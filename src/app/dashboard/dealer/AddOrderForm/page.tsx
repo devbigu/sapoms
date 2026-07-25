@@ -56,6 +56,7 @@ type ProductRow = {
   variantCode: string;
   producQuanity: number;
   price: number; // rupees per unit
+  baseListPrice?: number; // rupees per pack, sourced from the catalogue JSON
   packSize: number;
   isPriority?: boolean;
   productNote?: string;
@@ -209,22 +210,21 @@ function cartPriceToRupees(rawPrice: unknown, apiPrice: unknown = 0): number {
   const cartPrice = safePositiveNumber(rawPrice);
   const fallbackPrice = safePositiveNumber(apiPrice);
   if (!cartPrice) return fallbackPrice;
-
-  const cartPriceAsRupees = roundRupees(cartPrice / 100);
-  if (!fallbackPrice) return cartPriceAsRupees;
-
-  if (Math.abs(cartPriceAsRupees - fallbackPrice) <= Math.max(0.01, fallbackPrice * 0.01)) {
-    return fallbackPrice;
-  }
-
-  return cartPrice >= fallbackPrice * 20 ? cartPriceAsRupees : cartPrice;
+  // Cart prices are stored as paise per individual unit.
+  return roundRupees(cartPrice / 100);
 }
 
 function rowSubtotalPaise(row: ProductRow): number {
   const quantity = safePositiveNumber(row.producQuanity);
   const packSize = safePositiveNumber(row.packSize) || 1;
   const price = safePositiveNumber(row.price);
-  return Math.max(0, Math.round(quantity * packSize * price * 100));
+  const baseListPrice = safePositiveNumber(row.baseListPrice) || (packSize * price);
+  return Math.max(0, Math.round(quantity * baseListPrice * 100));
+}
+
+function rowBaseListPrice(row: ProductRow): number {
+  const packSize = safePositiveNumber(row.packSize) || 1;
+  return safePositiveNumber(row.baseListPrice) || (packSize * safePositiveNumber(row.price));
 }
 
 function hashString(value: string): string {
@@ -807,14 +807,17 @@ function AddOrderPageInner() {
             const catalogueMatch = catalogueIndex ? findCatalogueEntry(catalogueIndex, String(item.variantCode).trim()) : null;
             const catalogueProduct = catalogueMatch?.product ?? null;
             const catalogueVariant = catalogueMatch?.variant ?? null;
+            const packSize = catalogueVariant?.pack ?? item.packSize ?? 1;
+            const unitPrice = cartPriceToRupees(item.unitPrice, match?.product_price);
             return {
               key: i + 1,
               productname: catalogueVariant?.sku ?? (match ? String(match.product_cat) : item.variantCode),
               displayName: catalogueProduct ? getCatalogueProductLabel(catalogueProduct) : (match ? (match.product_name ?? item.productName) : item.productName),
               variantCode: catalogueVariant?.sku ?? item.variantCode,
               producQuanity: item.quantity,
-              price: cartPriceToRupees(item.unitPrice, match?.product_price),
-              packSize: catalogueVariant?.pack ?? item.packSize ?? 1,
+              price: unitPrice,
+              baseListPrice: unitPrice * packSize,
+              packSize,
               isPriority: item.isPriority ?? item.priority ?? false,
               productNote: "",
               catalogueSection: catalogueProduct ? getCatalogueSection(catalogueProduct) : "",
@@ -867,6 +870,7 @@ function AddOrderPageInner() {
         variantCode,
         producQuanity: item.quantity,
         price,
+        baseListPrice: price * packSize,
         packSize,
         isPriority: item.isPriority ?? false,
         productNote: "",
@@ -1412,6 +1416,7 @@ function AddOrderPageInner() {
         displayName: "",
         variantCode: "",
         price: 0,
+        baseListPrice: 0,
         packSize: 1,
         productNote: "",
         catalogueSection: "",
@@ -1445,6 +1450,7 @@ function AddOrderPageInner() {
         productname: variant.sku,
         displayName,
         variantCode: variant.sku,
+        baseListPrice: safePositiveNumber(variant.price),
         price: cataloguePricing.variantPackPriceToUnitRupees(variant.price, variant.pack),
         packSize: Number(variant.pack ?? 1),
       };
@@ -2578,6 +2584,7 @@ function AddOrderPageInner() {
                 <tbody className="divide-y divide-gray-50">
                   {arr1.map((row, idx) => {
                     const listPrice = rowSubtotalPaise(row);
+                    const baseListPrice = rowBaseListPrice(row);
                     const rowDiscountPercent = getRowDiscountPercent(row);
                     const discAmt = Math.round(listPrice * (rowDiscountPercent / 100));
                     const rowTotal = Math.max(0, listPrice - discAmt);
@@ -2802,7 +2809,9 @@ function AddOrderPageInner() {
                             {listPrice > 0 ? fmt(listPrice) : "—"}
                           </span>
                           {listPrice > 0 && (
-                            <p className="text-[10px] text-gray-400 mt-0.5">{totalUnits} pcs. × ₹{row.price}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              {row.producQuanity} pack{row.producQuanity !== 1 ? "s" : ""} × ₹{baseListPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
                           )}
                         </td>
                         <td className="px-3 py-3 min-w-[160px]">
