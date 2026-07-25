@@ -40,6 +40,7 @@ import {
 } from "@/lib/customDiscountRequests";
 import { useDraft } from "@/lib/useDrafts";
 import { buildPriorityRemarks } from "@/lib/orderPriority";
+import cataloguePricing from "@/lib/cataloguePricing";
 import {
   buildOrderRemarks as buildLineRemarks,
   verifyOrderProductNotesPersistence,
@@ -55,6 +56,7 @@ type ProductRow = {
   variantCode: string;
   producQuanity: number;
   price: number; // rupees per unit
+  baseListPrice?: number; // rupees per pack, sourced from the catalogue JSON
   packSize: number;
   isPriority?: boolean;
   productNote?: string;
@@ -64,6 +66,13 @@ type ProductRow = {
 };
 
 type CustomDiscountScope = "order" | "product";
+
+type WalletSnapshot = {
+  status: "active" | "inactive";
+  availableBalance: number;
+  totalConsumed: number;
+  transactions: Array<{ id: string; type: string; amount: number; createdAt?: string }>;
+};
 
 type CustomDiscountRequest = {
   id: string;
@@ -201,22 +210,21 @@ function cartPriceToRupees(rawPrice: unknown, apiPrice: unknown = 0): number {
   const cartPrice = safePositiveNumber(rawPrice);
   const fallbackPrice = safePositiveNumber(apiPrice);
   if (!cartPrice) return fallbackPrice;
-
-  const cartPriceAsRupees = roundRupees(cartPrice / 100);
-  if (!fallbackPrice) return cartPriceAsRupees;
-
-  if (Math.abs(cartPriceAsRupees - fallbackPrice) <= Math.max(0.01, fallbackPrice * 0.01)) {
-    return fallbackPrice;
-  }
-
-  return cartPrice >= fallbackPrice * 20 ? cartPriceAsRupees : cartPrice;
+  // Cart prices are stored as paise per individual unit.
+  return roundRupees(cartPrice / 100);
 }
 
 function rowSubtotalPaise(row: ProductRow): number {
   const quantity = safePositiveNumber(row.producQuanity);
   const packSize = safePositiveNumber(row.packSize) || 1;
   const price = safePositiveNumber(row.price);
-  return Math.max(0, Math.round(quantity * packSize * price * 100));
+  const baseListPrice = safePositiveNumber(row.baseListPrice) || (packSize * price);
+  return Math.max(0, Math.round(quantity * baseListPrice * 100));
+}
+
+function rowBaseListPrice(row: ProductRow): number {
+  const packSize = safePositiveNumber(row.packSize) || 1;
+  return safePositiveNumber(row.baseListPrice) || (packSize * safePositiveNumber(row.price));
 }
 
 function hashString(value: string): string {
@@ -413,6 +421,9 @@ function AddOrderPageInner() {
   const [draftSaving, setDraftSaving] = useState(false);
   const [reorderLoading, setReorderLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [wallet, setWallet] = useState<WalletSnapshot | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const orderIdempotencyKey = useRef<string | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [catalogueIndex, setCatalogueIndex] = useState<CatalogueIndex<CatalogueProduct> | null>(null);
   const [variantLookup, setVariantLookup] = useState<Record<string, ProductMeta>>({});
@@ -796,14 +807,17 @@ function AddOrderPageInner() {
             const catalogueMatch = catalogueIndex ? findCatalogueEntry(catalogueIndex, String(item.variantCode).trim()) : null;
             const catalogueProduct = catalogueMatch?.product ?? null;
             const catalogueVariant = catalogueMatch?.variant ?? null;
+            const packSize = catalogueVariant?.pack ?? item.packSize ?? 1;
+            const unitPrice = cartPriceToRupees(item.unitPrice, match?.product_price);
             return {
               key: i + 1,
               productname: catalogueVariant?.sku ?? (match ? String(match.product_cat) : item.variantCode),
               displayName: catalogueProduct ? getCatalogueProductLabel(catalogueProduct) : (match ? (match.product_name ?? item.productName) : item.productName),
               variantCode: catalogueVariant?.sku ?? item.variantCode,
               producQuanity: item.quantity,
-              price: cartPriceToRupees(item.unitPrice, match?.product_price),
-              packSize: catalogueVariant?.pack ?? item.packSize ?? 1,
+              price: unitPrice,
+              baseListPrice: unitPrice * packSize,
+              packSize,
               isPriority: item.isPriority ?? item.priority ?? false,
               productNote: "",
               catalogueSection: catalogueProduct ? getCatalogueSection(catalogueProduct) : "",
@@ -856,6 +870,7 @@ function AddOrderPageInner() {
         variantCode,
         producQuanity: item.quantity,
         price,
+        baseListPrice: price * packSize,
         packSize,
         isPriority: item.isPriority ?? false,
         productNote: "",
@@ -1401,6 +1416,7 @@ function AddOrderPageInner() {
         displayName: "",
         variantCode: "",
         price: 0,
+        baseListPrice: 0,
         packSize: 1,
         productNote: "",
         catalogueSection: "",
@@ -1434,7 +1450,8 @@ function AddOrderPageInner() {
         productname: variant.sku,
         displayName,
         variantCode: variant.sku,
-        price: Number(variant.price ?? 0),
+        baseListPrice: safePositiveNumber(variant.price),
+        price: cataloguePricing.variantPackPriceToUnitRupees(variant.price, variant.pack),
         packSize: Number(variant.pack ?? 1),
       };
       return next;
@@ -1581,6 +1598,19 @@ function AddOrderPageInner() {
     return () => {
       active = false;
     };
+  }, [user?.Dealer_Id]);
+
+  useEffect(() => {
+    if (!user?.Dealer_Id) return;
+    setWalletLoading(true);
+    fetch(`/api/wallet/${encodeURIComponent(user.Dealer_Id)}?limit=5`, {
+      cache: "no-store",
+      headers: { "x-omsons-actor-role": "dealer", "x-omsons-actor-id": String(user.Dealer_Id) },
+    })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("wallet unavailable")))
+      .then((json) => { if (json.success) setWallet(json); })
+      .catch(() => setWallet(null))
+      .finally(() => setWalletLoading(false));
   }, [user?.Dealer_Id]);
 
   const saveOrderNoteForHistory = async (orderId: string) => {
@@ -1779,7 +1809,13 @@ function AddOrderPageInner() {
     try {
       await ensureDealerIsActive();
       setLoading(true);
-      const { data } = await axios.post(targetApiUrl, fd);
+      orderIdempotencyKey.current ||= crypto.randomUUID();
+      const { data } = await axios.post(targetApiUrl, fd, { headers: {
+        "x-omsons-actor-role": "dealer",
+        "x-omsons-actor-id": String(user.Dealer_Id),
+        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
+        "idempotency-key": orderIdempotencyKey.current,
+      } });
       logPhpExchange("PlaceOrderarray", {
         method: "POST",
         url: targetApiUrl,
@@ -1839,6 +1875,10 @@ function AddOrderPageInner() {
         }).catch((err) => console.error("[reorder-log] failed:", err));
       }
       toast.success(data.msg, { autoClose: 5000 });
+      if (data.wallet?.used) {
+        setWallet((current) => current ? { ...current, availableBalance: Number(data.wallet.balanceAfter) } : current);
+      }
+      orderIdempotencyKey.current = null;
       clearCart();
       seededRef.current = false;
       setArr([emptyRow()]);
@@ -1894,7 +1934,13 @@ function AddOrderPageInner() {
     try {
       await ensureDealerIsActive();
       setLoading(true);
-      const { data } = await axios.post(targetApiUrl, fd);
+      orderIdempotencyKey.current ||= crypto.randomUUID();
+      const { data } = await axios.post(targetApiUrl, fd, { headers: {
+        "x-omsons-actor-role": "dealer",
+        "x-omsons-actor-id": String(user.Dealer_Id),
+        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
+        "idempotency-key": orderIdempotencyKey.current,
+      } });
       logPhpExchange("importdata", {
         method: "POST",
         url: targetApiUrl,
@@ -2062,6 +2108,22 @@ function AddOrderPageInner() {
             </button>
           </div>
         )}
+
+        {/* Wallet balance stays visible before the order details and product form. */}
+        <div className={`mb-5 rounded-2xl border px-5 py-4 shadow-sm ${wallet?.status === "active" ? (wallet.availableBalance > 0 ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50") : "border-gray-200 bg-white"}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">Dealer Wallet Balance</p>
+              <p className={`mt-1 font-mono text-2xl font-bold ${wallet?.status === "active" ? (wallet.availableBalance > 0 ? "text-emerald-700" : "text-red-700") : "text-gray-700"}`}>
+                {walletLoading ? "Loading…" : fmt(toPaise(wallet?.availableBalance ?? 0))}
+              </p>
+              <p className="mt-1 text-xs text-gray-500">Running balance—each successful order deducts its final Net Payable.</p>
+            </div>
+            <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${wallet?.status === "active" ? (wallet.availableBalance > 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700") : "bg-gray-100 text-gray-600"}`}>
+              {walletLoading ? "Loading" : wallet?.status === "active" ? (wallet.availableBalance > 0 ? "Active" : "Exhausted") : "Inactive"}
+            </span>
+          </div>
+        </div>
 
         {/* Page heading */}
         <div className="mb-6 flex items-start justify-between">
@@ -2522,6 +2584,7 @@ function AddOrderPageInner() {
                 <tbody className="divide-y divide-gray-50">
                   {arr1.map((row, idx) => {
                     const listPrice = rowSubtotalPaise(row);
+                    const baseListPrice = rowBaseListPrice(row);
                     const rowDiscountPercent = getRowDiscountPercent(row);
                     const discAmt = Math.round(listPrice * (rowDiscountPercent / 100));
                     const rowTotal = Math.max(0, listPrice - discAmt);
@@ -2746,7 +2809,9 @@ function AddOrderPageInner() {
                             {listPrice > 0 ? fmt(listPrice) : "—"}
                           </span>
                           {listPrice > 0 && (
-                            <p className="text-[10px] text-gray-400 mt-0.5">{totalUnits} pcs. × ₹{row.price}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              {row.producQuanity} pack{row.producQuanity !== 1 ? "s" : ""} × ₹{baseListPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
                           )}
                         </td>
                         <td className="px-3 py-3 min-w-[160px]">
@@ -2947,6 +3012,24 @@ function AddOrderPageInner() {
             </div>
 
             {/* Action bar */}
+            <div className={`mx-6 mt-4 rounded-xl border px-4 py-3 ${wallet?.status === "active" && wallet.availableBalance < discountPayload.finalPayableAmount ? "border-red-200 bg-red-50" : wallet?.status === "active" ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Dealer Wallet</p>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {walletLoading ? "Loading wallet..." : wallet?.status === "active" ? `Active · Available ${fmt(toPaise(wallet.availableBalance))}` : "Inactive · normal ordering applies"}
+                  </p>
+                </div>
+                {wallet?.status === "active" && (
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${wallet.availableBalance >= discountPayload.finalPayableAmount ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                    {wallet.availableBalance >= discountPayload.finalPayableAmount ? "Balance sufficient" : "Insufficient balance"}
+                  </span>
+                )}
+              </div>
+              {wallet?.status === "active" && wallet.availableBalance < discountPayload.finalPayableAmount && (
+                <p className="mt-2 text-xs text-red-700">Insufficient wallet balance. Available: {fmt(toPaise(wallet.availableBalance))}. Required: {fmt(finalPayablePaise)}. Contact Admin to add funds.</p>
+              )}
+            </div>
             <div className="flex items-center gap-3 px-6 py-4 border-t border-gray-100 flex-wrap">
               {isWaitingForApproval ? (
                 <>
@@ -2973,11 +3056,11 @@ function AddOrderPageInner() {
                   </button>
                 </>
               ) : (
-                <button onClick={handleSubmitProductArray}
+                <button onClick={handleSubmitProductArray} disabled={wallet?.status === "active" && wallet.availableBalance < discountPayload.finalPayableAmount}
                   className={`inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl text-[13.5px] font-semibold transition-all shadow-sm hover:shadow-md hover:-translate-y-px cursor-pointer border-none ${hasAnyDiscount
                       ? "bg-gradient-to-r from-emerald-700 to-emerald-500 hover:from-emerald-800 hover:to-emerald-600"
                       : "bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-700 hover:to-emerald-600"
-                    }`}>
+                    } disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0`}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                     <path d="M20 6 9 17l-5-5" />
                   </svg>
