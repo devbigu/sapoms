@@ -56,7 +56,7 @@ type ProductRow = {
   variantCode: string;
   producQuanity: number;
   price: number; // rupees per unit
-  baseListPrice?: number; // rupees per pack, sourced from the catalogue JSON
+  baseListPrice?: number; // rupees per pack, derived as catalogue unit price * pack size
   packSize: number;
   isPriority?: boolean;
   productNote?: string;
@@ -1440,6 +1440,8 @@ function AddOrderPageInner() {
     if (!product || !variant) return;
 
     const displayName = getCatalogueProductLabel(product);
+    const unitPrice = cataloguePricing.variantPriceToUnitRupees(variant.price);
+    const packSize = safePositiveNumber(variant.pack) || 1;
     setArr((prev) => {
       const next = [...prev];
       next[idx] = {
@@ -1450,9 +1452,9 @@ function AddOrderPageInner() {
         productname: variant.sku,
         displayName,
         variantCode: variant.sku,
-        baseListPrice: safePositiveNumber(variant.price),
-        price: cataloguePricing.variantPackPriceToUnitRupees(variant.price, variant.pack),
-        packSize: Number(variant.pack ?? 1),
+        baseListPrice: unitPrice * packSize,
+        price: unitPrice,
+        packSize,
       };
       return next;
     });
@@ -2573,6 +2575,7 @@ function AddOrderPageInner() {
                     <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 w-32">Quantity</th>
                     <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 w-28">Pack Size</th>
                     <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 w-24">Pieces</th>
+                    <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 w-28">Unit Price</th>
                     <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider text-gray-400 w-28">List Price</th>
                     <th className={`px-3 py-3 text-left text-[10px] font-bold uppercase tracking-wider w-44 ${hasAnyDiscount ? "text-emerald-600" : "text-gray-400"}`}>
                       Discount
@@ -2805,6 +2808,14 @@ function AddOrderPageInner() {
                           <p className="text-[10px] text-gray-400 mt-0.5">pc{totalUnits !== 1 ? "s" : ""}</p>
                         </td>
                         <td className="px-3 py-3">
+                          <span className="font-mono text-[13px] font-semibold text-slate-700">
+                            {row.price > 0 ? fmt(toPaise(row.price)) : "—"}
+                          </span>
+                          {row.price > 0 && (
+                            <p className="text-[10px] text-gray-400 mt-0.5">per pc.</p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
                           <span className="font-mono text-[13px] text-gray-600 font-semibold">
                             {listPrice > 0 ? fmt(listPrice) : "—"}
                           </span>
@@ -2919,7 +2930,7 @@ function AddOrderPageInner() {
                     );
                   })}
                   <tr className="border-t border-dashed border-gray-100">
-                    <td colSpan={10} className="px-6 py-3">
+                    <td colSpan={11} className="px-6 py-3">
                       <button onClick={addRow} disabled={orderLockedByPendingApproval}
                         className="inline-flex items-center gap-2 text-[12px] text-gray-400 hover:text-indigo-600 transition-colors cursor-pointer">
                         <span className="w-5 h-5 rounded-md border border-gray-200 flex items-center justify-center text-sm hover:border-indigo-300 hover:bg-indigo-50 transition-colors">+</span>

@@ -2,14 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import pricing from "./cataloguePricing.js";
 
-test("manual order converts catalogue pack price to per-unit rupees", () => {
-  assert.equal(pricing.variantPackPriceToUnitRupees(5200, 100), 52);
+test("manual order keeps catalogue price as per-unit rupees", () => {
+  assert.equal(pricing.variantPriceToUnitRupees(440), 440);
 });
 
 test("single-unit packs keep their catalogue price", () => {
-  assert.equal(pricing.variantPackPriceToUnitRupees(125, 1), 125);
+  assert.equal(pricing.variantPriceToUnitRupees(125), 125);
 });
 
-test("per-unit values round consistently to paise", () => {
-  assert.equal(pricing.variantPackPriceToUnitRupees(100, 3), 33.33);
+test("per-unit values round consistently to paise without pack division", () => {
+  assert.equal(pricing.variantPriceToUnitRupees(100.555), 100.56);
+});
+
+test("legacy helper name also keeps catalogue price as per-unit rupees", () => {
+  assert.equal(pricing.variantPackPriceToUnitRupees(5200, 100), 5200);
 });

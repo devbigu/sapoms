@@ -56,7 +56,7 @@ function getVariantImage(product: Product, variant?: Variant | null): string | u
   return (variant?.images ?? []).find(Boolean) ?? product.images?.find(Boolean) ?? undefined;
 }
 
-// All prices kept as paise internally so fmt() and the cart stay consistent.
+// Catalogue prices are per unit; all prices are kept as paise internally.
 function variantPricePaise(v: Variant | null): number | null {
   return typeof v?.price === "number" && v.price > 0 ? v.price * 100 : null;
 }
@@ -141,9 +141,9 @@ function NoImageBox({ height = 280 }: { height?: number }) {
 function RelatedCard({ product }: { product: Product }) {
   const img        = getImage(product, 0);
   const firstVar   = product.variants?.[0] ?? null;
-  const pricePaise = variantPricePaise(firstVar);
+  const unitPricePaise = variantPricePaise(firstVar);
   const packSize   = firstVar?.pack ?? 1;
-  const perUnit    = pricePaise && packSize > 1 ? Math.round(pricePaise / packSize) : null;
+  const packPricePaise = unitPricePaise !== null ? unitPricePaise * packSize : null;
 
   return (
     <Link href={`/Products/${product.sku}`} style={{ textDecoration: "none" }}>
@@ -161,13 +161,13 @@ function RelatedCard({ product }: { product: Product }) {
         <div style={{ padding: "10px 12px 12px" }}>
           <h4 style={{ fontSize: 12, fontWeight: 600, color: "#0f172a", lineHeight: 1.4, margin: "0 0 4px" }}>{product.name}</h4>
           <span style={{ fontSize: 10.5, color: "#94a3b8", display: "block", marginBottom: 5 }}>SKU: {product.sku}</span>
-          {pricePaise !== null ? (
+          {packPricePaise !== null ? (
             <div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#6A5ACD" }}>{fmt(pricePaise)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#6A5ACD" }}>{fmt(packPricePaise)}</span>
               {packSize > 1 && (
                 <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
                   <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", padding: "1px 5px", borderRadius: 3 }}>Pack of {packSize}</span>
-                  {perUnit && <span style={{ fontSize: 10, color: "#94a3b8" }}>{fmt(perUnit)}/unit</span>}
+                  {unitPricePaise && <span style={{ fontSize: 10, color: "#94a3b8" }}>{fmt(unitPricePaise)}/unit</span>}
                 </div>
               )}
             </div>
@@ -247,10 +247,10 @@ export default function ProductDetailsPage() {
     : "";
   const selectedQuantity  = quantityAsNumber(selectedQuantityValue);
   const selectedPackSize = Math.max(1, selectedVariant?.pack ?? 1);
-  const packPricePaise = variantPricePaise(selectedVariant);
-  const perUnitPaise =
-    packPricePaise !== null
-      ? Math.round(packPricePaise / selectedPackSize)
+  const perUnitPaise = variantPricePaise(selectedVariant);
+  const packPricePaise =
+    perUnitPaise !== null
+      ? perUnitPaise * selectedPackSize
       : null;
   const lineTotalPaise =
     packPricePaise !== null
@@ -266,8 +266,8 @@ export default function ProductDetailsPage() {
     const numPacks = quantityAsNumber(quantityValue);
     const variant = product?.variants?.find((item) => item.sku === variantSku);
     const packSize = Math.max(1, variant?.pack ?? 1);
-    const packPaise = variantPricePaise(variant ?? null) ?? 0;
-    const unitPaise = packPaise > 0 ? Math.round(packPaise / packSize) : 0;
+    const unitPaise = variantPricePaise(variant ?? null) ?? 0;
+    const packPaise = unitPaise * packSize;
 
     return {
       quantityValue,
