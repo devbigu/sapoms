@@ -130,7 +130,7 @@ export default function Cart() {
                 cart.map((item) => {
                   const meta      = lookup[item.id];
                   const packSize  = meta?.packSize ?? item.packSize ?? 1;
-                  const unitPrice = item.price;                        // paise per pack
+                  const unitPrice = item.price;                        // paise per piece
                   const lineTotal = unitPrice * item.quantity * packSize;         // paise total
                   const totalUnitCount = item.quantity * packSize;
 
@@ -243,12 +243,12 @@ export default function Cart() {
                         </p>
                         {item.quantity > 1 && (
                           <p className="text-xs text-[#565959]">
-                            {fmt(unitPrice)} / pack
+                            {fmt(unitPrice * packSize)} / pack
                           </p>
                         )}
                         {packSize > 1 && (
                           <p className="text-xs text-[#565959]">
-                            {fmt(Math.round(unitPrice / packSize))} / unit
+                            {fmt(unitPrice)} / unit
                           </p>
                         )}
                       </div>

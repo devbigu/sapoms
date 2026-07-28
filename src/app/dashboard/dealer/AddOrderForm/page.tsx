@@ -2788,7 +2788,7 @@ function AddOrderPageInner() {
                             <button onClick={() => updateQuantity(idx, row.producQuanity + 1)} disabled={orderLockedByPendingApproval}
                               className="w-8 h-[34px] flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-base transition-colors border-none cursor-pointer">+</button>
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-1 font-mono">{row.producQuanity} pack{row.producQuanity !== 1 ? "s" : ""}</p>
+                          <p className="text-[11px] text-gray-400 mt-1 font-mono">{row.producQuanity} pack of {row.producQuanity !== 1 ? "s" : ""}  {totalUnits} pc{totalUnits !== 1 ? "s" : ""} </p>
                         </td>
                         <td className="px-3 py-3">
                           {row.packSize > 1 ? (
