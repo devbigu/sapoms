@@ -16,10 +16,10 @@ const compiled = ts.transpileModule(source, {
   },
 }).outputText;
 
-const module = { exports: {} };
+const moduleShim = { exports: {} };
 vm.runInNewContext(compiled, {
-  module,
-  exports: module.exports,
+  module: moduleShim,
+  exports: moduleShim.exports,
   require,
   Buffer,
   atob,
@@ -30,7 +30,7 @@ const {
   getAllowedRoles,
   getRoleHome,
   resolveStoredAuth,
-} = module.exports;
+} = moduleShim.exports;
 
 function storage(values = {}) {
   const map = new Map(Object.entries(values));

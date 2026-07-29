@@ -11,6 +11,7 @@ import AccountBookSummary, { AccountBookStats } from '@/components/ledger/Accoun
 import TransactionTable from '@/components/ledger/TransactionTable'
 import PayMoneyModal, { PaymentData } from '@/components/ledger/PayMoneyModal'
 import { InvoiceModal } from '@/components/InvoiceModel'
+import { createIdempotencyKey } from '@/lib/idempotency'
 import { resolveStoredAuth } from '@/lib/roleAccess'
 
 const TRANSACTIONS_PAGE_SIZE = 10
@@ -243,7 +244,7 @@ export default function DealerLedgerPage() {
     try {
       const session = resolveStoredAuth(window.localStorage)
       if (session.status !== 'authenticated') throw new Error('Missing wallet identity')
-      const idempotencyKey = crypto.randomUUID()
+      const idempotencyKey = createIdempotencyKey('wallet-adjust')
       const response = await axios.post(`/api/wallet/${dealerId}/adjust`, {
         action: walletAdjustType,
         ...(walletAdjustType !== 'disable' && Number.isFinite(amount) && amount > 0 ? { amount } : {}),
