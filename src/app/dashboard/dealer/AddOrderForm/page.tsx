@@ -12,6 +12,7 @@ import Select, { components, type FilterOptionOption, type StylesConfig } from "
 import { useCartStore } from "@/Store/store";
 import { fetchDealerStatus } from "@/lib/dealerStatus";
 import discountUtils from "@/lib/discount";
+import { createIdempotencyKey } from "@/lib/idempotency";
 import {
   buildCatalogueIndex,
   findCatalogueEntry,
@@ -1811,7 +1812,7 @@ function AddOrderPageInner() {
     try {
       await ensureDealerIsActive();
       setLoading(true);
-      orderIdempotencyKey.current ||= crypto.randomUUID();
+      orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
       const { data } = await axios.post(targetApiUrl, fd, { headers: {
         "x-omsons-actor-role": "dealer",
         "x-omsons-actor-id": String(user.Dealer_Id),
@@ -1936,7 +1937,7 @@ function AddOrderPageInner() {
     try {
       await ensureDealerIsActive();
       setLoading(true);
-      orderIdempotencyKey.current ||= crypto.randomUUID();
+      orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
       const { data } = await axios.post(targetApiUrl, fd, { headers: {
         "x-omsons-actor-role": "dealer",
         "x-omsons-actor-id": String(user.Dealer_Id),
