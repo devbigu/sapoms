@@ -37,6 +37,13 @@ function normalizedMtStatus(value: unknown) {
   return "NoActionTaken";
 }
 
+function normalizedOrderStatus(value: unknown) {
+  const key = text(value).toLowerCase().replace(/[\s_-]/g, "");
+  if (key === "0" || key === "pending" || key === "awaiting") return "pending";
+  if (key === "1" || key === "approved" || key === "accepted" || key === "completed") return "approved";
+  return key;
+}
+
 function orderDedupeKey(order: Record<string, unknown>) {
   const orderId = text(order.order_id ?? order.orderId ?? order.orderdata_id ?? order.orderdata_orderid);
   if (!orderId) return "";
@@ -121,7 +128,7 @@ export function applyOrderFilters<T extends Record<string, unknown>>(rows: T[], 
     const rowOrderId = text(row.order_id ?? row.orderId).toLowerCase();
     if (orderId && !rowOrderId.startsWith(orderId)) return false;
     if (filters.accepted && text(row.accept_order) !== filters.accepted) return false;
-    if (filters.orderStatus && text(row.order_status ?? row.status) !== filters.orderStatus) return false;
+    if (filters.orderStatus && normalizedOrderStatus(row.order_status ?? row.status) !== normalizedOrderStatus(filters.orderStatus)) return false;
     if (filters.mtStatus && normalizedMtStatus(row.mtstatus) !== filters.mtStatus) return false;
     const date = getOriginalOrderDate(row) ?? "";
     if (filters.dateFrom && date < filters.dateFrom) return false;

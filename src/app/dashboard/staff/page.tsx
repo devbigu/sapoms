@@ -17,6 +17,7 @@ import {
   BookOpen, LogOut, ChevronUp, ChevronDown, Search, AlertCircle, Eye, Receipt,
 } from "lucide-react"
 import { formatRupee, resolveCurrentMonthTotal } from "@/lib/companySales"
+import { resolveOrderAmounts } from "@/lib/orderAmounts"
 import PendingProductsPreview from "@/components/dashboard/PendingProductsPreview"
 import { clearAuthStorage } from "@/lib/roleAccess"
 import { STAFF_ORDER_SCOPE_VERSION } from "@/lib/staffOrderScope.js"
@@ -315,7 +316,7 @@ function ExecutiveDashboard() {
 
   const stats = useMemo(() => ({
     myOrders:      orders.length,
-    totalRevenue:  orders.reduce((s, o) => s + Number(o.total || 0), 0),
+    totalRevenue:  orders.reduce((s, o) => s + resolveOrderAmounts(o).netPayable, 0),
     pendingOrders: orders.filter(o => o.status === "pending" || o.order_status === "0").length,
     myDealers:     dealers.length,
     pendingDiscountRequests: discountRequests.length,

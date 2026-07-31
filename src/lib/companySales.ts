@@ -1,4 +1,4 @@
-import { resolveOrderAmounts, type OrderAmountSource } from "@/lib/orderAmounts";
+import { resolveOrderAmounts, resolveOrderDiscountBreakdown, type OrderAmountSource } from "@/lib/orderAmounts";
 
 export type MonthlySeries = {
   month: string[];
@@ -17,6 +17,8 @@ export type DistributorSalesRow = {
   dealerName: string;
   orderCount: number;
   grossSales: number;
+  baseDiscount: number;
+  slabDiscount: number;
   discount: number;
   netSales: number;
 };
@@ -66,19 +68,27 @@ export function getOrderDate(order: SalesOrder) {
   return String(order.orderDate || order.order_date || "").slice(0, 10);
 }
 
-export function groupOrdersByDistributor(orders: SalesOrder[]) {
+export function groupOrdersByDistributor(
+  orders: SalesOrder[],
+  overridesByOrderId: Record<string, OrderAmountSource> = {},
+) {
   const grouped = new Map<string, DistributorSalesRow>();
 
   for (const order of orders) {
     const dealerName = String(order.Dealer_Name || "Unknown Distributor").trim() || "Unknown Distributor";
     const dealerKey = String(order.order_dealer || dealerName).trim() || dealerName;
     const key = `${dealerKey}::${dealerName}`;
-    const amounts = resolveOrderAmounts(order);
+    const orderId = String(order.order_id || "").trim();
+    const override = orderId ? overridesByOrderId[orderId] : undefined;
+    const breakdown = resolveOrderDiscountBreakdown(order, override);
+    const amounts = resolveOrderAmounts(order, override);
 
     const existing = grouped.get(key);
     if (existing) {
       existing.orderCount += 1;
       existing.grossSales += amounts.gross;
+      existing.baseDiscount += breakdown.baseDiscountAmount;
+      existing.slabDiscount += breakdown.slabDiscountAmount;
       existing.discount += amounts.discountAmount;
       existing.netSales += amounts.netPayable;
     } else {
@@ -87,6 +97,8 @@ export function groupOrdersByDistributor(orders: SalesOrder[]) {
         dealerName,
         orderCount: 1,
         grossSales: amounts.gross,
+        baseDiscount: breakdown.baseDiscountAmount,
+        slabDiscount: breakdown.slabDiscountAmount,
         discount: amounts.discountAmount,
         netSales: amounts.netPayable,
       });

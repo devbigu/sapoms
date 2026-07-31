@@ -18,6 +18,25 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizedStatus(value: unknown) {
+  return text(value).toLowerCase().replace(/[\s_-]/g, "");
+}
+
+export function isPendingOrderHeader(order: Record<string, unknown>) {
+  const orderStatus = normalizedStatus(order.order_status ?? order.status);
+  return orderStatus === "0" || orderStatus === "pending" || orderStatus === "awaiting";
+}
+
+export function resolveOrderHeaderSource(input: {
+  source: string;
+  actor: OrdersActor;
+}) {
+  if (input.source !== "orderpeginationnew") return input.source;
+  if (input.actor.role === "staff") return "staffOrderrPagination";
+  if (input.actor.role === "dealer") return "orderhispegination";
+  return "orderpegination";
+}
+
 function upstreamActorIds(input: {
   source: string;
   actor: OrdersActor;
@@ -37,22 +56,23 @@ export async function loadOrderHeaders(input: {
   assignedDealerIds?: Array<string | number>;
 }) {
   if (!ORDER_HEADER_SOURCES.has(input.source)) throw new Error(`Unsupported order header source: ${input.source}`);
+  const source = resolveOrderHeaderSource(input);
   const assignedDealerIds = input.assignedDealerIds ?? [];
   let upstreamHeaders = 0;
   const scan = await scanScopedOrders<Record<string, unknown>>({
     actor: input.actor,
     assignedDealerIds,
-    upstreamActorIds: upstreamActorIds({ ...input, assignedDealerIds }),
+    upstreamActorIds: upstreamActorIds({ source, actor: input.actor, assignedDealerIds }),
     upstreamPageSize: UPSTREAM_PAGE_SIZE,
     maxUpstreamPages: MAX_UPSTREAM_PAGES,
     fetchPage: async (upstreamActorId, page, pageSize) => {
       const params = new URLSearchParams({ page: String(page), limit: String(pageSize), search: "" });
       if (upstreamActorId) params.set("id", upstreamActorId);
-      const response = await fetch(`${BACKEND_URL}/${input.source}?${params.toString()}`, {
+      const response = await fetch(`${BACKEND_URL}/${source}?${params.toString()}`, {
         cache: "no-store",
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
-      if (!response.ok) throw new Error(`${input.source} failed with ${response.status}`);
+      if (!response.ok) throw new Error(`${source} failed with ${response.status}`);
       const payload = await parsePhpJsonResponse<Record<string, unknown>>(response);
       const rows: Record<string, unknown>[] = Array.isArray(payload?.data)
         ? payload.data.filter((row: unknown): row is Record<string, unknown> => !!row && typeof row === "object")
@@ -65,9 +85,12 @@ export async function loadOrderHeaders(input: {
       };
     },
   });
+  const rows = input.source === "orderpeginationnew"
+    ? scan.rows.filter(isPendingOrderHeader)
+    : scan.rows;
 
   return {
-    rows: scan.rows,
+    rows,
     truncated: scan.truncated,
     totalIsExact: scan.totalIsExact,
     diagnostics: { upstreamCalls: scan.pageCalls.length, upstreamHeaders },

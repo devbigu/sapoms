@@ -5,6 +5,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { STAFF_ORDER_SCOPE_VERSION } from '@/lib/staffOrderScope.js'
+import { formatAdditionalDiscountBadge, withDisplayOrderAmounts } from '@/lib/orderAmounts'
 
 type Role = 'admin' | 'dealer' | 'staff' | 'accountant'
 type PendingOrderData = {
@@ -13,9 +14,14 @@ type PendingOrderData = {
   reason: string; accept_order: string; outstandingDate: string; orderDate: string
   Dealer_Name: string; orderdata_item_quantity: string
 }
+type OrderSummaryOverride = Record<string, unknown> & {
+  orderId?: string | number
+  order_id?: string | number
+  order_dealer?: string | number
+  dealerId?: string | number
+}
 type ResponseType = { data: PendingOrderData[]; total: number; last_page: number }
 
-const BACKEND_URL    = "https://mirisoft.co.in/sas/dealerapi/api"
 const ITEMS_PER_PAGE = 10
 const YEAR           = new Date().getFullYear()
 const ALLOWED_ROLES  = new Set<Role>(['admin', 'staff', 'dealer', 'accountant'])
@@ -76,6 +82,32 @@ function acceptBadge(a: string) {
   return a === "1"
     ? { cls: "badge-accepted",     dot: "#3b82f6", label: "Accepted"     }
     : { cls: "badge-not-accepted", dot: "#ef4444", label: "Not Accepted" }
+}
+
+function orderLookupKey(value: unknown) {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const trailing = text.match(/(\d+)(?!.*\d)/)?.[1]
+  if (!trailing) return text
+  const normalized = String(Number(trailing))
+  return normalized === 'NaN' ? trailing : normalized
+}
+
+function rememberSummaryOverride(
+  target: Record<string, OrderSummaryOverride>,
+  item: OrderSummaryOverride
+) {
+  const ids = [
+    item.orderId,
+    item.order_id,
+  ]
+
+  ids.forEach((id) => {
+    const raw = String(id ?? '').trim()
+    const normalized = orderLookupKey(id)
+    if (raw) target[raw] = item
+    if (normalized) target[normalized] = item
+  })
 }
 
 function FilterSelect({ value, onChange, options, placeholder }: {
@@ -152,6 +184,23 @@ export default function PendingOrdersPage() {
   })
 
   const allData: PendingOrderData[] = response?.data || []
+  const orderIdsKey = allData.map((order) => String(order.order_id || '').trim()).filter(Boolean).join(',')
+  const { data: summaryOverrides = {} } = useQuery<Record<string, OrderSummaryOverride>>({
+    queryKey: ['pendingorders-summary-overrides', orderIdsKey],
+    enabled: authResolved && hasAccess && orderIdsKey.length > 0,
+    queryFn: async () => {
+      const params = new URLSearchParams({ order_ids: orderIdsKey })
+      const json = await fetch(`/api/order-summary-overrides?${params.toString()}`, { cache: 'no-store' }).then((r) => r.json())
+      const next: Record<string, OrderSummaryOverride> = {}
+      if (json.success) {
+        ;(json.data ?? []).forEach((item: OrderSummaryOverride) => {
+          rememberSummaryOverride(next, item)
+        })
+      }
+      return next
+    },
+    staleTime: 5 * 60 * 1000,
+  })
   const displayData = allData.filter(o => {
     if (statusFilter !== '' && o.order_status !== statusFilter) return false
     if (acceptFilter !== '' && o.accept_order !== acceptFilter) return false
@@ -174,7 +223,16 @@ export default function PendingOrdersPage() {
   }, [acceptFilter, authResolved, hasAccess, page, queryClient, search, statusFilter, totalPages, viewerId, viewerRole])
 
   useEffect(() => { const t = setTimeout(() => { setPage(1); setSearch(searchInput) }, 400); return () => clearTimeout(t) }, [searchInput])
-  useEffect(() => { setPage(1) }, [statusFilter, acceptFilter])
+
+  const updateStatusFilter = (value: string) => {
+    setPage(1)
+    setStatusFilter(value)
+  }
+
+  const updateAcceptFilter = (value: string) => {
+    setPage(1)
+    setAcceptFilter(value)
+  }
 
   function pageNumbers(): (number | "…")[] {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -307,17 +365,17 @@ export default function PendingOrdersPage() {
             </span>
             <div className="filter-div" />
 
-            <FilterSelect value={statusFilter} onChange={setStatusFilter} placeholder="Order Status"
+            <FilterSelect value={statusFilter} onChange={updateStatusFilter} placeholder="Order Status"
               options={[{ value: '0', label: 'Pending' }, { value: '1', label: 'Approved' }]}
             />
-            <FilterSelect value={acceptFilter} onChange={setAcceptFilter} placeholder="Order Confirmation"
+            <FilterSelect value={acceptFilter} onChange={updateAcceptFilter} placeholder="Order Confirmation"
               options={[{ value: '0', label: 'Acceptance order is pending' }, { value: '1', label: 'Order accepted' }]}
             />
 
             {statusFilter && (
               <span className="filter-tag" style={{ background: '#fffbeb', color: '#92400e' }}>
                 {statusFilter === '0' ? 'Pending' : 'Approved'}
-                <button className="filter-tag-x" onClick={() => setStatusFilter('')} style={{ color: '#92400e' }}>
+                <button className="filter-tag-x" onClick={() => updateStatusFilter('')} style={{ color: '#92400e' }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </span>
@@ -325,13 +383,13 @@ export default function PendingOrdersPage() {
             {acceptFilter && (
               <span className="filter-tag" style={{ background: '#fff1f2', color: '#be123c' }}>
                 {acceptFilter === '0' ? 'Pending acceptance' : 'Accepted'}
-                <button className="filter-tag-x" onClick={() => setAcceptFilter('')} style={{ color: '#be123c' }}>
+                <button className="filter-tag-x" onClick={() => updateAcceptFilter('')} style={{ color: '#be123c' }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </span>
             )}
             {activeFilters > 0 && (
-              <button className="clear-btn" onClick={() => { setStatusFilter(''); setAcceptFilter('') }}>
+              <button className="clear-btn" onClick={() => { updateStatusFilter(''); updateAcceptFilter('') }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 Clear all
               </button>
@@ -393,6 +451,8 @@ export default function PendingOrdersPage() {
                   {!isLoading && displayData.map((order, i) => {
                     const sb = statusBadge(order.order_status)
                     const ab = acceptBadge(order.accept_order)
+                    const amounts = withDisplayOrderAmounts(order, summaryOverrides[order.order_id] ?? summaryOverrides[orderLookupKey(order.order_id)])
+                    const discountBadge = formatAdditionalDiscountBadge(amounts)
                     return (
                       <tr key={order.order_id ?? i}>
                         <td className="mono-sm">{startIndex + i}</td>
@@ -403,8 +463,15 @@ export default function PendingOrdersPage() {
                         </td>
                         <td className="mono-sm">{(order.orderDate || order.order_date || '—').slice(0, 10)}</td>
                         <td>{order.outstandingDate ? <span className="due-urgent">{order.outstandingDate}</span> : <span className="mono-sm">—</span>}</td>
-                        <td><span className="amount-pill">₹{Number(order.order_amount || 0).toLocaleString('en-IN')}</span></td>
-                        <td className="mono-sm">₹{Number(order.order_discount || 0).toLocaleString('en-IN')}</td>
+                        <td><span className="amount-pill">₹{amounts.grossAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span></td>
+                        <td className="mono-sm">
+                          ₹{amounts.discountAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          {discountBadge && (
+                            <div className="qty-info" style={{ color: '#4f46e5', fontWeight: 600 }}>
+                              {discountBadge}
+                            </div>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center', fontFamily: "'JetBrains Mono', monospace", fontWeight: '600', color: '#374151', fontSize: '12.5px' }}>
                           {order.orderdata_item_quantity || '—'}
                         </td>
