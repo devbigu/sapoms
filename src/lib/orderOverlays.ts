@@ -624,7 +624,7 @@ export async function listCancelledOrderOverlays(input: {
   }
 
   const page = Math.max(1, Math.floor(input.page ?? 1));
-  const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 10)));
+  const limit = Math.min(5000, Math.max(1, Math.floor(input.limit ?? 10)));
   const total = await collection.countDocuments(query);
   const rows = await collection.find(query).sort({ "cancellation.cancelledAt": -1, updatedAt: -1 }).skip((page - 1) * limit).limit(limit).toArray();
   return { rows, total, page, limit, totalPages: Math.ceil(total / limit) };

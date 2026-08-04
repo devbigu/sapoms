@@ -108,6 +108,8 @@ export default function DealerFormCard({
   const [staffLoading, setStaffLoading] = useState(true);
   const [staffError, setStaffError] = useState("");
   const [inlineError, setInlineError] = useState("");
+  const [dealerCodeLoading, setDealerCodeLoading] = useState(false);
+  const [dealerCodeError, setDealerCodeError] = useState("");
   const [formData, setFormData] = useState<DealerFormValues>(() => toFormValues(initialSnapshot));
   const [selectedStaff, setSelectedStaff] = useState<string[]>(() => initialSnapshot?.assignedStaffIds ?? []);
 
@@ -150,6 +152,42 @@ export default function DealerFormCard({
     };
   }, []);
 
+  useEffect(() => {
+    const shouldGenerateCode = (mode === "admin-create" || mode === "staff-submit") && !initialSnapshot?.dealerCode;
+    if (!shouldGenerateCode) return;
+
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setDealerCodeLoading(true);
+      setDealerCodeError("");
+
+      fetch("/api/dealer-code", { cache: "no-store" })
+        .then(async (response) => {
+          const json = await response.json();
+          if (!response.ok || !json.success || !json.dealerCode) {
+            throw new Error(json.message ?? "Failed to generate dealer code");
+          }
+          return String(json.dealerCode);
+        })
+        .then((dealerCode) => {
+          if (!active) return;
+          setFormData((prev) => ({ ...prev, dealerCode }));
+        })
+        .catch((error) => {
+          if (!active) return;
+          setDealerCodeError(error instanceof Error ? error.message : "Failed to generate dealer code.");
+        })
+        .finally(() => {
+          if (active) setDealerCodeLoading(false);
+        });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [initialSnapshot?.dealerCode, mode]);
+
   const copy = useMemo(() => getModeCopy(mode), [mode]);
 
   const handleInputChange = (
@@ -167,7 +205,11 @@ export default function DealerFormCard({
 
   const resetForm = () => {
     const snapshot = normalizeDealerFormSnapshot(initialSnapshot ?? null);
-    setFormData(toFormValues(snapshot));
+    const nextForm = toFormValues(snapshot);
+    if (!initialSnapshot?.dealerCode && formData.dealerCode) {
+      nextForm.dealerCode = formData.dealerCode;
+    }
+    setFormData(nextForm);
     setSelectedStaff(snapshot.assignedStaffIds);
     setInlineError("");
   };
@@ -243,6 +285,12 @@ export default function DealerFormCard({
           </div>
         ) : null}
 
+        {dealerCodeError ? (
+          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            {dealerCodeError}
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <Section title="Basic information">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -294,7 +342,15 @@ export default function DealerFormCard({
           <Section title="Account & credentials">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Field label="Dealer code" required>
-                <input name="dealerCode" type="text" value={formData.dealerCode} onChange={handleInputChange} placeholder="Unique dealer code" required />
+                <input
+                  name="dealerCode"
+                  type="text"
+                  value={dealerCodeLoading ? "Generating..." : formData.dealerCode}
+                  onChange={handleInputChange}
+                  placeholder="Auto generated"
+                  readOnly
+                  required
+                />
               </Field>
               <Field label="Username" required>
                 <input name="username" type="text" value={formData.username} onChange={handleInputChange} placeholder="Login username" required />
@@ -341,16 +397,16 @@ export default function DealerFormCard({
           <div className="flex flex-wrap gap-3 border-t border-gray-100 pt-4">
             <button
               type="submit"
-              disabled={isSubmitting || isSecondarySubmitting}
+              disabled={isSubmitting || isSecondarySubmitting || dealerCodeLoading}
               className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-400"
             >
-              {isSubmitting ? copy.submittingLabel : copy.submitLabel}
+              {dealerCodeLoading ? "Generating code..." : isSubmitting ? copy.submittingLabel : copy.submitLabel}
             </button>
             {secondaryAction ? (
               <button
                 type="button"
                 onClick={handleSecondaryAction}
-                disabled={isSubmitting || isSecondarySubmitting}
+                disabled={isSubmitting || isSecondarySubmitting || dealerCodeLoading}
                 className="rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 {isSecondarySubmitting ? secondaryAction.loadingLabel : secondaryAction.label}

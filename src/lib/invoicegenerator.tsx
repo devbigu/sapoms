@@ -53,6 +53,17 @@ export interface OrderInvoiceData {
     amountBeforeSlab?: string | number;
     order_dealer?: string | number;
     orderdata_dealerid?: string | number;
+    Dealer_Id?: string | number;
+    Dealer_Email?: string;
+    Dealer_Number?: string;
+    Dealer_Address?: string;
+    Dealer_shipto?: string;
+    Dealer_City?: string;
+    Dealer_Pincode?: string;
+    Dealer_Dealercode?: string;
+    Dealer_Notes?: string;
+    gst?: string;
+    creditdays?: string;
 
 }
 
@@ -465,6 +476,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     const dp = getDealerProfile();
     const summaryOverride = await fetchOrderSummaryOverride(order);
     const displayOrder = summaryOverride ? { ...(order as any), ...summaryOverride } : order;
+    const dealerSource = { ...(displayOrder as any), ...(dp ?? {}) };
 
     // Fetch detailed order items (product names) from the API or prefer inlined `order.items` if present
     let orderItems: OrderItem[] = [];
@@ -595,7 +607,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         isApproved ? "Invoice Date" : "PO Date", moment(displayOrder.order_date).format("DD-MM-YYYY")],
         ["Order Date", moment(displayOrder.order_date).format("DD-MM-YYYY"),
             "Order Time", moment(displayOrder.order_date).format("hh:mm A")],
-        ["Dealer", dp?.Dealer_Name || displayOrder.Dealer_Name || "—",
+        ["Dealer", dealerSource.Dealer_Name || displayOrder.Dealer_Name || "—",
             "Outstanding Date", displayOrder.outstandingDate ? moment(displayOrder.outstandingDate).format("DD-MM-YYYY") : "—"],
     ];
 
@@ -613,12 +625,12 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     const SEC_HDR_H = 6;
 
     const dealerLines: [string, string][] = [];
-    if (dp?.Dealer_Name) dealerLines.push(["Name", dp.Dealer_Name]);
-    if (dp?.Dealer_Address) dealerLines.push(["Address", dp.Dealer_Address]);
-    if (dp?.Dealer_City) dealerLines.push(["City", dp.Dealer_City]);
-    if (dp?.gst) dealerLines.push(["GST No", dp.gst]);
-    if (dp?.Dealer_Number) dealerLines.push(["Phone", dp.Dealer_Number]);
-    if (dp?.Dealer_Email) dealerLines.push(["Email", dp.Dealer_Email]);
+    if (dealerSource.Dealer_Name) dealerLines.push(["Name", dealerSource.Dealer_Name]);
+    if (dealerSource.Dealer_Address) dealerLines.push(["Address", dealerSource.Dealer_Address]);
+    if (dealerSource.Dealer_City) dealerLines.push(["City", dealerSource.Dealer_City]);
+    if (dealerSource.gst) dealerLines.push(["GST No", dealerSource.gst]);
+    if (dealerSource.Dealer_Number) dealerLines.push(["Phone", dealerSource.Dealer_Number]);
+    if (dealerSource.Dealer_Email) dealerLines.push(["Email", dealerSource.Dealer_Email]);
     if (dealerLines.length === 0 && displayOrder.Dealer_Name)
         dealerLines.push(["Name", displayOrder.Dealer_Name]);
 
@@ -644,14 +656,14 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     });
 
     // Ship To — same PAD / LAB_W convention
-    const shipAddr = dp?.Dealer_shipto
+    const shipAddr = dealerSource.Dealer_shipto
         || "Omsons Glassware Pvt. Ltd., KHATA No. 278/364 AND 285/372 HADBAST No. 66, Ambala, Haryana 133104";
 
     doc.setFont("Helvetica", "bold"); doc.setFontSize(7.5);
     doc.text("Name :", ML + half + PAD, y + 7);
     doc.text("Address :", ML + half + PAD, y + 13);
     doc.setFont("Helvetica", "normal"); doc.setFontSize(7);
-    doc.text(dp?.Dealer_Name || displayOrder.Dealer_Name || "—", ML + half + PAD + LAB_W, y + 7);
+    doc.text(dealerSource.Dealer_Name || displayOrder.Dealer_Name || "—", ML + half + PAD + LAB_W, y + 7);
     const shipWrapped = doc.splitTextToSize(shipAddr, half - PAD - LAB_W - PAD);
     doc.text(shipWrapped, ML + half + PAD + LAB_W, y + 13);
 
@@ -1006,7 +1018,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.setFont("Helvetica", "bold"); doc.setFontSize(7.5);
     doc.text("Payment Terms:", ML + PAD, y + FRH * 0.63);
     doc.setFont("Helvetica", "normal");
-    const pt = dp?.creditdays ? `Net ${dp.creditdays} days` : "Net 30";
+    const pt = dealerSource.creditdays ? `Net ${dealerSource.creditdays} days` : "Net 30";
     doc.text(pt, ML + 32, y + FRH * 0.63);
     y += FRH + 14;
 

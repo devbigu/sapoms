@@ -809,15 +809,18 @@ function AddOrderPageInner() {
             const catalogueProduct = catalogueMatch?.product ?? null;
             const catalogueVariant = catalogueMatch?.variant ?? null;
             const packSize = catalogueVariant?.pack ?? item.packSize ?? 1;
-            const unitPrice = cartPriceToRupees(item.unitPrice, match?.product_price);
+            const cartUnitPrice = cartPriceToRupees(item.unitPrice, match?.product_price);
+            const pricing = catalogueProduct && catalogueVariant
+              ? cataloguePricing.getVariantOrderPricing(catalogueVariant.price, packSize, catalogueProduct)
+              : { unitPrice: cartUnitPrice, baseListPrice: cartUnitPrice * packSize };
             return {
               key: i + 1,
               productname: catalogueVariant?.sku ?? (match ? String(match.product_cat) : item.variantCode),
               displayName: catalogueProduct ? getCatalogueProductLabel(catalogueProduct) : (match ? (match.product_name ?? item.productName) : item.productName),
               variantCode: catalogueVariant?.sku ?? item.variantCode,
               producQuanity: item.quantity,
-              price: unitPrice,
-              baseListPrice: unitPrice * packSize,
+              price: pricing.unitPrice,
+              baseListPrice: pricing.baseListPrice,
               packSize,
               isPriority: item.isPriority ?? item.priority ?? false,
               productNote: "",
@@ -863,6 +866,9 @@ function AddOrderPageInner() {
       const cartPrice = Number(item.price);
       const apiPrice = match ? Number(match.product_price) : 0;
       const price = cartPriceToRupees(cartPrice, apiPrice);
+      const pricing = catalogueProduct && catalogueVariant
+        ? cataloguePricing.getVariantOrderPricing(catalogueVariant.price, packSize, catalogueProduct)
+        : { unitPrice: price, baseListPrice: price * packSize };
 
       return {
         key: i + 1,
@@ -870,8 +876,8 @@ function AddOrderPageInner() {
         displayName: catalogueProduct ? getCatalogueProductLabel(catalogueProduct) : (match ? (match.product_name ?? productName) : productName),
         variantCode,
         producQuanity: item.quantity,
-        price,
-        baseListPrice: price * packSize,
+        price: pricing.unitPrice,
+        baseListPrice: pricing.baseListPrice,
         packSize,
         isPriority: item.isPriority ?? false,
         productNote: "",
@@ -1441,8 +1447,8 @@ function AddOrderPageInner() {
     if (!product || !variant) return;
 
     const displayName = getCatalogueProductLabel(product);
-    const unitPrice = cataloguePricing.variantPriceToUnitRupees(variant.price);
     const packSize = safePositiveNumber(variant.pack) || 1;
+    const pricing = cataloguePricing.getVariantOrderPricing(variant.price, packSize, product);
     setArr((prev) => {
       const next = [...prev];
       next[idx] = {
@@ -1453,8 +1459,8 @@ function AddOrderPageInner() {
         productname: variant.sku,
         displayName,
         variantCode: variant.sku,
-        baseListPrice: unitPrice * packSize,
-        price: unitPrice,
+        baseListPrice: pricing.baseListPrice,
+        price: pricing.unitPrice,
         packSize,
       };
       return next;
@@ -1826,11 +1832,27 @@ function AddOrderPageInner() {
         response: data,
       });
       const placedOrderId = extractOrderIdFromResponse(data) || await getLatestOrderIdForDealer();
+      const rowsUsedForOrder = arr1.filter((row) => row.productname);
       saveLocalOrderDetailsFallback(placedOrderId, {
         dealerId: user.Dealer_Id,
         dealerName: user.Dealer_Name,
         order_dealer: user.Dealer_Id,
         Dealer_Name: user.Dealer_Name,
+        Dealer_Id: user.Dealer_Id,
+        Dealer_Email: user.Dealer_Email,
+        Dealer_Number: user.Dealer_Number,
+        Dealer_Address: user.Dealer_Address,
+        Dealer_shipto: user.Dealer_shipto,
+        Dealer_City: user.Dealer_City,
+        Dealer_Pincode: user.Dealer_Pincode,
+        Dealer_Dealercode: user.Dealer_Dealercode,
+        Dealer_Notes: user.Dealer_Notes,
+        gst: user.gst,
+        creditdays: user.creditdays,
+        discount: user.discount,
+        staffname: user.staffname,
+        note: orderNote.trim() || "",
+        order_note: orderNote.trim() || "",
         grossAmount: payloadAmount(discountPayload.subtotal),
         order_amount: payloadAmount(discountPayload.subtotal),
         discountAmount: payloadAmount(discountPayload.discountAmount),
@@ -1852,10 +1874,11 @@ function AddOrderPageInner() {
         del_status: "0",
         staffid: user.assignedstaff,
         assignedstaff: user.assignedstaff,
-        items: payload.map((item) => ({
+        items: payload.map((item, index) => ({
           ...item,
           productId: item.catNo,
           productName: item.productName,
+          productNote: rowsUsedForOrder[index]?.productNote ?? "",
           discountAmount: item.discount,
           finalPrice: item.afterDiscountPrice,
         })),

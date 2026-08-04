@@ -992,11 +992,36 @@ export default function OrdersPage() {
     fd.append('id', id); fd.append('tbl', 'order_tbl'); fd.append('field', 'order_id')
     if (reason) fd.append('reason', reason)
     try {
+      if (session.role === 'dealer' || session.role === 'admin') {
+        const order = data.find((row) => String(row.order_id) === String(id))
+        const overlayRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-omsons-actor-role': session.role,
+            'x-omsons-actor-id': session.id,
+            'x-omsons-actor-name': session.name,
+            ...(session.roletype ? { 'x-omsons-actor-roletype': session.roletype } : {}),
+          },
+          body: JSON.stringify({
+            action: 'cancel',
+            reason: reason || 'Cancelled from order management.',
+            formattedOrderNumber: `OM/${YEAR}/${id}`,
+            dealerId: order?.order_dealer,
+            assignedStaffId: order?.staffid,
+          }),
+        })
+        const overlayJson = await overlayRes.json().catch(() => null)
+        if (!overlayRes.ok || overlayJson?.success === false) {
+          throw new Error(overlayJson?.message || 'Cancellation could not be recorded.')
+        }
+      }
       const res = await axios.post(`${BACKEND_URL}/deletewithreason`, fd)
       setToast({ msg: res.data?.msg || 'Deleted.', type: 'ok' })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['cancelled-orders'] })
     } catch { setToast({ msg: 'Delete failed.', type: 'err' }) }
-  }, [session, cfg, queryClient])
+  }, [session, cfg, data, queryClient])
 
   const handleAccept = useCallback(async (id: string, status: 0 | 1) => {
     if (!session) return

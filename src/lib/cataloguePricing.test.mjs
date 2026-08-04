@@ -17,3 +17,37 @@ test("per-unit values round consistently to paise without pack division", () => 
 test("legacy helper name also keeps catalogue price as per-unit rupees", () => {
   assert.equal(pricing.variantPackPriceToUnitRupees(5200, 100), 5200);
 });
+
+test("normal catalogue products use unit price times pack size", () => {
+  assert.deepEqual(
+    pricing.getVariantOrderPricing(266, 10, {
+      category: "Accessories",
+      categories: ["Laboratory Glassware > Extraction Apparatus"],
+    }),
+    { unitPrice: 266, baseListPrice: 2660, priceBasis: "unit" }
+  );
+});
+
+test("syringe filters use catalogue price as pack price", () => {
+  assert.deepEqual(
+    pricing.getVariantOrderPricing(6200, 100, {
+      category: "Filters & Membrane",
+      categories: ["Syringe Filters > Sterile"],
+      name: "PTFE Syringe Filters, Hydrophobic, Sterile",
+    }),
+    { unitPrice: 62, baseListPrice: 6200, priceBasis: "pack" }
+  );
+});
+
+test("cat nos 364, 365, and 366 use catalogue price as 10 mtrs price", () => {
+  for (const sku of ["364", "365", "366"]) {
+    assert.deepEqual(
+      pricing.getVariantOrderPricing(1100, 10, {
+        sku,
+        category: "Rubberware",
+        name: "Tubings, Red Colour",
+      }),
+      { unitPrice: 110, baseListPrice: 1100, priceBasis: "pack" }
+    );
+  }
+});
