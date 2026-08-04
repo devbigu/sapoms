@@ -3,6 +3,48 @@ function positiveNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
+function roundMoney(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function collectProductText(product) {
+  if (!product || typeof product !== "object") return "";
+  const values = [
+    product.sku,
+    product.SKU,
+    product.catalogueProductSku,
+    product.productname,
+    product.variantCode,
+    product.category,
+    product.catalogueSection,
+    product.name,
+    product.productName,
+    product.displayName,
+    product.Name,
+  ];
+
+  const categories = Array.isArray(product.categories)
+    ? product.categories
+    : Array.isArray(product.Categories)
+      ? product.Categories
+      : [];
+
+  return [...values, ...categories]
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value))
+    .join(" ");
+}
+
+function isSyringeFiltersProduct(product) {
+  return /\bsyringe\s+filters?\b/i.test(collectProductText(product));
+}
+
+function isTenMetreTubingProduct(product) {
+  const sku = String(product?.sku ?? product?.SKU ?? product?.catalogueProductSku ?? "").trim();
+  if (/^(364|365|366)$/.test(sku)) return true;
+  return /\b(364|365|366)(?:\/\d+)?\b/.test(collectProductText(product));
+}
+
 /**
  * Catalogue variant prices are rupees per individual unit. Order rows also
  * store rupees per individual unit because quantity * packSize is sent to PHP.
@@ -10,10 +52,33 @@ function positiveNumber(value) {
 function variantPriceToUnitRupees(priceInput) {
   const unitPrice = positiveNumber(priceInput);
   if (!unitPrice) return 0;
-  return Math.round((unitPrice + Number.EPSILON) * 100) / 100;
+  return roundMoney(unitPrice);
+}
+
+function getVariantOrderPricing(priceInput, packSizeInput, product) {
+  const price = variantPriceToUnitRupees(priceInput);
+  const packSize = Math.max(1, positiveNumber(packSizeInput) || 1);
+  if (!price) return { unitPrice: 0, baseListPrice: 0, priceBasis: "unit" };
+
+  if (isSyringeFiltersProduct(product) || isTenMetreTubingProduct(product)) {
+    return {
+      unitPrice: roundMoney(price / packSize),
+      baseListPrice: price,
+      priceBasis: "pack",
+    };
+  }
+
+  return {
+    unitPrice: price,
+    baseListPrice: roundMoney(price * packSize),
+    priceBasis: "unit",
+  };
 }
 
 module.exports = {
+  getVariantOrderPricing,
+  isSyringeFiltersProduct,
+  isTenMetreTubingProduct,
   variantPriceToUnitRupees,
   variantPackPriceToUnitRupees: variantPriceToUnitRupees,
 };

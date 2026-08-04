@@ -24,18 +24,21 @@ async function transpileToDataUrl(filePath, replacements = []) {
 async function loadDealerModules() {
   const dealerFormPath = path.resolve("src/lib/dealerForm.ts");
   const dealerFormUrl = await transpileToDataUrl(dealerFormPath);
+  const dealerCodePath = path.resolve("src/lib/dealerCode.ts");
+  const dealerCodeUrl = await transpileToDataUrl(dealerCodePath);
   const dealerRequestsPath = path.resolve("src/lib/dealerRequests.ts");
   const dealerRequestsUrl = await transpileToDataUrl(dealerRequestsPath, [
     ["@/lib/dealerForm", dealerFormUrl],
   ]);
 
   return {
+    dealerCode: await import(dealerCodeUrl),
     dealerForm: await import(dealerFormUrl),
     dealerRequests: await import(dealerRequestsUrl),
   };
 }
 
-const { dealerForm, dealerRequests } = await loadDealerModules();
+const { dealerCode, dealerForm, dealerRequests } = await loadDealerModules();
 
 const snapshot = {
   name: "North Labs",
@@ -44,7 +47,7 @@ const snapshot = {
   city: "Delhi",
   address: "Industrial Area",
   pincode: "110001",
-  dealerCode: "DLR-42",
+  dealerCode: "1234",
   username: "northlabs",
   password: "secret123",
   gstNo: "07ABCDE1234F1Z5",
@@ -67,6 +70,26 @@ test("dealer form validation keeps staff assignment and required fields intact",
     dealerForm.validateDealerFormSnapshot({ ...snapshot, email: "bad-email" }),
     "Enter a valid email address",
   );
+  assert.equal(
+    dealerForm.validateDealerFormSnapshot({ ...snapshot, dealerCode: "DLR-42" }),
+    "Dealer code must be a unique 4-digit number",
+  );
+});
+
+test("dealer code generator returns an unused 4-digit number", () => {
+  assert.equal(dealerCode.isFourDigitDealerCode("1234"), true);
+  assert.equal(dealerCode.isFourDigitDealerCode("DLR-42"), false);
+  assert.deepEqual(
+    Array.from(dealerCode.collectDealerCodes([
+      { Dealer_Dealercode: "1234" },
+      { formSnapshot: { dealerCode: "5678" } },
+    ])).sort(),
+    ["1234", "5678"],
+  );
+  assert.equal(
+    dealerCode.generateUniqueFourDigitDealerCode(["1000", "1001"], () => 0),
+    "1002",
+  );
 });
 
 test("dealer PHP payload preserves the existing backend field names", () => {
@@ -75,7 +98,7 @@ test("dealer PHP payload preserves the existing backend field names", () => {
 
   assert.equal(entries.Dealer_Name, "North Labs");
   assert.equal(entries.Dealer_Email, "dealer@example.com");
-  assert.equal(entries.Dealer_Dealercode, "DLR-42");
+  assert.equal(entries.Dealer_Dealercode, "1234");
   assert.equal(entries.Dealer_Username, "northlabs");
   assert.equal(entries.Dealer_Password, "secret123");
   assert.equal(entries.assignedstaff, "7,11");
@@ -106,7 +129,7 @@ test("request list rows hide the full form snapshot while detail rows retain it"
     _id: { toString: () => "6872fbc0f3d9cf7d7a000123" },
     status: "rejected",
     dealerName: "North Labs",
-    dealerCode: "DLR-42",
+    dealerCode: "1234",
     city: "Delhi",
     contactEmail: "dealer@example.com",
     contactPhone: "9876543210",

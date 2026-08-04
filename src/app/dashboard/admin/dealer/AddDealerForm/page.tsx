@@ -18,6 +18,22 @@ const STAFF_REQUESTS_ROUTE = "/dashboard/staff/dealer-requests";
 const ADMIN_REQUESTS_ROUTE = "/dashboard/admin/dealer/requests";
 const DEALER_LIST_ROUTE = "/dashboard/admin/dealer/DealerList";
 
+async function resolveUniqueDealerCode(snapshot: DealerFormSnapshot): Promise<DealerFormSnapshot> {
+  const response = await fetch(`/api/dealer-code?candidate=${encodeURIComponent(snapshot.dealerCode)}`, {
+    cache: "no-store",
+  });
+  const payload = await response.json();
+
+  if (!response.ok || !payload.success || !payload.dealerCode) {
+    throw new Error(payload.message ?? "Unable to generate a unique dealer code");
+  }
+
+  return {
+    ...snapshot,
+    dealerCode: String(payload.dealerCode),
+  };
+}
+
 function resolveMode(actor: DashboardActor | null, requestData: PublicDealerRequest | null): RequestMode | null {
   if (!actor) return null;
   if (!requestData) {
@@ -109,28 +125,30 @@ function AddDealerPageContent() {
     setMessage(null);
 
     try {
+      const uniqueSnapshot = await resolveUniqueDealerCode(snapshot);
+
       if (mode === "admin-create") {
         const response = await fetch(DIRECT_DEALER_CREATE_URL, {
           method: "POST",
           body: (() => {
             const formData = new FormData();
-            formData.append("Dealer_Name", snapshot.name);
-            formData.append("Dealer_Email", snapshot.email);
-            formData.append("Dealer_Number", snapshot.whatsapp);
-            formData.append("Dealer_City", snapshot.city);
-            formData.append("Dealer_Address", snapshot.address);
-            formData.append("Dealer_Pincode", snapshot.pincode);
-            formData.append("Dealer_Dealercode", snapshot.dealerCode);
-            formData.append("Dealer_Username", snapshot.username);
-            formData.append("Dealer_Password", snapshot.password);
-            formData.append("gst", snapshot.gstNo);
-            formData.append("discount", snapshot.discount);
-            formData.append("creditdays", snapshot.creditDays);
-            formData.append("annualtarget", snapshot.annualTarget);
-            formData.append("currentlimit", snapshot.currentLimit);
-            formData.append("Dealer_Notes", snapshot.notes);
-            formData.append("assignedstaff", snapshot.assignedStaffIds.join(","));
-            formData.append("staffname", snapshot.staffNames);
+            formData.append("Dealer_Name", uniqueSnapshot.name);
+            formData.append("Dealer_Email", uniqueSnapshot.email);
+            formData.append("Dealer_Number", uniqueSnapshot.whatsapp);
+            formData.append("Dealer_City", uniqueSnapshot.city);
+            formData.append("Dealer_Address", uniqueSnapshot.address);
+            formData.append("Dealer_Pincode", uniqueSnapshot.pincode);
+            formData.append("Dealer_Dealercode", uniqueSnapshot.dealerCode);
+            formData.append("Dealer_Username", uniqueSnapshot.username);
+            formData.append("Dealer_Password", uniqueSnapshot.password);
+            formData.append("gst", uniqueSnapshot.gstNo);
+            formData.append("discount", uniqueSnapshot.discount);
+            formData.append("creditdays", uniqueSnapshot.creditDays);
+            formData.append("annualtarget", uniqueSnapshot.annualTarget);
+            formData.append("currentlimit", uniqueSnapshot.currentLimit);
+            formData.append("Dealer_Notes", uniqueSnapshot.notes);
+            formData.append("assignedstaff", uniqueSnapshot.assignedStaffIds.join(","));
+            formData.append("staffname", uniqueSnapshot.staffNames);
             return formData;
           })(),
         });
@@ -150,7 +168,7 @@ function AddDealerPageContent() {
             "Content-Type": "application/json",
             ...buildDealerRequestHeaders(actor),
           },
-          body: JSON.stringify({ formSnapshot: snapshot }),
+          body: JSON.stringify({ formSnapshot: uniqueSnapshot }),
         });
         const payload = await response.json();
         if (!response.ok || !payload.success) {
@@ -172,7 +190,7 @@ function AddDealerPageContent() {
           "Content-Type": "application/json",
           ...buildDealerRequestHeaders(actor),
         },
-        body: JSON.stringify({ action, formSnapshot: snapshot }),
+        body: JSON.stringify({ action, formSnapshot: uniqueSnapshot }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.success) {

@@ -7,12 +7,18 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { CalendarRange, ChevronLeft, RefreshCw, Search } from "lucide-react"
 import { DistributorSalesRow, formatRupee, getOrderDate, groupOrdersByDistributor, type SalesOrder } from "@/lib/companySales"
 import { STAFF_ORDER_SCOPE_VERSION } from "@/lib/staffOrderScope.js"
+import type { OrderAmountSource } from "@/lib/orderAmounts"
 
 type OrderResponse = {
   data: SalesOrder[]
   total?: number
   count?: number
   last_page?: number
+}
+
+type OrderSummaryOverride = OrderAmountSource & {
+  orderId?: string
+  order_id?: string
 }
 
 type StaffSession = {
@@ -60,6 +66,32 @@ async function fetchAllStaffOrders(staffId: string): Promise<SalesOrder[]> {
   ]
 }
 
+async function fetchOrderSummaryOverrides(orderIds: string[]) {
+  if (orderIds.length === 0) return {}
+
+  const chunks: string[][] = []
+  for (let i = 0; i < orderIds.length; i += 200) {
+    chunks.push(orderIds.slice(i, i + 200))
+  }
+
+  const responses = await Promise.all(
+    chunks.map(async (chunk) => {
+      const res = await fetch(`/api/order-summary-overrides?order_ids=${encodeURIComponent(chunk.join(","))}`, { cache: "no-store" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json() as Promise<{ data?: OrderSummaryOverride[] }>
+    })
+  )
+
+  const map: Record<string, OrderSummaryOverride> = {}
+  for (const response of responses) {
+    for (const row of response.data ?? []) {
+      const id = String(row.orderId ?? row.order_id ?? "").trim()
+      if (id) map[id] = row
+    }
+  }
+  return map
+}
+
 function resolveStaffSession(): StaffSession | null {
   if (typeof window === "undefined") return null
   try {
@@ -98,6 +130,29 @@ function SalesReportPageInner() {
     enabled: !!session,
   })
 
+  const orderIds = useMemo(
+    () => Array.from(new Set(orders.map((order) => String(order.order_id ?? "").trim()).filter(Boolean))),
+    [orders]
+  )
+
+  const {
+    data: summaryOverrides = {},
+    isLoading: overridesLoading,
+    refetch: refetchOverrides,
+  } = useQuery<Record<string, OrderSummaryOverride>>({
+    queryKey: [
+      "staffSalesOverrides",
+      STAFF_ORDER_SCOPE_VERSION,
+      session?.staff_id,
+      orderIds.length,
+      orderIds[0] ?? "",
+      orderIds[orderIds.length - 1] ?? "",
+    ],
+    queryFn: () => fetchOrderSummaryOverrides(orderIds),
+    enabled: !!session && orderIds.length > 0,
+    staleTime: 5 * 60_000,
+  })
+
   const filteredOrders = useMemo(() => {
     const search = queryText.trim().toLowerCase()
     return orders.filter(order => {
@@ -118,18 +173,20 @@ function SalesReportPageInner() {
   }, [orders, monthFilter, fromDate, toDate, queryText])
 
   const distributorRows = useMemo<DistributorSalesRow[]>(
-    () => groupOrdersByDistributor(filteredOrders),
-    [filteredOrders]
+    () => groupOrdersByDistributor(filteredOrders, summaryOverrides),
+    [filteredOrders, summaryOverrides]
   )
 
   const totals = useMemo(() => {
     return distributorRows.reduce((acc, row) => {
       acc.orderCount += row.orderCount
       acc.grossSales += row.grossSales
+      acc.baseDiscount += row.baseDiscount
+      acc.slabDiscount += row.slabDiscount
       acc.discount += row.discount
       acc.netSales += row.netSales
       return acc
-    }, { orderCount: 0, grossSales: 0, discount: 0, netSales: 0 })
+    }, { orderCount: 0, grossSales: 0, baseDiscount: 0, slabDiscount: 0, discount: 0, netSales: 0 })
   }, [distributorRows])
 
   if (!session) return null
@@ -196,7 +253,7 @@ function SalesReportPageInner() {
               <ChevronLeft size={16} />
               Back to dashboard
             </Link>
-            <button className="icon-btn" onClick={() => refetch()} disabled={isFetching}>
+            <button className="icon-btn" onClick={() => { refetch(); void refetchOverrides(); }} disabled={isFetching || overridesLoading}>
               <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
               Refresh
             </button>
@@ -206,7 +263,7 @@ function SalesReportPageInner() {
             <div className="hero-kicker">Staff dashboard report</div>
             <h1 className="hero-title">Assigned Dealer Sales</h1>
             <div className="hero-sub">
-              Monthly sales for your assigned dealers. Filter by month or date range, then review gross, discount, and net sales with a totals row at the bottom.
+              Monthly sales for your assigned dealers. Filter by month or date range, then review gross, base discount, slab discount, and net sales with a totals row at the bottom.
             </div>
             <div className="hero-meta">
               <span className="meta-chip">
@@ -317,18 +374,20 @@ function SalesReportPageInner() {
                       <th>Distributor name</th>
                       <th className="right">Order count</th>
                       <th className="right">Gross sales</th>
-                      <th className="right">Discount</th>
+                      <th className="right">Base discount</th>
+                      <th className="right">Slab discount</th>
+                      <th className="right">Total discount</th>
                       <th className="right">Net sales</th>
                     </tr>
                   </thead>
                   <tbody>
                     {isLoading ? (
                       <tr>
-                        <td colSpan={5} className="empty">Loading company-wide sales...</td>
+                        <td colSpan={7} className="empty">Loading company-wide sales...</td>
                       </tr>
                     ) : distributorRows.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="empty">No sales found for the selected filter.</td>
+                        <td colSpan={7} className="empty">No sales found for the selected filter.</td>
                       </tr>
                     ) : (
                       distributorRows.map(row => (
@@ -339,6 +398,8 @@ function SalesReportPageInner() {
                           </td>
                           <td className="right mono">{row.orderCount.toLocaleString("en-IN")}</td>
                           <td className="right mono">{formatRupee(row.grossSales)}</td>
+                          <td className="right mono">{formatRupee(row.baseDiscount)}</td>
+                          <td className="right mono">{formatRupee(row.slabDiscount)}</td>
                           <td className="right mono">{formatRupee(row.discount)}</td>
                           <td className="right mono">{formatRupee(row.netSales)}</td>
                         </tr>
@@ -350,6 +411,8 @@ function SalesReportPageInner() {
                       <td>Totals</td>
                       <td className="right mono">{totals.orderCount.toLocaleString("en-IN")}</td>
                       <td className="right mono">{formatRupee(totals.grossSales)}</td>
+                      <td className="right mono">{formatRupee(totals.baseDiscount)}</td>
+                      <td className="right mono">{formatRupee(totals.slabDiscount)}</td>
                       <td className="right mono">{formatRupee(totals.discount)}</td>
                       <td className="right mono">{formatRupee(totals.netSales)}</td>
                     </tr>

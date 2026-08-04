@@ -125,6 +125,10 @@ export function validateDealerFormSnapshot(snapshot: DealerFormSnapshot): string
     return "Please assign at least one staff member";
   }
 
+  if (!/^\d{4}$/.test(cleanText(snapshot.dealerCode))) {
+    return "Dealer code must be a unique 4-digit number";
+  }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(snapshot.email)) {
     return "Enter a valid email address";
   }

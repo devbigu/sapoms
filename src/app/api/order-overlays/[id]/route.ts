@@ -188,10 +188,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ success: true, data: toSafeOverlay(saved) });
     }
 
-    if (actor.role !== "dealer") {
-      return NextResponse.json({ success: false, message: "Only Dealers can change their order overlay." }, { status: 403 });
-    }
-
     const context = await loadEffectiveContext(id, actor);
 
     if (!context.effective.eligibility.canDealerChange) {
@@ -202,6 +198,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (action === "cancel") {
+      if (actor.role !== "dealer" && actor.role !== "admin") {
+        return NextResponse.json({ success: false, message: "Only Dealers or Admin can cancel an order overlay." }, { status: 403 });
+      }
       const saved = await saveCancellation({
         orderId: context.orderId,
         formattedOrderNumber: safeText(body.formattedOrderNumber, 80),
@@ -235,6 +234,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     if (action === "edit") {
+      if (actor.role !== "dealer") {
+        return NextResponse.json({ success: false, message: "Only Dealers can edit their order overlay." }, { status: 403 });
+      }
       const expectedRevision = Number(body.expectedRevision ?? 0);
       if (!Number.isFinite(expectedRevision) || expectedRevision !== context.effective.latestRevision) {
         return NextResponse.json({ success: false, code: "stale_revision", message: "Reload the order before saving this edit." }, { status: 409 });

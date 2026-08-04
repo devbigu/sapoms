@@ -10,6 +10,7 @@ import {
   getCatalogueSection,
 } from '@/lib/catalogue';
 import { loadCatalogueProducts } from '@/lib/catalogueClient';
+import cataloguePricing from '@/lib/cataloguePricing';
 
 // ─────────────────────────────────────────────────────────────
 // TYPES  (matches omsons_products_from_excel_with_images.json)
@@ -56,9 +57,17 @@ function getVariantImage(product: Product, variant?: Variant | null): string | u
   return (variant?.images ?? []).find(Boolean) ?? product.images?.find(Boolean) ?? undefined;
 }
 
-// Catalogue prices are per unit; all prices are kept as paise internally.
-function variantPricePaise(v: Variant | null): number | null {
-  return typeof v?.price === "number" && v.price > 0 ? v.price * 100 : null;
+// Cart prices are kept as paise per piece. Some catalogue sections list pack prices.
+function variantUnitPricePaise(product: Product | null, v: Variant | null): number | null {
+  if (typeof v?.price !== "number" || v.price <= 0) return null;
+  const pricing = cataloguePricing.getVariantOrderPricing(v.price, v.pack, product);
+  return pricing.unitPrice > 0 ? Math.round(pricing.unitPrice * 100) : null;
+}
+
+function variantPackPricePaise(product: Product | null, v: Variant | null): number | null {
+  if (typeof v?.price !== "number" || v.price <= 0) return null;
+  const pricing = cataloguePricing.getVariantOrderPricing(v.price, v.pack, product);
+  return pricing.baseListPrice > 0 ? Math.round(pricing.baseListPrice * 100) : null;
 }
 
 function fmt(paise: number | null): string {
@@ -141,9 +150,9 @@ function NoImageBox({ height = 280 }: { height?: number }) {
 function RelatedCard({ product }: { product: Product }) {
   const img        = getImage(product, 0);
   const firstVar   = product.variants?.[0] ?? null;
-  const unitPricePaise = variantPricePaise(firstVar);
+  const unitPricePaise = variantUnitPricePaise(product, firstVar);
   const packSize   = firstVar?.pack ?? 1;
-  const packPricePaise = unitPricePaise !== null ? unitPricePaise * packSize : null;
+  const packPricePaise = variantPackPricePaise(product, firstVar);
 
   return (
     <Link href={`/Products/${product.sku}`} style={{ textDecoration: "none" }}>
@@ -247,11 +256,8 @@ export default function ProductDetailsPage() {
     : "";
   const selectedQuantity  = quantityAsNumber(selectedQuantityValue);
   const selectedPackSize = Math.max(1, selectedVariant?.pack ?? 1);
-  const perUnitPaise = variantPricePaise(selectedVariant);
-  const packPricePaise =
-    perUnitPaise !== null
-      ? perUnitPaise * selectedPackSize
-      : null;
+  const perUnitPaise = variantUnitPricePaise(product, selectedVariant);
+  const packPricePaise = variantPackPricePaise(product, selectedVariant);
   const lineTotalPaise =
     packPricePaise !== null
       ? packPricePaise * selectedQuantity
@@ -266,8 +272,8 @@ export default function ProductDetailsPage() {
     const numPacks = quantityAsNumber(quantityValue);
     const variant = product?.variants?.find((item) => item.sku === variantSku);
     const packSize = Math.max(1, variant?.pack ?? 1);
-    const unitPaise = variantPricePaise(variant ?? null) ?? 0;
-    const packPaise = unitPaise * packSize;
+    const unitPaise = variantUnitPricePaise(product, variant ?? null) ?? 0;
+    const packPaise = variantPackPricePaise(product, variant ?? null) ?? 0;
 
     return {
       quantityValue,

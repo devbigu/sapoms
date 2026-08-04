@@ -960,6 +960,7 @@ export default function ViewOrderDealerPage() {
       return null;
     }
   }, []);
+  const [orderDealerProfile, setOrderDealerProfile] = useState<DealerInfo | null>(null);
   const currentUser = useMemo<DispatchUserSession | null>(() => resolveCurrentUser(), []);
   const orderAccessDealerId = useMemo(
     () => firstNonEmptyString(
@@ -1281,6 +1282,29 @@ export default function ViewOrderDealerPage() {
     displayOrderMeta?.orderdata_dealerid,
     dealer?.Dealer_Id
   );
+  useEffect(() => {
+    if (!dealerIdForDispatch || dealer?.Dealer_Id === dealerIdForDispatch) {
+      setOrderDealerProfile(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`${BACKEND}/getdealer?id=${encodeURIComponent(dealerIdForDispatch)}`, { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+      .then((json) => {
+        if (cancelled) return;
+        const data = json?.data;
+        setOrderDealerProfile(data && typeof data === "object" && data.Dealer_Id ? data as DealerInfo : null);
+      })
+      .catch(() => {
+        if (!cancelled) setOrderDealerProfile(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dealer?.Dealer_Id, dealerIdForDispatch]);
+  const resolvedDealer = dealer ?? orderDealerProfile;
   const canEditDispatchDetails = canUserEditDispatch(currentUser, {
     dealerId: dealerIdForDispatch,
     assignedStaffId,
@@ -1371,10 +1395,18 @@ export default function ViewOrderDealerPage() {
     slabDiscountPercent: discountBreakdown.slabDiscountPercent,
     approvedDiscountPercent: displayOrderMeta?.approvedDiscountPercent,
     allocatedDiscountPercent: displayOrderMeta?.allocatedDiscountPercent,
-    Dealer_Name: dealer?.Dealer_Name || firstOrder?.Dealer_Name || displayOrderMeta?.Dealer_Name || "",
-    Dealer_Address: dealer?.Dealer_Address || firstOrder?.Dealer_Address || displayOrderMeta?.Dealer_Address || "",
-    Dealer_Number: dealer?.Dealer_Number || firstOrder?.Dealer_Number || displayOrderMeta?.Dealer_Number || "",
-    gst: dealer?.gst || firstOrder?.gst || displayOrderMeta?.gst || "",
+    Dealer_Name: resolvedDealer?.Dealer_Name || firstOrder?.Dealer_Name || displayOrderMeta?.Dealer_Name || "",
+    Dealer_Id: resolvedDealer?.Dealer_Id || dealerIdForDispatch || "",
+    Dealer_Email: resolvedDealer?.Dealer_Email || (displayOrderMeta as any)?.Dealer_Email || "",
+    Dealer_Address: resolvedDealer?.Dealer_Address || firstOrder?.Dealer_Address || displayOrderMeta?.Dealer_Address || "",
+    Dealer_Number: resolvedDealer?.Dealer_Number || firstOrder?.Dealer_Number || displayOrderMeta?.Dealer_Number || "",
+    Dealer_shipto: resolvedDealer?.Dealer_shipto || (displayOrderMeta as any)?.Dealer_shipto || "",
+    Dealer_City: resolvedDealer?.Dealer_City || (displayOrderMeta as any)?.Dealer_City || "",
+    Dealer_Pincode: resolvedDealer?.Dealer_Pincode || (displayOrderMeta as any)?.Dealer_Pincode || "",
+    Dealer_Dealercode: resolvedDealer?.Dealer_Dealercode || (displayOrderMeta as any)?.Dealer_Dealercode || "",
+    Dealer_Notes: resolvedDealer?.Dealer_Notes || (displayOrderMeta as any)?.Dealer_Notes || "",
+    gst: resolvedDealer?.gst || firstOrder?.gst || displayOrderMeta?.gst || "",
+    creditdays: (resolvedDealer as any)?.creditdays || (displayOrderMeta as any)?.creditdays || "",
     orderdata_item_quantity: String(totals.qty),
     mtstatus: displayOrderMeta?.mtstatus || firstOrder?.orderdata_status || "",
     outstandingDate: displayOrderMeta?.outstandingDate || "",
@@ -1621,20 +1653,20 @@ export default function ViewOrderDealerPage() {
   };
 
   // Dealer fields to show — in display order, only truthy ones render
-  const dealerFields: { label: string; value?: string }[] = dealer ? [
-    { label: "Dealer Name",    value: dealer.Dealer_Name      },
-    { label: "Dealer Code",    value: dealer.Dealer_Dealercode},
-    { label: "City",           value: dealer.Dealer_City      },
-    { label: "Address",        value: dealer.Dealer_Address   },
-    { label: "Ship To",        value: dealer.Dealer_shipto    },
-    { label: "Email",          value: dealer.Dealer_Email     },
-    { label: "Phone",          value: dealer.Dealer_Number    },
-    { label: "GST",            value: dealer.gst              },
+  const dealerFields: { label: string; value?: string }[] = resolvedDealer ? [
+    { label: "Dealer Name",    value: resolvedDealer.Dealer_Name      },
+    { label: "Dealer Code",    value: resolvedDealer.Dealer_Dealercode},
+    { label: "City",           value: resolvedDealer.Dealer_City      },
+    { label: "Address",        value: resolvedDealer.Dealer_Address   },
+    { label: "Ship To",        value: resolvedDealer.Dealer_shipto    },
+    { label: "Email",          value: resolvedDealer.Dealer_Email     },
+    { label: "Phone",          value: resolvedDealer.Dealer_Number    },
+    { label: "GST",            value: resolvedDealer.gst              },
     // { label: "Credit Days",    value: dealer.creditdays       },
-    { label: "Discount",       value: dealer.discount ? `${dealer.discount}%` : undefined },
+    { label: "Discount",       value: resolvedDealer.discount ? `${resolvedDealer.discount}%` : undefined },
     // { label: "Annual Target",  value: dealer.annualtarget ? `₹${Number(dealer.annualtarget).toLocaleString("en-IN")}` : undefined },
     // { label: "Current Limit",  value: dealer.currentlimit     },
-    { label: "Assigned Staff", value: dealer.staffname        },
+    { label: "Assigned Staff", value: resolvedDealer.staffname        },
     // { label: "Notes",          value: dealer.Dealer_Notes     },
   ] : [];
 

@@ -64,3 +64,19 @@ test("normal filters remain available without an implicit date filter", () => {
   assert.equal(pagination.buildOrdersPage({ rows, page: 1, pageSize: 10, filters: { orderStatus: "pending" } }).total, 1);
   assert.equal(pagination.buildOrdersPage({ rows, page: 1, pageSize: 10 }).total, 2);
 });
+
+test("status filters treat legacy numeric and text values as the same statuses", () => {
+  const rows = [
+    order("1", "2026-07-01", "101", { order_status: "0" }),
+    order("2", "2026-07-14", "101", { order_status: "1" }),
+    order("3", "2026-07-15", "101", { order_status: "pending" }),
+  ];
+  assert.deepEqual(
+    pagination.buildOrdersPage({ rows, page: 1, pageSize: 10, filters: { orderStatus: "pending" } }).items.map((row) => row.order_id),
+    ["1", "3"],
+  );
+  assert.deepEqual(
+    pagination.buildOrdersPage({ rows, page: 1, pageSize: 10, filters: { orderStatus: "1" } }).items.map((row) => row.order_id),
+    ["2"],
+  );
+});

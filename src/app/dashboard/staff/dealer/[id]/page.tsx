@@ -10,6 +10,12 @@ import { hasPriorityTag } from '@/lib/orderPriority'
 import { OrderAmountSource, withDisplayOrderAmounts } from '@/lib/orderAmounts'
 import { mergeFallbackProductNotes } from '@/lib/orderProductNotes.mjs'
 import { STAFF_ORDER_SCOPE_VERSION } from '@/lib/staffOrderScope.js'
+import {
+  dealerStatusBadge,
+  fetchDealerStatus,
+  normalizeDealerStatus,
+  type DealerStatus,
+} from '@/lib/dealerStatus'
 
 const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
 const YEAR        = new Date().getFullYear()
@@ -162,6 +168,7 @@ export default function StaffDealerViewPage() {
 
   const [tab,           setTab]          = useState<"orders" | "items">("orders")
   const [dealer,        setDealer]       = useState<DealerInfo | null>(null)
+  const [dealerStatus,  setDealerStatus] = useState<DealerStatus>("active")
   const [allOrders,     setAllOrders]    = useState<RawOrder[]>([])
   const [summaryOverrides, setSummaryOverrides] = useState<Record<string, OrderSummaryOverride>>({})
   const [loadingOrders, setLoadingOrders] = useState(true)
@@ -208,14 +215,30 @@ export default function StaffDealerViewPage() {
   // Fetch dealer info only after assignment ownership is verified.
   useEffect(() => {
     if (!dealerId || !dealerAccessAllowed) return
+    let active = true
+
     fetch(`${BACKEND_URL}/getdealer?id=${dealerId}`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ type: "type" }),
     })
       .then(r => r.json())
-      .then(json => { if (json.status) setDealer(json.data) })
+      .then(async json => {
+        if (!active || !json.status) return
+
+        const dealerData = json.data as DealerInfo
+        setDealer(dealerData)
+
+        try {
+          const status = await fetchDealerStatus(String(dealerData.Dealer_Id || dealerId))
+          if (active) setDealerStatus(status)
+        } catch {
+          if (active) setDealerStatus(normalizeDealerStatus(dealerData.status))
+        }
+      })
       .catch(() => {})
+
+    return () => { active = false }
   }, [dealerAccessAllowed, dealerId])
 
   // Fetch all orders (filter by dealer name client-side)
@@ -333,6 +356,7 @@ export default function StaffDealerViewPage() {
   )
   const itemTotal      = itemsResp?.count ?? 0
   const itemTotalPages = itemsResp?.last_page || Math.max(1, Math.ceil(itemTotal / ITEM_PAGE_SIZE))
+  const statusBadge = dealerStatusBadge(dealerStatus)
 
   useEffect(() => {
     const orderIds = Array.from(new Set(items.map(item => String(item.orderdata_orderid || '').trim()).filter(Boolean)))
@@ -428,12 +452,8 @@ export default function StaffDealerViewPage() {
               </div>
             </div>
 
-            <span className={`text-xs font-semibold px-3 py-1.5 rounded-full self-start ${
-              dealer?.status === "1"
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-red-50 text-red-600"
-            }`}>
-              {dealer?.status === "1" ? "Active" : "Inactive"}
+            <span className={`text-xs font-semibold px-3 py-1.5 rounded-full self-start ${statusBadge.bg} ${statusBadge.text}`}>
+              {statusBadge.label}
             </span>
           </div>
         </div>
