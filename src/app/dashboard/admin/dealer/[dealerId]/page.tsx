@@ -2,8 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import axios from 'axios'
-import { fetchDealerStatus, normalizeDealerStatus, saveDealerStatus, type DealerStatus } from "@/lib/dealerStatus"
+type DealerStatus = "active" | "inactive" | "suspended"
+
+function normalizeDealerStatus(value: unknown): DealerStatus {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "active") return "active"
+  if (normalized === "suspended") return "suspended"
+  return "inactive"
+}
+
+function toApiStatus(value: DealerStatus) {
+  return value === "active" ? "ACTIVE" : value === "suspended" ? "SUSPENDED" : "INACTIVE"
+}
 
 type StaffOption = {
   staff_id: string
@@ -11,7 +21,8 @@ type StaffOption = {
   staff_roletype: string
 }
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const ADMIN_DEALERS_URL = "/api/admin/dealers"
+const ADMIN_STAFF_URL = "/api/admin/staff"
 const DEALER_LIST_ROUTE = "/dashboard/admin/dealer/DealerList"
 
 async function parseJsonResponse<T>(res: Response): Promise<T> {
@@ -107,11 +118,7 @@ export default function EditDealerPage() {
       if (!dealerId) return
       setIsLoading(true)
       try {
-        const res = await fetch(`${BACKEND_URL}/getdealer?id=${encodeURIComponent(dealerId)}`, {
-          method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ type: 'type' }),
-        })
+        const res = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(dealerId)}`, { credentials: "include" })
         const json = await parseJsonResponse<any>(res)
         if (!active) return
         if (json.status) {
@@ -134,16 +141,7 @@ export default function EditDealerPage() {
           setCurrentlimit(d.currentlimit || "")
           setExistingStaffNames(d.staffname || "")
           setAssignedStaffIds(splitCsv(d.assignedstaff))
-
-          try {
-            const dealerStatus = await fetchDealerStatus(String(d.Dealer_Id || dealerId))
-            if (active) setStatus(dealerStatus)
-          } catch {
-            if (active) {
-              setStatus("active")
-              setToastMsg({ text: "Could not load dealer status from MongoDB", type: 'error' })
-            }
-          }
+          setStatus(normalizeDealerStatus(d.status))
         } else {
           setToastMsg({ text: json.msz || "Failed to load dealer", type: 'error' })
         }
@@ -156,7 +154,7 @@ export default function EditDealerPage() {
 
     const loadStaff = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/staffassign`)
+        const res = await fetch(`${ADMIN_STAFF_URL}?page=1&limit=100`, { credentials: "include" })
         const json = await parseJsonResponse<any>(res)
         if (active) setStaffOptions(json.data || [])
       } catch {
@@ -189,10 +187,14 @@ export default function EditDealerPage() {
 
     setStatusSaving(true)
     try {
-      await saveDealerStatus({
-        dealerId: resolvedDealerId,
-        status: normalizeDealerStatus(status),
+      const response = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ status: toApiStatus(normalizeDealerStatus(status)) }),
       })
+      const payload = await response.json()
+      if (!response.ok || !payload.success) throw new Error(payload.message ?? "Failed to update dealer status")
       setToastMsg({ text: `Dealer marked ${status === "active" ? "active" : "inactive"}`, type: 'success' })
     } catch {
       setToastMsg({ text: "Failed to update dealer status", type: 'error' })
@@ -214,30 +216,38 @@ export default function EditDealerPage() {
     }
     setIsSaving(true)
     try {
-      const fd = new FormData()
-      fd.append("Dealer_Name",      name)
-      fd.append("Dealer_Email",     email)
-      fd.append("Dealer_Number",    number)
-      fd.append("Dealer_City",      city)
-      fd.append("Dealer_Address",   address)
-      fd.append("Dealer_Pincode",   pincode)
-      fd.append("Dealer_Username",  username)
-      fd.append("Dealer_Password",  password)
-      fd.append("Dealer_Dealercode", dealercode)
-      fd.append("Dealer_Notes",     notes)
-      fd.append("assignedstaff",    assignedStaffIds.join(','))
-      fd.append("staffname",        getStaffNames())
-      fd.append("discount",         discount)
-      fd.append("gst",              gst)
-      fd.append("creditdays",       creditdays)
-      fd.append("annualtarget",     annualtarget)
-      fd.append("currentlimit",     currentlimit)
-      fd.append("id",               resolvedDealerId)
-      fd.append("Dealer_Id",        resolvedDealerId)
+      const updateResponse = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          businessName: name,
+          email,
+          phone: number,
+          city,
+          address,
+          pincode,
+          dealerCode: dealercode,
+          gstin: gst,
+          discountPercent: discount,
+          creditDays: creditdays,
+          creditLimitPaise: currentlimit,
+        }),
+      })
+      const updatePayload = await updateResponse.json()
+      if (!updateResponse.ok || !updatePayload.success) throw new Error(updatePayload.message ?? "Failed to update dealer")
 
-      const res = await axios.post(`${BACKEND_URL}/updateDealer`, fd)
-      setToastMsg({ text: res.data.msg || "Dealer updated successfully", type: 'success' })
-      setTimeout(() => router.push(DEALER_LIST_ROUTE), 700)
+      const staffResponse = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}/staff`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ staffIds: assignedStaffIds }),
+      })
+      const staffPayload = await staffResponse.json()
+      if (!staffResponse.ok || !staffPayload.success) throw new Error(staffPayload.message ?? "Failed to update staff assignments")
+
+      setExistingStaffNames(getStaffNames())
+      setToastMsg({ text: "Dealer updated successfully", type: 'success' })
     } catch {
       setToastMsg({ text: "Failed to update dealer", type: 'error' })
     } finally {
@@ -315,7 +325,7 @@ export default function EditDealerPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <InputField label="Dealer Code" value={dealercode} onChange={setDealercode} placeholder="Unique dealer code" />
                 <InputField label="Username"    value={username}   onChange={setUsername}   placeholder="Login username" />
-                <InputField label="Password"    value={password}   onChange={setPassword}   type="password" placeholder="Set a password" />
+                <InputField label="Password"    value={password}   onChange={setPassword}   type="password" placeholder="Password reset is handled separately" required={false} />
                 <InputField label="GST No."     value={gst}        onChange={setGst}        placeholder="15-character GST number" />
               </div>
             </div>

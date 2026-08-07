@@ -2,25 +2,16 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import axios from "axios"
-import { AlertTriangle, Eye, EyeOff } from "lucide-react"
-import { fetchDealerStatus } from "@/lib/dealerStatus"
-import { clearAuthStorage } from "@/lib/roleAccess"
+import { Eye, EyeOff } from "lucide-react"
+import { persistAuthenticatedSession } from "@/lib/roleAccess"
 
-const ROLE_OPTIONS = [
-  { label: "Staff", value: "1" },
-  { label: "Dealer", value: "2" },
-  { label: "Admin", value: "3" },
-]
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/login/login_verify"
 const LOGO_SRC = "/omsons_logo.jpeg"
 
 export default function Login() {
   const router = useRouter()
 
   const [showNotice, setShowNotice] = useState(true)
-  const [roletype, setRoletype] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPw, setShowPw] = useState(false)
@@ -49,13 +40,8 @@ export default function Login() {
     e.preventDefault()
     setError("")
 
-    if (!email || !password || !roletype) {
-      setError("All fields are required")
-      return
-    }
-
-    if (!BACKEND_URL) {
-      setError("Backend URL is not configured")
+    if (!email || !password) {
+      setError("Email and password are required")
       return
     }
 
@@ -65,73 +51,39 @@ export default function Login() {
       const formData = new FormData()
       formData.append("email", email)
       formData.append("password", password)
-      formData.append("roletype", roletype)
 
-      const res = await axios.post(`${BACKEND_URL}`, formData)
-      const data = res.data
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      })
+      const data = await res.json()
+      const failureMessage = typeof data?.message === "string" ? data.message : "Invalid credentials"
 
-      if (data?.status) {
-        const userData = data.data || { email, role: roletype }
-        const dealerId = String(userData?.Dealer_Id ?? "").trim()
-
-        if (roletype === "2") {
-          if (!dealerId) {
-            setError("Dealer account is missing an id.")
-            return
-          }
-          try {
-            const dealerStatus = await fetchDealerStatus(dealerId)
-            if (dealerStatus === "inactive") {
-              setError("This dealer account is inactive. Please contact the administrator.")
-              return
-            }
-          } catch (statusError) {
-            console.error("Dealer status verification failed:", statusError)
-            setError("Could not verify dealer status. Please try again.")
-            return
-          }
+      if (res.ok && data?.status) {
+        const userData = data.data || { email }
+        const session = persistAuthenticatedSession(localStorage, userData)
+        if (!session || session.status !== "authenticated") {
+          setError("Invalid credentials")
+          return
         }
-
-        clearAuthStorage(localStorage)
-        localStorage.setItem("status", "true")
-        localStorage.setItem("UserData", JSON.stringify(userData))
-        localStorage.setItem("roletype", roletype)
-        if (roletype === "1") {
-          localStorage.setItem("staffData", JSON.stringify(userData))
-        }
-        if (roletype === "3") {
-          localStorage.setItem("AdminData", JSON.stringify(userData))
-        }
+        const clientRole = session.role
         window.dispatchEvent(new Event("omsons-auth-changed"))
 
         setEmail("")
         setPassword("")
-        setRoletype("")
 
-        if (roletype === "1") router.push("/dashboard/staff")
-        else if (roletype === "2") router.push("/home")
-        else if (roletype === "3") router.push("/dashboard/admin")
+        if (clientRole === "staff") router.push("/dashboard/staff")
+        else if (clientRole === "dealer") router.push("/home")
+        else if (clientRole === "admin") router.push("/dashboard/admin")
+        else if (clientRole === "accountant") router.push("/dashboard/accountant")
       } else {
-        setError(data?.msg || "Login failed")
+        setError(failureMessage)
       }
     } catch (err: unknown) {
       console.error("Login error:", err)
 
-      let backendMsg: unknown = "Server error"
-
-      if (axios.isAxiosError(err)) {
-        const responseData = err.response?.data
-        backendMsg =
-          responseData &&
-          typeof responseData === "object" &&
-          "msg" in responseData
-            ? responseData.msg
-            : responseData || err.message
-      } else if (err instanceof Error) {
-        backendMsg = err.message
-      }
-
-      setError(typeof backendMsg === "string" ? backendMsg : "Server error")
+      setError("Server error")
     } finally {
       setLoading(false)
     }
@@ -168,46 +120,16 @@ export default function Login() {
                   Login
                 </h1>
                 <p className="mt-1 text-[13px] text-slate-500">
-                  Sign in to manage orders, products, and dispatches.
+                  Sign in with your assigned account. Your role is detected automatically.
                 </p>
               </div>
 
               {/* Fields */}
               <div className="space-y-3">
                 <label className="block">
-                  <span className="mb-1.5 block text-[12px] font-semibold text-slate-700">Role</span>
-                  <div className="relative">
-                    <select
-                      value={roletype}
-                      onChange={(e) => setRoletype(e.target.value)}
-                      className="h-10 w-full appearance-none rounded-full border border-slate-200 bg-white px-5 pr-10 text-[13px] font-medium text-slate-900 shadow-sm outline-none transition focus:border-[#5b3ff2] focus:ring-4 focus:ring-[#5b3ff2]/10"
-                    >
-                      <option value="" disabled>Select your role</option>
-                      {ROLE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value} className="text-slate-900">
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 text-slate-400">
-                      <svg width="12" height="12" viewBox="0 0 12 12">
-                        <path
-                          d="M2 4l4 4 4-4"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          fill="none"
-                        />
-                      </svg>
-                    </span>
-                  </div>
-                </label>
-
-                <label className="block">
                   <span className="mb-1.5 block text-[12px] font-semibold text-slate-700">Email</span>
                   <input
-                    type="email"
+                    type="text"
                     placeholder="Enter your email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -265,19 +187,7 @@ export default function Login() {
                 {loading ? "Signing in..." : "Login"}
               </button>
 
-              {/* Accountant portal — inline row */}
-              <div className="mt-4 flex items-center justify-center gap-3">
-                <p className="text-[11px] text-slate-400">Signing in as an accountant?</p>
-                <button
-                  type="button"
-                  onClick={() => router.push("/auth/accountant-login")}
-                  className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 bg-white px-4 text-[11px] font-semibold text-slate-600 transition hover:border-[#593df4] hover:text-[#593df4]"
-                >
-                  Accountant portal
-                </button>
-              </div>
-
-              {/* Footer */}
+{/* Footer */}
               <p className="mt-4 text-center text-[11px] text-slate-300">
                 ©2026 Omsons. All rights reserved.
               </p>

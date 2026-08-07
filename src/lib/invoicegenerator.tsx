@@ -121,7 +121,7 @@ export function canGenerateOrderInvoiceForActor(order: OrderInvoiceData, options
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 
 interface OrderItem {
     orderdata_id: string;
@@ -200,6 +200,13 @@ async function fetchOrderSummaryOverride(order: OrderInvoiceData): Promise<Recor
 
 async function fetchOrderItems(orderId: string): Promise<OrderItem[]> {
     try {
+        const normalized = await fetch(`/api/order-access/${encodeURIComponent(orderId)}?role=admin&actor_id=admin`, { cache: "no-store" }).catch(() => null);
+        if (normalized?.ok) {
+            const payload = await normalized.json().catch(() => null);
+            const normalizedOrder = payload?.data;
+            const normalizedItems = Array.isArray(normalizedOrder?.items) ? normalizedOrder.items : Array.isArray(normalizedOrder?.productorder) ? normalizedOrder.productorder : [];
+            if (normalizedItems.length > 0) return normalizedItems as OrderItem[];
+        }
         const res = await fetch(`${BACKEND_URL}/orderdatalist?id=${orderId}`);
         if (!res.ok) return [];
         const json = await res.json();

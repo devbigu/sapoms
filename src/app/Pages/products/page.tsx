@@ -39,7 +39,7 @@ type ProductResponse = {
   last_page: number
 }
 
-const BACKEND_URL    = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL    = "/api/php-compat"
 const ITEMS_PER_PAGE = 10
 
 function firstNonEmpty(...values: unknown[]): string {

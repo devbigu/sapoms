@@ -51,10 +51,7 @@ type StaffSession = {
   email: string;
 };
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  "https://mirisoft.co.in/sas/dealerapi"
-).replace(/\/+$/, "");
+const API_BASE = "/api/php-compat-root";
 const DEALERS_PER_PAGE = 10;
 
 function isRecord(value: unknown): value is StoredStaffRecord {

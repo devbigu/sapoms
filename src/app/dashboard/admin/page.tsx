@@ -24,7 +24,7 @@ import { fetchDealerStatusOverrides, normalizeDealerStatus, type DealerStatusDoc
 import PendingProductsPreview from "@/components/dashboard/PendingProductsPreview";
 import { clearAuthStorage } from "@/lib/roleAccess";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+
 const year = new Date().getFullYear();
 
 type Item = {
@@ -35,6 +35,27 @@ type Item = {
 type Dealer = {
   Dealer_Name: string;
   total: string;
+};
+
+type AdminDashboardApiResponse = {
+  success: boolean;
+  data?: {
+    summary?: {
+      dealerCount?: number;
+      orderCount?: number;
+    };
+    monthlyPerformance?: Array<{
+      month: string;
+      total: string;
+    }>;
+    topDealers?: Array<{
+      dealerId?: string;
+      dealerName: string;
+      total: string;
+    }>;
+    warnings?: string[];
+  };
+  message?: string;
 };
 
 type AdminStats = {
@@ -163,7 +184,7 @@ const dashboardQueryClient = new QueryClient({
 });
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: "include" });
   return parseJsonResponse<T>(res);
 }
 
@@ -175,7 +196,7 @@ async function fetchAllDistributors(): Promise<DealerPaginationResponse> {
 
   for (let page = 1; page <= 500; page += 1) {
     const response = await fetchJson<DealerPaginationResponse>(
-      `${BACKEND_URL}/dealerpegination?page=${page}&limit=100&search=`,
+      `/api/admin/dealers?page=${page}&limit=100&search=`,
     );
     const rows = Array.isArray(response.data) ? response.data : [];
     let newRows = 0;
@@ -265,33 +286,43 @@ function AdminDashboardInner() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [activeOrdersRes, activePendingRes, dealerRes, staffRes] = await Promise.all([
-          fetch(`/api/orders-data?source=orderpegination&role=admin&page=1&limit=1000&search=`),
-          fetch(`/api/orders-data?source=orderpeginationnew&role=admin&page=1&limit=1&search=`),
-          fetch(`${BACKEND_URL}/getMonthlyreporttopdealer`),
-          fetch(`${BACKEND_URL}/dealercount`),
+        const [activeOrdersRes, activePendingRes, dashboardRes] = await Promise.all([
+          fetch(`/api/admin/orders?page=1&limit=100&search=`, { credentials: "include" }),
+          fetch(`/api/admin/orders?page=1&limit=1&status=AWAITING_ACCEPTANCE`, { credentials: "include" }),
+          fetch(`/api/admin/dashboard`, { credentials: "include" }),
         ]);
+
+        if (dashboardRes.status === 401) {
+          clearAuthStorage(localStorage);
+          window.dispatchEvent(new Event("omsons-auth-changed"));
+          router.push("/auth/login");
+          return;
+        }
+
+        if (dashboardRes.status === 403) {
+          throw new Error("Forbidden");
+        }
 
         const activeOrdersJson = await parseJsonResponse<any>(activeOrdersRes);
         const activePendingJson = await parseJsonResponse<any>(activePendingRes);
-        const dealerJson = await parseJsonResponse<any>(dealerRes);
-        const staffJson = await parseJsonResponse<any>(staffRes);
+        const dashboardJson = await parseJsonResponse<AdminDashboardApiResponse>(dashboardRes);
 
         const activeOrders = (activeOrdersJson.data || []) as Array<Record<string, unknown>>;
         setData(activeOrders
-          .map((order) => ({ order_id: String(order.order_id || ""), total: String(order.order_net_amount ?? order.order_discount ?? order.order_amount ?? 0) }))
+          .map((order) => ({ order_id: String(order.orderNumber || order.id || ""), total: String(order.finalPayableAmountPaise ?? 0) }))
           .sort((left, right) => Number(right.total) - Number(left.total))
           .slice(0, 10));
-        setDealerData(dealerJson.top || []);
+        setDealerData((dashboardJson.data?.topDealers ?? []).map((dealer) => ({
+          Dealer_Name: dealer.dealerName,
+          total: dealer.total,
+        })));
 
-        // Handle staffJson.data - could be array or object
-        const statsData = Array.isArray(staffJson.data) ? staffJson.data[0] : staffJson.data;
-        setAdminData({ ...(statsData || {
-          dealerCount: 0,
+        setAdminData({
+          dealerCount: Number(dashboardJson.data?.summary?.dealerCount ?? 0),
           staffCount: 0,
-          orderCount: 0,
-          PorderCount: 0,
-        }), orderCount: Number(activeOrdersJson.total ?? activeOrders.length), PorderCount: Number(activePendingJson.total ?? 0) });
+          orderCount: Number(dashboardJson.data?.summary?.orderCount ?? activeOrdersJson.total ?? activeOrders.length),
+          PorderCount: Number(activePendingJson.total ?? 0),
+        });
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -300,7 +331,7 @@ function AdminDashboardInner() {
     }
 
     fetchData();
-  }, []);
+  }, [router]);
 
   const [
     outstandingOrdersQ,
@@ -313,7 +344,7 @@ function AdminDashboardInner() {
       {
         queryKey: ["adminSidebarSummary", "outstandingOrders"],
         queryFn: async () => {
-          const result = await fetchJson<{ data: PendingOrderRecord[]; total?: number }>(`/api/orders-data?source=orderpeginationnew&role=admin&page=1&limit=1000&search=`);
+          const result = await fetchJson<{ data: PendingOrderRecord[]; total?: number }>(`/api/admin/orders?page=1&limit=100&status=AWAITING_ACCEPTANCE`);
           return result;
         },
       },
@@ -331,7 +362,7 @@ function AdminDashboardInner() {
       },
       {
         queryKey: ["adminSidebarSummary", "staff"],
-        queryFn: () => fetchJson<{ data: StaffSummary[]; count?: number }>(`${BACKEND_URL}/staffpegination?page=1&limit=200&search=`),
+        queryFn: () => fetchJson<{ data: StaffSummary[]; count?: number }>(`/api/admin/staff?page=1&limit=100&search=`),
       },
     ],
   });
@@ -358,7 +389,7 @@ function AdminDashboardInner() {
     isError: distributorsError,
   } = useQuery<DealerPaginationResponse>({
     queryKey: ["adminDashboardDistributors", distributorPage, distributorSearch],
-    queryFn: () => fetchJson<DealerPaginationResponse>(`${BACKEND_URL}/dealerpegination?page=${distributorPage}&search=${distributorSearch}`),
+    queryFn: () => fetchJson<DealerPaginationResponse>(`/api/admin/dealers?page=${distributorPage}&limit=10&search=${encodeURIComponent(distributorSearch)}`),
     placeholderData: keepPreviousData,
     staleTime: 5 * 60 * 1000,
   });
@@ -393,7 +424,7 @@ function AdminDashboardInner() {
   const highExposureDealers = [...dealerRows]
     .sort((a, b) => (Number(b.currentlimit) || 0) - (Number(a.currentlimit) || 0))
     .slice(0, 5);
-  const totalDistributors = dealersQ.data?.total ?? dealerRows.length;
+  const totalDistributors = adminData.dealerCount || dealersQ.data?.total || dealerRows.length;
   const distributorRows = useMemo(() => (distributorResponse?.data ?? []).map((dealer) => ({
     ...dealer,
     status: statusMap.get(String(dealer.Dealer_Id)) ?? normalizeDealerStatus(dealer.status),
@@ -671,7 +702,9 @@ function AdminDashboardInner() {
               {STAT_CONFIG.map((stat) => {
                 const value = stat.key === "dealerCount"
                   ? totalDistributors
-                  : adminData[stat.key as keyof AdminStats] || 0;
+                  : stat.key === "staffCount"
+                    ? (adminData.staffCount || staffQ.data?.count || staffRows.length)
+                    : adminData[stat.key as keyof AdminStats] || 0;
                 const badgeClass = stat.key === "PorderCount" ? "badge-amber" :
                   stat.key === "dealerCount" ? "badge-green" :
                     stat.key === "orderCount" ? "badge-blue" : "badge-purple";

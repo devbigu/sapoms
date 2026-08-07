@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 import { Save, Upload } from "lucide-react";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 
 type DealerSession = {
   Dealer_Id?: string;

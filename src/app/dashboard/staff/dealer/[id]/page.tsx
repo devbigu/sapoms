@@ -17,7 +17,7 @@ import {
   type DealerStatus,
 } from '@/lib/dealerStatus'
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL = "/api/php-compat"
 const YEAR        = new Date().getFullYear()
 const ORDER_PAGE_SIZE = 15
 const ITEM_PAGE_SIZE  = 10

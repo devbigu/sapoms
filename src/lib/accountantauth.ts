@@ -1,13 +1,11 @@
-// Lightweight auth helpers for the accountant JWT flow
+// Lightweight auth helpers for the accountant cookie session flow
 
-export const ACCOUNTANT_API =
-  process.env.NEXT_PUBLIC_ACCOUNTANT_API_URL || "/api";
+export const ACCOUNTANT_API = "/api";
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
 export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("accountant_token");
+  return null;
 }
 
 export function clearAccountantSession() {
@@ -27,10 +25,9 @@ export function isTokenExpired(token: string): boolean {
   }
 }
 
-export function isAuthenticated(): boolean {
-  const token = getToken();
-  if (!token) return false;
-  return !isTokenExpired(token);
+export async function isAuthenticated(): Promise<boolean> {
+  const res = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+  return res.ok;
 }
 
 // ── Authenticated fetch wrapper ───────────────────────────────────────────────
@@ -39,12 +36,11 @@ export async function accountantFetch(
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const token = getToken();
   return fetch(`${ACCOUNTANT_API}${path}`, {
     ...options,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });

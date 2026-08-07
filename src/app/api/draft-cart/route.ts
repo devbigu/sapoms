@@ -1,56 +1,73 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
+import { actorFromRequestHeaders, assertDealerScope, jsonValue, text } from "@/lib/postgresDiscountDrafts";
+
+export const runtime = "nodejs";
+
+async function getActor(req: NextRequest) {
+  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
+}
+
+function jsonError(error: any, fallback: string) {
+  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
+}
+
+function mapCart(row: any) {
+  if (!row) return null;
+  return {
+    id: row.id.toString(),
+    _id: row.id.toString(),
+    dealer_id: row.dealerId.toString(),
+    dealerId: row.dealerId.toString(),
+    items: row.items ?? [],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
 
 export async function GET(req: NextRequest) {
-  const dealerId = req.nextUrl.searchParams.get("dealer_id");
-  if (!dealerId)
-    return NextResponse.json({ success: false, message: "dealer_id required" }, { status: 400 });
-
   try {
-    const db    = await getDb();
-    const draft = await db.collection("draftcarts").findOne({ dealer_id: dealerId });
-    if (!draft) return NextResponse.json({ success: true, data: null });
-    return NextResponse.json({ success: true, data: { ...draft, _id: draft._id.toString() } });
-  } catch (e: any) {
-    console.error("[GET /api/draft-cart]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const actor = await getActor(req);
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
+    assertDealerScope(actor, dealerId);
+    const cart = await prisma.draftCart.findUnique({ where: { dealerId } });
+    return NextResponse.json({ success: true, data: mapCart(cart) });
+  } catch (error) {
+    console.error("[GET /api/draft-cart]", error);
+    return jsonError(error, "Failed to load draft cart");
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { dealer_id, items } = await req.json();
-    if (!dealer_id || !Array.isArray(items))
-      return NextResponse.json(
-        { success: false, message: "dealer_id and items array required" },
-        { status: 400 }
-      );
-
-    const db  = await getDb();
-    const now = new Date().toISOString();
-    await db.collection("draftcarts").updateOne(
-      { dealer_id },
-      { $set: { dealer_id, items, updatedAt: now }, $setOnInsert: { createdAt: now } },
-      { upsert: true }
-    );
-    return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("[POST /api/draft-cart]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const actor = await getActor(req);
+    const body = await req.json();
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealer_id || body.dealerId, 80));
+    assertDealerScope(actor, dealerId);
+    if (!Array.isArray(body.items)) return NextResponse.json({ success: false, message: "dealer_id and items array required" }, { status: 400 });
+    const cart = await prisma.draftCart.upsert({
+      where: { dealerId },
+      create: { dealerId, items: jsonValue(body.items) },
+      update: { items: jsonValue(body.items) },
+    });
+    return NextResponse.json({ success: true, data: mapCart(cart) });
+  } catch (error) {
+    console.error("[POST /api/draft-cart]", error);
+    return jsonError(error, "Failed to save draft cart");
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  const dealerId = req.nextUrl.searchParams.get("dealer_id");
-  if (!dealerId)
-    return NextResponse.json({ success: false, message: "dealer_id required" }, { status: 400 });
-
   try {
-    const db = await getDb();
-    await db.collection("draftcarts").deleteOne({ dealer_id: dealerId });
+    const actor = await getActor(req);
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
+    assertDealerScope(actor, dealerId);
+    await prisma.draftCart.deleteMany({ where: { dealerId } });
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("[DELETE /api/draft-cart]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+  } catch (error) {
+    console.error("[DELETE /api/draft-cart]", error);
+    return jsonError(error, "Failed to clear draft cart");
   }
 }

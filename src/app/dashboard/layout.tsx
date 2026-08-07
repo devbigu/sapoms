@@ -82,17 +82,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       : String(user?.staff_roletype ?? "");
 
   const handleLogout = () => {
-    if (role === "accountant") {
-      localStorage.removeItem("accountant_token");
-      localStorage.removeItem("AccountantData");
-      localStorage.removeItem("roletype");
-      router.push("/auth/accountant-login");
-      return;
-    }
-
-    clearAuthStorage(localStorage);
-    window.dispatchEvent(new Event("omsons-auth-changed"));
-    router.push("/auth/login");
+    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).finally(() => {
+      clearAuthStorage(localStorage);
+      window.dispatchEvent(new Event("omsons-auth-changed"));
+      router.push("/auth/login");
+    });
   };
 
   return (

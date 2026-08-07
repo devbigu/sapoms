@@ -1,184 +1,253 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
-import { normalizeDealerStatus, type DealerStatus } from "@/lib/dealerStatus";
-import { fetchStaffAssignedDealerIds, parseOrderActor } from "@/lib/orderScopeServer";
-import walletUtils from "@/lib/wallet";
+import { Prisma, OrderDiscountType, WalletTransactionType } from "@prisma/client";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
 
 export const runtime = "nodejs";
-const PHP_BASE = "https://mirisoft.co.in/sas/dealerapi/api";
-const STATUS_COLLECTION = "dealer_statuses";
 
-function safeText(value: unknown, max = 240) { return String(value ?? "").trim().slice(0, max); }
-function money(value: FormDataEntryValue | null) {
-  const n = Number(String(value ?? "").replace(/,/g, "").trim());
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+class OrderError extends Error {
+  constructor(message: string, public status = 400, public code = "order_error") { super(message); }
 }
-function closeMoney(a: number, b: number) { return Math.abs(a - b) <= 0.02; }
 
-async function getDealerStatusOrDefault(dealerId: string): Promise<DealerStatus> {
-  try {
-    const doc = await (await getDb()).collection(STATUS_COLLECTION).findOne({ dealerId });
-    return doc ? normalizeDealerStatus(doc.status) : "active";
-  } catch (error) {
-    if (isMongoDependencyError(error)) return "active";
-    throw error;
+type ParsedItem = {
+  productname: string;
+  productName: string;
+  catNo: string;
+  quantityPacks: number;
+  packSize: number;
+  totalPieces: number;
+  unitPricePaise: bigint;
+  listPriceTotalPaise: bigint;
+  discountPercent: number;
+  discountAmountPaise: bigint;
+  finalAmountPaise: bigint;
+  remarks: string;
+  productNote: string;
+  priority: boolean;
+  variantId?: bigint;
+  productId?: bigint;
+};
+
+function text(value: unknown, max = 1000) { return String(value ?? "").trim().slice(0, max); }
+function num(value: unknown) { const n = Number(String(value ?? "").replace(/,/g, "").trim()); return Number.isFinite(n) ? n : 0; }
+function paise(value: unknown) { return BigInt(Math.round(num(value) * 100)); }
+function fromPaise(value: bigint) { return Number(value) / 100; }
+function clampPercent(value: unknown) { return Math.min(100, Math.max(0, num(value))); }
+function jsonBigInt(_key: string, value: unknown) { return typeof value === "bigint" ? value.toString() : value; }
+
+function parseProductOrder(form: FormData): Array<Record<string, unknown>> {
+  const raw = text(form.get("productorder"), 2_000_000);
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new OrderError("Order products are malformed.", 422, "invalid_products"); }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new OrderError("At least one order product is required.", 422, "invalid_products");
+  return parsed.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
+}
+
+async function nextOrderNumber(tx: Prisma.TransactionClient) {
+  const year = new Date().getFullYear();
+  const sequence = await tx.orderSequence.upsert({
+    where: { year },
+    create: { year, lastValue: BigInt(1) },
+    update: { lastValue: { increment: BigInt(1) } },
+  });
+  return `OM/${year}/${sequence.lastValue.toString().padStart(4, "0")}`;
+}
+
+async function parseItems(tx: Prisma.TransactionClient, rows: Array<Record<string, unknown>>): Promise<ParsedItem[]> {
+  const items: ParsedItem[] = [];
+  for (const row of rows) {
+    const catNo = text(row.catNo ?? row.variantCode ?? row.productname, 160);
+    const productName = text(row.productName ?? row.productname, 300);
+    const quantityPacks = Math.trunc(num(row.quantityPacks) || (num(row.producQuanity) / Math.max(1, num(row.packSize) || 1)));
+    const submittedPackSize = Math.trunc(num(row.packSize) || 1);
+    if (!catNo || !productName || quantityPacks <= 0 || submittedPackSize <= 0) throw new OrderError("Order product quantity is invalid.", 422, "invalid_quantity");
+
+    const variant = await tx.productVariant.findFirst({
+      where: { active: true, OR: [{ catalogueNumber: catNo }, { sku: catNo }] },
+      include: { product: true },
+    });
+    if (!variant || !variant.product.active) throw new OrderError(`Product ${catNo} is not active in PostgreSQL catalogue.`, 422, "invalid_product");
+
+    const packSize = Number(variant.packSize || submittedPackSize || 1);
+    const totalPieces = quantityPacks * packSize;
+    const unitPricePaise = BigInt(variant.unitPricePaise || BigInt(0));
+    if (unitPricePaise <= BigInt(0)) throw new OrderError(`Product ${catNo} does not have PostgreSQL unit pricing.`, 422, "invalid_price");
+    const listPriceTotalPaise = unitPricePaise * BigInt(totalPieces);
+    const discountPercent = clampPercent(row.discountPercent ?? row.totalDiscountPercent);
+    const discountAmountPaise = BigInt(Math.round(Number(listPriceTotalPaise) * (discountPercent / 100)));
+    const finalAmountPaise = listPriceTotalPaise - discountAmountPaise;
+
+    items.push({
+      productname: text(row.productname ?? productName, 300),
+      productName: variant.product.name || productName,
+      catNo: variant.catalogueNumber || catNo,
+      quantityPacks,
+      packSize,
+      totalPieces,
+      unitPricePaise,
+      listPriceTotalPaise,
+      discountPercent,
+      discountAmountPaise,
+      finalAmountPaise,
+      remarks: text(row.remarks, 1500),
+      productNote: text(row.productNote ?? row.product_note ?? row.note, 1500),
+      priority: row.isPriority === true || text(row.priority, 20) === "1" || text(row.isPriority, 20).toLowerCase() === "true",
+      variantId: variant.id,
+      productId: variant.productId,
+    });
   }
+  return items;
 }
 
-function authoritativeNetPayable(form: FormData) {
-  const raw = safeText(form.get("productorder"), 2_000_000);
-  let products: Array<Record<string, unknown>>;
-  try { products = JSON.parse(raw); } catch { throw new walletUtils.WalletError("Order products are malformed.", 422, "invalid_order_amount"); }
-  if (!Array.isArray(products) || products.length === 0) throw new walletUtils.WalletError("Order products are required.", 422, "invalid_order_amount");
-  const gross = products.reduce((sum, row) => {
-    const quantity = Number(row.producQuanity);
-    const price = Number(row.price);
-    if (!(quantity > 0) || !(price >= 0)) throw new walletUtils.WalletError("Order product amount is invalid.", 422, "invalid_order_amount");
-    return sum + quantity * price;
-  }, 0);
-  const subtotal = money(form.get("subtotal"));
-  const base = money(form.get("baseDiscountAmount"));
-  const additional = money(form.get("additionalDiscountAmount"));
-  const submittedNet = money(form.get("finalPayableAmount"));
-  if (![subtotal, base, additional, submittedNet].every(Number.isFinite) || !closeMoney(gross, subtotal)) {
-    throw new walletUtils.WalletError("Order amount verification failed.", 422, "invalid_order_amount");
-  }
-  const additionalType = safeText(form.get("additionalDiscountType"), 20).toLowerCase();
-  if (additional > 0 && !["slab", "custom"].includes(additionalType)) throw new walletUtils.WalletError("Additional discount type is invalid.", 422, "invalid_discount");
-  const calculated = Math.round(Math.max(0, gross - base - additional) * 100) / 100;
-  if (!closeMoney(calculated, submittedNet)) throw new walletUtils.WalletError("Net Payable verification failed.", 422, "invalid_net_payable");
-  return calculated;
-}
-
-async function assertCustomDiscountApproved(db: Awaited<ReturnType<typeof getDb>>, form: FormData, dealerId: string) {
-  if (safeText(form.get("additionalDiscountType"), 20).toLowerCase() !== "custom") return;
-  const ids = safeText(form.get("customDiscountRequestId"), 2000).split(",").map((id) => id.trim()).filter(Boolean);
-  if (!ids.length) throw new walletUtils.WalletError("Approved custom-discount reference is required.", 409, "custom_discount_not_approved");
-  const objectIds = ids.map((id) => { try { return new ObjectId(id); } catch { return null; } }).filter((id): id is ObjectId => Boolean(id));
-  const approved = await db.collection("custom_discount_requests").countDocuments({ _id: { $in: objectIds }, dealerId, status: "approved" });
-  if (approved !== ids.length) throw new walletUtils.WalletError("Custom discount is not approved for this order.", 409, "custom_discount_not_approved");
-}
-
-function extractOrderId(payload: any) {
-  const values = [payload?.order_id, payload?.orderId, payload?.Order_Id, payload?.id, payload?.lastid, payload?.data?.order_id, payload?.data?.orderId, payload?.data?.id];
-  const value = values.find((entry) => safeText(entry));
-  return safeText(value || safeText(payload?.msg || payload?.message).match(/order\s*(?:id|no\.?)?\s*#?\s*(\d+)/i)?.[1], 120);
-}
-
-function phpSucceeded(response: Response, payload: any) {
-  if (!response.ok) return false;
-  const message = safeText(payload?.msg || payload?.message, 500);
-  if (payload?.error) return false;
-  if (/(fail|error|invalid|unable|not\s+saved|not\s+placed)/i.test(message)) return false;
-  // The legacy PHP API commonly returns status:false alongside successful
-  // messages (including "Success") after it has already persisted the order.
-  // Treat an explicit false success flag as failure only when no positive
-  // success message is present; never use the legacy status flag by itself.
-  if (payload?.success === false && !/(success|saved|placed|created|inserted)/i.test(message)) return false;
-  return true;
-}
-
-function orderIdFromRow(row: Record<string, unknown>) {
-  return safeText(row.order_id ?? row.orderId ?? row.Order_Id ?? row.id, 120);
-}
-
-async function fetchRecentDealerOrders(dealerId: string): Promise<Record<string, unknown>[]> {
-  const response = await fetch(
-    `${PHP_BASE}/orderhispegination?page=1&limit=20&search=&id=${encodeURIComponent(dealerId)}`,
-    { cache: "no-store", signal: AbortSignal.timeout(10_000) }
-  );
-  if (!response.ok) return [];
-  const payload = await response.json().catch(() => null);
-  const rows: unknown[] = Array.isArray(payload?.data) ? payload.data : [];
-  return rows.filter((row: unknown): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
-}
-
-async function resolveCreatedOrderId(dealerId: string, payload: any, previousOrderIds: Set<string>) {
-  const direct = extractOrderId(payload);
-  if (direct) return direct;
-
-  // Some successful PHP responses contain only a message. Poll the authoritative
-  // Dealer order history briefly and select the ID that did not exist before POST.
-  for (const delayMs of [0, 250, 600, 1200]) {
-    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
-    const rows = await fetchRecentDealerOrders(dealerId).catch(() => []);
-    const created = rows.map(orderIdFromRow).find((id) => id && !previousOrderIds.has(id));
-    if (created) return created;
-  }
-  return "";
+async function validateCustomDiscounts(tx: Prisma.TransactionClient, form: FormData, dealerId: bigint) {
+  const ids = text(form.get("customDiscountRequestId"), 2000).split(",").map((id) => id.trim()).filter(Boolean);
+  if (text(form.get("additionalDiscountType"), 40).toLowerCase() !== "custom" && ids.length === 0) return [];
+  if (ids.length === 0) throw new OrderError("Approved custom-discount reference is required.", 409, "custom_discount_not_approved");
+  const bigIds = ids.map((id) => BigInt(id));
+  const approved = await tx.customDiscountRequest.findMany({ where: { id: { in: bigIds }, dealerId, status: "APPROVED", orderId: null } });
+  if (approved.length !== bigIds.length) throw new OrderError("Custom discount is not approved for this order.", 409, "custom_discount_not_approved");
+  return approved;
 }
 
 export async function POST(request: NextRequest) {
-  let reservation: { dealerId: string; key: string } | null = null;
   try {
-    const incoming = await request.formData();
-    const dealerId = safeText(incoming.get("id") ?? incoming.get("dealerId") ?? incoming.get("order_dealer"), 120);
-    if (!dealerId) return NextResponse.json({ success: false, message: "dealerId is required" }, { status: 400 });
-    const actor = parseOrderActor({ role: request.headers.get("x-omsons-actor-role"), actorId: request.headers.get("x-omsons-actor-id") });
-    if (!actor) return NextResponse.json({ success: false, message: "Missing order identity." }, { status: 401 });
-    if (actor.role === "accountant") return NextResponse.json({ success: false, message: "This role cannot create orders." }, { status: 403 });
-    if (actor.role === "dealer" && actor.actorId !== dealerId) return NextResponse.json({ success: false, message: "Dealers can only order for their own account." }, { status: 403 });
-    if (actor.role === "staff" && !(await fetchStaffAssignedDealerIds(actor.actorId)).includes(dealerId)) {
-      return NextResponse.json({ success: false, message: "This Dealer is outside your assignment." }, { status: 403 });
-    }
-    if (await getDealerStatusOrDefault(dealerId) === "inactive") return NextResponse.json({ success: false, message: "This dealer account is inactive." }, { status: 403 });
+    const actor = await requireAuth();
+    if (actor.role !== "DEALER" || !actor.dealerId) return NextResponse.json({ success: false, message: "Only dealers can create orders." }, { status: 403 });
 
-    const db = await getDb();
-    const isExcelUpload = incoming.has("exelefile");
-    const idempotencyKey = safeText(request.headers.get("idempotency-key"), 240);
-    const snapshot = await walletUtils.getWalletSnapshot(db, dealerId, { limit: 1 });
-    let netPayable = 0;
-    let previousOrderIds = new Set<string>();
-    if (snapshot.status === "active") {
-      if (isExcelUpload) throw new walletUtils.WalletError("Excel orders are unavailable while this Dealer wallet is active because Net Payable cannot be verified before import.", 422, "unverifiable_order_amount");
-      netPayable = authoritativeNetPayable(incoming);
-      await assertCustomDiscountApproved(db, incoming, dealerId);
-      const reserved = await walletUtils.reserveOrderFunds(db, dealerId, netPayable, { idempotencyKey });
-      if (reserved.duplicate) return NextResponse.json({ success: true, duplicate: true, wallet: reserved });
-      reservation = { dealerId, key: idempotencyKey };
-      previousOrderIds = new Set((await fetchRecentDealerOrders(dealerId).catch(() => [])).map(orderIdFromRow).filter(Boolean));
-    }
+    const form = await request.formData();
+    if (form.has("exelefile")) return NextResponse.json({ success: false, message: "Excel order import has not been migrated to PostgreSQL yet." }, { status: 422 });
+    const idempotencyKey = text(request.headers.get("idempotency-key"), 240) || null;
+    const submittedDraftId = text(form.get("orderDraftId") ?? form.get("order_draft_id") ?? form.get("draftId"), 80);
+    const fromCart = text(form.get("fromCart") ?? form.get("from_cart"), 20).toLowerCase() === "true";
 
-    const forwarded = new FormData();
-    incoming.forEach((value, key) => forwarded.append(key, value));
-    const staffId = safeText(incoming.get("staffid"), 120);
-    const endpoint = isExcelUpload ? `${PHP_BASE}/importdata` : `${PHP_BASE}/PlaceOrderarray?id=${encodeURIComponent(dealerId)}&staffid=${encodeURIComponent(staffId)}`;
-    const phpResponse = await fetch(endpoint, { method: "POST", body: forwarded });
-    const responseText = await phpResponse.text();
-    let payload: any;
-    try { payload = JSON.parse(responseText); } catch { payload = { success: phpResponse.ok, message: responseText || "Request failed" }; }
-    if (!phpSucceeded(phpResponse, payload)) {
-      if (reservation) await walletUtils.releaseOrderReservation(db, reservation.dealerId, reservation.key);
-      reservation = null;
-      return NextResponse.json({ success: false, message: safeText(payload?.msg || payload?.message, 500) || "Order creation failed." }, { status: phpResponse.status || 502 });
-    }
-
-    if (reservation) {
-      const orderId = await resolveCreatedOrderId(dealerId, payload, previousOrderIds);
-      if (!orderId) {
-        await walletUtils.releaseOrderReservation(db, reservation.dealerId, reservation.key);
-        reservation = null;
-        return NextResponse.json({ success: false, message: "The order was created but its order ID was not returned; wallet was not charged. Contact Admin before retrying." }, { status: 502 });
+    const result = await prisma.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        const existing = await tx.order.findUnique({ where: { idempotencyKey } });
+        if (existing) return { order: existing, duplicate: true, wallet: null as null | { used: boolean; balanceAfter: number } };
       }
-      const debit = await walletUtils.finalizeOrderDebit(db, dealerId, reservation.key, { id: orderId, number: safeText(payload?.order_number || payload?.orderNumber, 120) }, {
-        actorId: actor.actorId, actorRole: actor.role, actorName: safeText(request.headers.get("x-omsons-actor-name"), 160),
-      });
-      reservation = null;
-      payload.order_id ||= orderId;
-      payload.success = true;
-      payload.msg ||= payload.message || "Order placed successfully.";
-      payload.wallet = { used: true, transactionId: debit.id, amountConsumed: netPayable, balanceAfter: debit.balanceAfter };
-    }
-    payload.success ??= true;
-    payload.msg ||= payload.message || "Order placed successfully.";
-    return NextResponse.json(payload, { status: phpResponse.status });
+
+      const dealer = await tx.dealerProfile.findUnique({ where: { id: actor.dealerId }, include: { user: true, staffAssignments: { where: { active: true }, take: 1 } } });
+      if (!dealer || dealer.deletedAt || dealer.user.status !== "ACTIVE") throw new OrderError("This dealer account is inactive.", 403, "inactive_dealer");
+
+      const rows = parseProductOrder(form);
+      const items = await parseItems(tx, rows);
+      const grossAmountPaise = items.reduce((sum, item) => sum + item.listPriceTotalPaise, BigInt(0));
+      const baseDiscountPercent = clampPercent(form.get("baseDiscountPercent") ?? form.get("allocatedDiscountPercent") ?? dealer.discountPercent ?? 0);
+      const baseDiscountAmountPaise = BigInt(Math.round(Number(grossAmountPaise) * (baseDiscountPercent / 100)));
+      const postBaseAmountPaise = grossAmountPaise - baseDiscountAmountPaise;
+      const additionalTypeText = text(form.get("additionalDiscountType"), 40).toLowerCase();
+      const additionalDiscountType = additionalTypeText === "custom" ? OrderDiscountType.CUSTOM : additionalTypeText === "slab" ? OrderDiscountType.SLAB : OrderDiscountType.NONE;
+      const slabDiscountPercent = additionalDiscountType === OrderDiscountType.SLAB ? clampPercent(form.get("slabDiscountPercent")) : 0;
+      const slabDiscountAmountPaise = additionalDiscountType === OrderDiscountType.SLAB ? BigInt(Math.round(Number(postBaseAmountPaise) * (slabDiscountPercent / 100))) : BigInt(0);
+      const customDiscountAmountPaise = additionalDiscountType === OrderDiscountType.CUSTOM ? paise(form.get("customDiscountAmount") ?? form.get("additionalDiscountAmount")) : BigInt(0);
+      const additionalDiscountAmountPaise = additionalDiscountType === OrderDiscountType.CUSTOM ? customDiscountAmountPaise : slabDiscountAmountPaise;
+      const couponDiscountPercent = clampPercent(form.get("couponDiscountPercent"));
+      const couponDiscountAmountPaise = BigInt(Math.round(Number(postBaseAmountPaise - additionalDiscountAmountPaise) * (couponDiscountPercent / 100)));
+      const totalDiscountAmountPaise = baseDiscountAmountPaise + additionalDiscountAmountPaise + couponDiscountAmountPaise;
+      const finalPayableAmountPaise = grossAmountPaise > totalDiscountAmountPaise ? grossAmountPaise - totalDiscountAmountPaise : BigInt(0);
+      const totalDiscountPercent = grossAmountPaise > BigInt(0) ? Number(totalDiscountAmountPaise) * 100 / Number(grossAmountPaise) : 0;
+
+      const customRequests = await validateCustomDiscounts(tx, form, dealer.id);
+      const wallet = await tx.dealerWallet.findUnique({ where: { dealerId: dealer.id } });
+      if (wallet?.status === "ACTIVE") {
+        const available = wallet.balancePaise - wallet.reservedPaise;
+        if (available < finalPayableAmountPaise) throw new OrderError(`Insufficient wallet balance. Available: ₹${fromPaise(available).toLocaleString("en-IN")}. Required: ₹${fromPaise(finalPayableAmountPaise).toLocaleString("en-IN")}.`, 409, "insufficient_balance");
+      }
+
+      const orderNumber = await nextOrderNumber(tx);
+      const orderData: any = {
+        orderNumber,
+        dealerId: dealer.id,
+        assignedStaffId: dealer.staffAssignments[0]?.staffId ?? null,
+        createdByUserId: actor.userId,
+        idempotencyKey,
+        shipTo: text(form.get("Dealer_shipto") ?? form.get("shipTo"), 1000),
+        refNo: text(form.get("refno") ?? form.get("refNo"), 160),
+        note: text(form.get("note") ?? form.get("order_note") ?? form.get("Dealer_note"), 1500),
+        grossAmountPaise,
+        allocatedDiscountPercent: new Prisma.Decimal(baseDiscountPercent),
+        couponDiscountPercent: new Prisma.Decimal(couponDiscountPercent),
+        couponCode: text(form.get("coupon_code"), 80) || null,
+        baseDiscountPercent: new Prisma.Decimal(baseDiscountPercent),
+        baseDiscountAmountPaise,
+        postBaseAmountPaise,
+        additionalDiscountType,
+        additionalDiscountAmountPaise,
+        customDiscountAmountPaise,
+        slabDiscountPercent: new Prisma.Decimal(slabDiscountPercent),
+        slabDiscountAmountPaise,
+        totalDiscountPercent: new Prisma.Decimal(totalDiscountPercent),
+        totalDiscountAmountPaise,
+        finalPayableAmountPaise,
+        status: "AWAITING_ACCEPTANCE",
+        acceptanceStatus: "AWAITING",
+        fulfilmentStatus: "PENDING",
+        items: { create: items.map((item) => ({
+          productId: item.productId,
+          productVariantId: item.variantId,
+          productNameSnapshot: item.productName,
+          catalogueNumberSnapshot: item.catNo,
+          skuSnapshot: item.catNo,
+          quantityPacks: item.quantityPacks,
+          packSize: item.packSize,
+          totalPieces: item.totalPieces,
+          unitPricePaise: item.unitPricePaise,
+          listPriceTotalPaise: item.listPriceTotalPaise,
+          discountPercent: new Prisma.Decimal(item.discountPercent),
+          discountAmountPaise: item.discountAmountPaise,
+          finalAmountPaise: item.finalAmountPaise,
+          isPriority: item.priority,
+          remarks: item.remarks || null,
+          productNote: item.productNote || null,
+        })) },
+      };
+      const order = await tx.order.create({ data: orderData });
+
+      if (customRequests.length) await tx.customDiscountRequest.updateMany({ where: { id: { in: customRequests.map((r) => r.id) } }, data: { orderId: order.id } });
+      if (submittedDraftId && /^\\d+$/.test(submittedDraftId)) {
+        await tx.orderDraft.updateMany({ where: { id: BigInt(submittedDraftId), dealerId: dealer.id }, data: { status: "CONVERTED", orderId: order.id } });
+      }
+      if (fromCart) {
+        await tx.draftCart.deleteMany({ where: { dealerId: dealer.id } });
+      }
+      let walletPayload: null | { used: boolean; transactionId: string; amountConsumed: number; balanceAfter: number } = null;
+      if (wallet?.status === "ACTIVE") {
+        const updated = await tx.dealerWallet.update({ where: { id: wallet.id }, data: { balancePaise: { decrement: finalPayableAmountPaise }, totalConsumedPaise: { increment: finalPayableAmountPaise } } });
+        const txRow = await tx.walletTransaction.create({ data: {
+          dealerId: dealer.id,
+          walletId: wallet.id,
+          orderId: order.id,
+          type: WalletTransactionType.ORDER_DEBIT,
+          amountPaise: finalPayableAmountPaise,
+          balanceBeforePaise: wallet.balancePaise,
+          balanceAfterPaise: updated.balancePaise,
+          idempotencyKey: idempotencyKey ? `${idempotencyKey}:wallet` : null,
+          reference: order.orderNumber,
+          note: "Order wallet debit",
+          metadata: { orderNumber: order.orderNumber },
+        } });
+        walletPayload = { used: true, transactionId: txRow.id.toString(), amountConsumed: fromPaise(finalPayableAmountPaise), balanceAfter: fromPaise(updated.balancePaise) };
+      }
+      await tx.authAuditLog.create({ data: { sessionId: actor.sessionId, role: actor.role, eventType: "ORDER_CREATED", metadata: { orderId: order.id.toString(), orderNumber } } });
+      return { order, duplicate: false, wallet: walletPayload };
+    });
+
+    return NextResponse.json(JSON.parse(JSON.stringify({
+      status: true,
+      success: true,
+      duplicate: result.duplicate,
+      msg: "Order placed successfully",
+      message: "Order placed successfully",
+      orderId: result.order.id,
+      order_id: result.order.id,
+      orderNumber: result.order.orderNumber,
+      wallet: result.wallet,
+    }, jsonBigInt)));
   } catch (error: any) {
-    if (reservation) {
-      try { await walletUtils.releaseOrderReservation(await getDb(), reservation.dealerId, reservation.key); } catch {}
-    }
     console.error("dealer-order POST failed", error);
-    const status = Number(error?.status) || (isMongoDependencyError(error) ? 503 : 500);
-    return NextResponse.json({ success: false, code: error?.code || "order_failed", message: status >= 500 ? "Unable to submit order." : error?.message }, { status });
+    const status = Number(error?.status) || 500;
+    return NextResponse.json({ success: false, status: false, code: error?.code || "order_failed", message: status >= 500 ? "Unable to submit order." : error.message }, { status });
   }
 }
+
+

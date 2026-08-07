@@ -189,11 +189,51 @@ test("source files keep the approval workflow on the shared dealer form and guar
   assert.match(listApiSource, /openRequestKey/);
   assert.match(listApiSource, /Only staff can submit dealer approval requests/);
 
-  assert.match(detailApiSource, /approvalLock/);
-  assert.match(detailApiSource, /resolveCreatedDealerId/);
+  assert.match(detailApiSource, /prisma\.\$transaction/);
+  assert.match(detailApiSource, /createAdminDealer\(dealerInput, adminActor, tx\)/);
+  assert.match(detailApiSource, /createdDealerId: createdDealer\.id/);
+  assert.match(detailApiSource, /TransactionIsolationLevel\.Serializable/);
   assert.match(detailApiSource, /Rejection reason is required/);
 
   assert.match(managementSource, /Pending Approval/);
   assert.match(managementSource, /Accepted Dealers/);
   assert.match(managementSource, /Rejected Dealers/);
+});
+
+test("dealer-request acceptance route is PostgreSQL-only", async () => {
+  const [detailApiSource, dealerRepositorySource] = await Promise.all([
+    fs.readFile(path.resolve("src/app/api/dealer-requests/[id]/route.ts"), "utf8"),
+    fs.readFile(path.resolve("src/server/modules/admin/dealers/dealers.repository.ts"), "utf8"),
+  ]);
+  const combined = `${detailApiSource}\n${dealerRepositorySource}`;
+
+  for (const required of [
+    /parseCreateAdminDealerInput/,
+    /createAdminDealer\(dealerInput, adminActor, tx\)/,
+    /tx\.user\.findUnique/,
+    /tx\.dealerProfile\.findUnique/,
+    /hashPassword/,
+    /dealerStaffAssignment\.createMany/,
+    /tx\.dealerRequest\.update/,
+    /createdDealerId: createdDealer\.id/,
+    /reviewedById: actor\.actorId/,
+    /acceptedAt: now/,
+  ]) {
+    assert.match(combined, required);
+  }
+
+  for (const forbidden of [
+    "lookupExistingDealer",
+    "submitDealerDirect",
+    "resolveCreatedDealerId",
+    "dealerpegination",
+    "formdata1",
+    "php-compat",
+    "@/lib/mongodb",
+    "getDb",
+    "mongodb",
+    "MongoDB",
+  ]) {
+    assert.equal(detailApiSource.includes(forbidden), false, forbidden);
+  }
 });

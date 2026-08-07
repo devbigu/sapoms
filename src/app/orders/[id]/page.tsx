@@ -206,7 +206,7 @@ type EffectiveOrderOverlayState = {
   acceptance?: { status?: string; rawStatus?: string; acceptedAt?: string } | null;
 };
 
-const BACKEND = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND = "/api/php-compat";
 const ORDER_DETAILS_FALLBACK_STORAGE_KEY = "omsons.orderDetailsFallback.v1";
 
 type PhpExchangeLog = {

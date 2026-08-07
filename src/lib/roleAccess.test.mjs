@@ -30,6 +30,7 @@ const {
   getAllowedRoles,
   getRoleHome,
   resolveStoredAuth,
+  persistAuthenticatedSession,
 } = moduleShim.exports;
 
 function storage(values = {}) {
@@ -42,6 +43,9 @@ function storage(values = {}) {
     removeItem(key) {
       this.removed.push(key);
       map.delete(key);
+    },
+    setItem(key, value) {
+      map.set(key, String(value));
     },
   };
 }
@@ -88,4 +92,12 @@ assert.equal(getRoleHome("staff"), "/dashboard/staff");
 assert.equal(getRoleHome("dealer"), "/home");
 assert.equal(getRoleHome("accountant"), "/dashboard/accountant");
 
+const persistedStorage = storage();
+const persisted = persistAuthenticatedSession(persistedStorage, { admin_id: "1", name: "Admin", email: "admin@admin", role: "admin" });
+assert.equal(persisted.role, "admin");
+assert.equal(persistedStorage.getItem("status"), "true");
+assert.equal(persistedStorage.getItem("roletype"), "3");
+assert.equal(JSON.parse(persistedStorage.getItem("UserData")).role, "admin");
+assert.equal(JSON.parse(persistedStorage.getItem("AdminData")).email, "admin@admin");
+assert.equal(persistedStorage.getItem("accountant_token"), null, "frontend auth sync does not store JWTs");
 console.log("roleAccess policy tests passed");

@@ -1,79 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
+import { actorFromRequestHeaders, assertDealerScope, dealerExists, draftSnapshot, jsonValue, mapDraft, text } from "@/lib/postgresDiscountDrafts";
 
-const dealerDraftQuery = (dealerId: string) => ({ dealer_id: dealerId });
+export const runtime = "nodejs";
 
-function toDoc(doc: any): object {
-  return {
-    ...doc,
-    id:         doc._id.toString(),
-    _id:        undefined,
-    created_at: doc.createdAt,
-    updated_at: doc.updatedAt,
-  };
+async function getActor(req: NextRequest) {
+  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
 }
 
-// GET /api/drafts?dealer_id=<id>  — list all drafts (newest first)
-// GET /api/drafts?dealer_id=<id>&count=1  — just the count
+function jsonError(error: any, fallback: string) {
+  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
+}
+
 export async function GET(req: NextRequest) {
-  const dealerId = req.nextUrl.searchParams.get("dealer_id");
-  if (!dealerId)
-    return NextResponse.json({ success: false, message: "dealer_id required" }, { status: 400 });
-
   try {
-    const db = await getDb();
-
+    const actor = await getActor(req);
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
+    assertDealerScope(actor, dealerId);
     if (req.nextUrl.searchParams.get("count") === "1") {
-      const count = await db.collection("order_drafts").countDocuments(dealerDraftQuery(dealerId));
+      const count = await prisma.orderDraft.count({ where: { dealerId, status: "ACTIVE" } });
       return NextResponse.json({ success: true, count });
     }
-
-    const docs = await db
-      .collection("order_drafts")
-      .find(dealerDraftQuery(dealerId))
-      .sort({ updatedAt: -1 })
-      .toArray();
-
-    return NextResponse.json({ success: true, data: docs.map(toDoc) });
-  } catch (e: any) {
-    console.error("[GET /api/drafts]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const rows = await prisma.orderDraft.findMany({ where: { dealerId, status: "ACTIVE" }, orderBy: { updatedAt: "desc" } });
+    return NextResponse.json({ success: true, data: rows.map(mapDraft) });
+  } catch (error) {
+    console.error("[GET /api/drafts]", error);
+    return jsonError(error, "Failed to load drafts");
   }
 }
 
-// POST /api/drafts  — create a new named draft
 export async function POST(req: NextRequest) {
   try {
+    const actor = await getActor(req);
     const body = await req.json();
-    const { dealer_id, name, rows, shipto, refno, order_note, coupon_code, coupon_pct, approval_state } = body;
-
-    if (!dealer_id || !name || !Array.isArray(rows))
-      return NextResponse.json(
-        { success: false, message: "dealer_id, name, and rows are required" },
-        { status: 400 }
-      );
-
-    const now = new Date().toISOString();
-    const db  = await getDb();
-
-    const result = await db.collection("order_drafts").insertOne({
-      dealer_id,
-      name,
-      rows,
-      shipto:      shipto      ?? null,
-      refno:       refno       ?? null,
-      order_note:  order_note  ?? null,
-      coupon_code: coupon_code ?? null,
-      coupon_pct:  coupon_pct  ?? null,
-      approval_state: approval_state ?? null,
-      createdAt: now,
-      updatedAt: now,
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealer_id || body.dealerId, 80));
+    assertDealerScope(actor, dealerId);
+    await dealerExists(dealerId);
+    if (!text(body.name, 160) || !Array.isArray(body.rows)) return NextResponse.json({ success: false, message: "dealer_id, name, and rows are required" }, { status: 400 });
+    const created = await prisma.orderDraft.create({
+      data: {
+        dealerId,
+        name: text(body.name, 160),
+        snapshot: jsonValue(draftSnapshot(body)),
+        approvalState: body.approval_state === undefined ? undefined : jsonValue(body.approval_state),
+      },
     });
-
-    const created = await db.collection("order_drafts").findOne({ _id: result.insertedId });
-    return NextResponse.json({ success: true, data: toDoc(created!) }, { status: 201 });
-  } catch (e: any) {
-    console.error("[POST /api/drafts]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    return NextResponse.json({ success: true, data: mapDraft(created) }, { status: 201 });
+  } catch (error) {
+    console.error("[POST /api/drafts]", error);
+    return jsonError(error, "Failed to create draft");
   }
 }

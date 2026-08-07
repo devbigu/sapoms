@@ -1,5 +1,7 @@
 export const MIN_DEALER_CODE = 1000;
 export const MAX_DEALER_CODE = 9999;
+export const DEALER_CODE_WIDTH = 4;
+export const RESERVED_DEALER_REQUEST_STATUSES = ["pending"] as const;
 
 export function normalizeDealerCode(value: unknown) {
   return typeof value === "string" || typeof value === "number"
@@ -9,6 +11,11 @@ export function normalizeDealerCode(value: unknown) {
 
 export function isFourDigitDealerCode(value: unknown) {
   return /^\d{4}$/.test(normalizeDealerCode(value));
+}
+
+export function parseFourDigitDealerCode(value: unknown) {
+  const code = normalizeDealerCode(value);
+  return isFourDigitDealerCode(code) ? Number(code) : null;
 }
 
 export function collectDealerCodes(rows: unknown[]) {
@@ -30,20 +37,20 @@ export function generateUniqueFourDigitDealerCode(
   existingCodes: Iterable<unknown>,
   random = Math.random,
 ) {
-  const existing = new Set(Array.from(existingCodes, normalizeDealerCode).filter(Boolean));
-  const range = MAX_DEALER_CODE - MIN_DEALER_CODE + 1;
+  void random;
+  return generateNextFourDigitDealerCode(existingCodes);
+}
 
-  if (existing.size >= range) return "";
+export function generateNextFourDigitDealerCode(existingCodes: Iterable<unknown>) {
+  let highest: number | null = null;
 
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const code = String(MIN_DEALER_CODE + Math.floor(random() * range));
-    if (!existing.has(code)) return code;
+  for (const value of existingCodes) {
+    const numeric = parseFourDigitDealerCode(value);
+    if (numeric === null) continue;
+    highest = highest === null ? numeric : Math.max(highest, numeric);
   }
 
-  for (let code = MIN_DEALER_CODE; code <= MAX_DEALER_CODE; code += 1) {
-    const candidate = String(code);
-    if (!existing.has(candidate)) return candidate;
-  }
-
-  return "";
+  const next = highest === null ? MIN_DEALER_CODE : highest + 1;
+  if (next > MAX_DEALER_CODE) return "";
+  return String(next).padStart(DEALER_CODE_WIDTH, "0");
 }

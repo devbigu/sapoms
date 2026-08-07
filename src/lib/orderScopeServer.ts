@@ -1,6 +1,6 @@
 import { filterOrdersForActor, getAssignedDealerIds } from "@/lib/staffOrderScope.js";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 const ASSIGNMENT_CACHE_TTL_MS = 60_000;
 
 type AssignmentCacheEntry = {

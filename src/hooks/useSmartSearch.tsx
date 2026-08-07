@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-const BASE_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BASE_URL = "/api/php-compat";
 
 type Role = "admin" | "dealer" | "staff" | "accountant";
 

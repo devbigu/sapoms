@@ -1,0 +1,1 @@
+export { parseAdminPagination as parseAdminAccountantListInput } from "@/server/admin/admin-pagination";

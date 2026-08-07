@@ -19,7 +19,7 @@ import { downloadOrderInvoice } from '@/lib/invoicegenerator'
 import { resolveOrderAmounts } from '@/lib/orderAmounts'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const BACKEND_URL = 'https://mirisoft.co.in/sas/dealerapi/api'
+const BACKEND_URL = '/api/php-compat'
 const YEAR = new Date().getFullYear()
 const TODAY = moment().startOf('day')
 const ORDERS_PAGE_SIZE = 20

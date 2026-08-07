@@ -1,112 +1,77 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
+import { actorFromRequestHeaders, assertDealerScope, draftSnapshot, jsonValue, mapDraft, text } from "@/lib/postgresDiscountDrafts";
 
-function toObjectId(id: string) {
-  try { return new ObjectId(id); } catch { return null; }
+export const runtime = "nodejs";
+
+async function getActor(req: NextRequest) {
+  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
 }
 
-function toDoc(doc: any): object {
-  return {
-    ...doc,
-    id:         doc._id.toString(),
-    _id:        undefined,
-    created_at: doc.createdAt,
-    updated_at: doc.updatedAt,
-  };
+function jsonError(error: any, fallback: string) {
+  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
 }
 
-// GET /api/drafts/[id]?dealer_id=<id>
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id }   = await params;
-  const dealerId = req.nextUrl.searchParams.get("dealer_id");
-  const oid      = toObjectId(id);
+async function scopedDraft(id: string, dealerId: bigint) {
+  if (!/^\d+$/.test(id)) return null;
+  return prisma.orderDraft.findFirst({ where: { id: BigInt(id), dealerId, status: "ACTIVE" } });
+}
 
-  if (!oid || !dealerId)
-    return NextResponse.json({ success: false, message: "Invalid id or missing dealer_id" }, { status: 400 });
-
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const db  = await getDb();
-    const doc = await db.collection("order_drafts").findOne({ _id: oid, dealer_id: dealerId });
-    if (!doc) return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
-    return NextResponse.json({ success: true, data: toDoc(doc) });
-  } catch (e: any) {
-    console.error("[GET /api/drafts/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const { id } = await params;
+    const actor = await getActor(req);
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
+    assertDealerScope(actor, dealerId);
+    const draft = await scopedDraft(id, dealerId);
+    if (!draft) return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
+    return NextResponse.json({ success: true, data: mapDraft(draft) });
+  } catch (error) {
+    console.error("[GET /api/drafts/[id]]", error);
+    return jsonError(error, "Failed to load draft");
   }
 }
 
-// PUT /api/drafts/[id]  — update fields (dealer_id in body for ownership check)
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const oid    = toObjectId(id);
-  if (!oid)
-    return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
+    const actor = await getActor(req);
     const body = await req.json();
-    const { dealer_id, name, rows, shipto, refno, order_note, coupon_code, coupon_pct, approval_state, source, source_request_id } = body;
-
-    if (!dealer_id)
-      return NextResponse.json({ success: false, message: "dealer_id required" }, { status: 400 });
-
-    const set: Record<string, any> = { updatedAt: new Date().toISOString() };
-    if (name        !== undefined) set.name        = name;
-    if (rows        !== undefined) set.rows        = rows;
-    if (shipto      !== undefined) set.shipto      = shipto;
-    if (refno       !== undefined) set.refno       = refno;
-    if (order_note  !== undefined) set.order_note  = order_note;
-    if (coupon_code !== undefined) set.coupon_code = coupon_code;
-    if (coupon_pct  !== undefined) set.coupon_pct  = coupon_pct;
-    if (approval_state !== undefined) set.approval_state = approval_state;
-    if (source !== undefined) set.source = source;
-    if (source_request_id !== undefined) set.source_request_id = source_request_id;
-
-    const db     = await getDb();
-    const result = await db
-      .collection("order_drafts")
-      .findOneAndUpdate(
-        { _id: oid, dealer_id },
-        { $set: set },
-        { returnDocument: "after" }
-      );
-
-    if (!result)
-      return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
-
-    return NextResponse.json({ success: true, data: toDoc(result) });
-  } catch (e: any) {
-    console.error("[PUT /api/drafts/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealer_id || body.dealerId, 80));
+    assertDealerScope(actor, dealerId);
+    const existing = await scopedDraft(id, dealerId);
+    if (!existing) return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
+    const currentSnapshot = existing.snapshot && typeof existing.snapshot === "object" ? existing.snapshot as Record<string, unknown> : {};
+    const merged = draftSnapshot({ ...currentSnapshot, ...body });
+    const updated = await prisma.orderDraft.update({
+      where: { id: existing.id },
+      data: {
+        ...(body.name !== undefined ? { name: text(body.name, 160) } : {}),
+        snapshot: jsonValue(merged),
+        ...(body.approval_state !== undefined ? { approvalState: jsonValue(body.approval_state) } : {}),
+      },
+    });
+    return NextResponse.json({ success: true, data: mapDraft(updated) });
+  } catch (error) {
+    console.error("[PUT /api/drafts/[id]]", error);
+    return jsonError(error, "Failed to update draft");
   }
 }
 
-// DELETE /api/drafts/[id]?dealer_id=<id>
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id }   = await params;
-  const dealerId = req.nextUrl.searchParams.get("dealer_id");
-  const oid      = toObjectId(id);
-
-  if (!oid || !dealerId)
-    return NextResponse.json({ success: false, message: "Invalid id or missing dealer_id" }, { status: 400 });
-
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const db     = await getDb();
-    const result = await db.collection("order_drafts").deleteOne({ _id: oid, dealer_id: dealerId });
-    if (result.deletedCount === 0)
-      return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
+    const { id } = await params;
+    const actor = await getActor(req);
+    const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
+    assertDealerScope(actor, dealerId);
+    const existing = await scopedDraft(id, dealerId);
+    if (!existing) return NextResponse.json({ success: false, message: "Draft not found" }, { status: 404 });
+    await prisma.orderDraft.update({ where: { id: existing.id }, data: { status: "CANCELLED" } });
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("[DELETE /api/drafts/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+  } catch (error) {
+    console.error("[DELETE /api/drafts/[id]]", error);
+    return jsonError(error, "Failed to delete draft");
   }
 }

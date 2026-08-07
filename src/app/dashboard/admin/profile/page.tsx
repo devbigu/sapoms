@@ -5,14 +5,13 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 import { Save, Upload } from "lucide-react";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const ADMIN_PROFILE_URL = "/api/admin/profile";
 
 type AdminSession = {
   ADMIN_ID?: string;
   ADMIN_NAME?: string;
   ADMIN_EMAIL?: string;
   ADMIN_PHONE?: string;
-  ADMIN_PASSWORD?: string;
   id?: string;
   admin_id?: string;
   name?: string;
@@ -20,10 +19,6 @@ type AdminSession = {
   ADMIN_IMAGE?: string;
   image?: string;
 };
-
-function getAdminId(admin: AdminSession | null) {
-  return String(admin?.ADMIN_ID || admin?.admin_id || admin?.id || "");
-}
 
 function readAdminSession(): AdminSession | null {
   if (typeof window === "undefined") return null;
@@ -70,37 +65,28 @@ function Field({
 
 export default function AdminProfilePage() {
   const router = useRouter();
-  const [adminId, setAdminId] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [image, setImage] = useState<File | null>(null);
 
   useEffect(() => {
     const admin = readAdminSession();
-    const id = getAdminId(admin);
-    if (!id) {
-      router.push("/auth/login");
-      return;
-    }
-    setAdminId(id);
 
     const loadAdmin = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`${BACKEND_URL}/admininfo?id=${encodeURIComponent(id)}`);
+        const response = await fetch(ADMIN_PROFILE_URL, { credentials: "include" });
         const json = await response.json();
         // Prefer session/localStorage values first so recent client-side updates show immediately
         const data = admin || json.data || {};
         setName(data.ADMIN_NAME || data.name || "");
         setPhone(data.ADMIN_PHONE || "");
         setEmail(data.ADMIN_EMAIL || data.email || "");
-        setPassword(data.ADMIN_PASSWORD || "");
       } catch {
         setToast({ text: "Failed to load admin profile", type: "error" });
       } finally {
@@ -119,18 +105,9 @@ export default function AdminProfilePage() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!adminId) return;
-
     setIsSaving(true);
     try {
-      const formData = new FormData();
-      formData.append("ADMIN_NAME", name);
-      formData.append("ADMIN_EMAIL", email);
-      formData.append("ADMIN_PHONE", phone);
-      formData.append("ADMIN_PASSWORD", password);
-      if (image) formData.append("ADMIN_IMAGE", image);
-
-      const response = await axios.post(`${BACKEND_URL}/updateadmin?id=${encodeURIComponent(adminId)}`, formData);
+      const response = await axios.patch(ADMIN_PROFILE_URL, { name, email, phone }, { withCredentials: true });
       const payload = response.data || {};
       const previous = readAdminSession() || {};
       const payloadData = payload?.data || {};
@@ -138,11 +115,11 @@ export default function AdminProfilePage() {
       const updated = {
         ...previous,
         ...payloadData,
-        ADMIN_ID: adminId,
+
         ADMIN_NAME: name,
         ADMIN_EMAIL: email,
         ADMIN_PHONE: phone,
-        ADMIN_PASSWORD: password,
+
         name: payloadData.name || previous.name || name,
         email: payloadData.email || previous.email || email,
         image: payloadData.ADMIN_IMAGE || payloadData.image || previous.image || previous.ADMIN_IMAGE || undefined,
@@ -195,7 +172,6 @@ export default function AdminProfilePage() {
               <Field label="Name" value={name} onChange={setName} />
               <Field label="Email" value={email} onChange={setEmail} type="email" />
               <Field label="Phone Number" value={phone} onChange={setPhone} type="tel" />
-              <Field label="Password" value={password} onChange={setPassword} type="password" />
             </div>
           </section>
 

@@ -94,10 +94,7 @@ export type DealerCandidate = {
 };
 
 const DEALER_REQUEST_COLLECTION = "dealer_approval_requests";
-const PHP_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  "https://mirisoft.co.in/sas/dealerapi"
-).replace(/\/+$/, "");
+const PHP_BASE_URL = "/api/php-compat-root";
 
 let dealerRequestIndexesPromise: Promise<void> | null = null;
 

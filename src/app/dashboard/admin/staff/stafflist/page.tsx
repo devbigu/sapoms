@@ -24,7 +24,7 @@ type StaffResponse = {
 }
 
 const SHIMMER = "animate-pulse bg-gray-200 rounded"
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const ADMIN_STAFF_URL = "/api/admin/staff"
 const ITEMS_PER_PAGE = 10
 const getStaffEditRoute = (staffId: string) => `/dashboard/admin/staff/${encodeURIComponent(staffId)}`
 
@@ -92,13 +92,13 @@ export default function StaffListPage() {
       // If user is searching, use normal paginated endpoint.
       if (search) {
         const res = await axios.get(
-          `${BACKEND_URL}/staffpegination?page=${page}&limit=${ITEMS_PER_PAGE}&search=${search}`
+          `${ADMIN_STAFF_URL}?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`
         )
         return res.data
       }
 
       // No search -> fetch all pages from server and combine results so UI can display full list.
-      const first = await axios.get(`${BACKEND_URL}/staffpegination?page=1&limit=${ITEMS_PER_PAGE}&search=`)
+      const first = await axios.get(`${ADMIN_STAFF_URL}?page=1&limit=${ITEMS_PER_PAGE}&search=`, { withCredentials: true })
       const firstRaw = first.data || {}
       const firstData: StaffResponse = {
         data: firstRaw.data || [],
@@ -115,7 +115,7 @@ export default function StaffListPage() {
       if (lastPage > 1) {
         const requests: Promise<any>[] = []
         for (let p = 2; p <= lastPage; p++) {
-          requests.push(axios.get(`${BACKEND_URL}/staffpegination?page=${p}&limit=${ITEMS_PER_PAGE}&search=`))
+          requests.push(axios.get(`${ADMIN_STAFF_URL}?page=${p}&limit=${ITEMS_PER_PAGE}&search=`, { withCredentials: true }))
         }
         const pages = await Promise.all(requests)
         for (const r of pages) {
@@ -148,7 +148,7 @@ export default function StaffListPage() {
       queryKey: ['stafflist', page + 1, search],
       queryFn: async () => {
         const res = await axios.get(
-          `${BACKEND_URL}/staffpegination?page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${search}`
+          `${ADMIN_STAFF_URL}?page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`
         )
         return res.data
       },
@@ -166,13 +166,7 @@ export default function StaffListPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const formData = new FormData()
-      formData.append("id", id)
-      formData.append("tbl", "staff_tbl")
-      formData.append("field", "staff_id")
-      const res = await axios.post(`${BACKEND_URL}/delete`, formData)
-      setToastMsg({ text: res.data.msg || "Staff deleted", type: 'success' })
-      refetch()
+      setToastMsg({ text: "Staff deletion is not available in Stage 3", type: 'error' })
     } catch {
       setToastMsg({ text: "Failed to delete staff", type: 'error' })
     } finally {

@@ -6,7 +6,7 @@ import {
   Trophy, Star, Users, X, Check,
 } from "lucide-react";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const ADMIN_DEALERS_URL = "/api/admin/dealers";
 
 type Dealer = {
   Dealer_Id: string;
@@ -166,7 +166,7 @@ export default function RewardsPage() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
     try {
-      const res  = await fetch(`${BACKEND_URL}/dealerlist`);
+      const res  = await fetch(`${ADMIN_DEALERS_URL}?page=1&limit=100`, { credentials: "include" });
       const json = await res.json();
       const list: Dealer[] = (json.data || json || []).map((d: Dealer) => ({
         ...d,

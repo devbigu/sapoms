@@ -7,7 +7,7 @@ import {
   withDisplayOrderAmounts,
 } from "@/lib/orderAmounts";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 const CACHE_ID = "collective_ledger_snapshot:all-orders-v1";
 const CACHE_TTL_MS = 60 * 1000;
 const FETCH_TIMEOUT_MS = Number(process.env.LEDGER_FETCH_TIMEOUT_MS ?? 30_000);

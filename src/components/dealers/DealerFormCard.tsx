@@ -13,10 +13,7 @@ import {
   type StaffMember,
 } from "@/lib/dealerForm";
 
-const API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL ??
-  "https://mirisoft.co.in/sas/dealerapi"
-).replace(/\/+$/, "");
+const ADMIN_STAFF_URL = "/api/admin/staff";
 
 type DealerFormMode = "admin-create" | "staff-submit" | "admin-review" | "staff-resubmit";
 
@@ -108,8 +105,6 @@ export default function DealerFormCard({
   const [staffLoading, setStaffLoading] = useState(true);
   const [staffError, setStaffError] = useState("");
   const [inlineError, setInlineError] = useState("");
-  const [dealerCodeLoading, setDealerCodeLoading] = useState(false);
-  const [dealerCodeError, setDealerCodeError] = useState("");
   const [formData, setFormData] = useState<DealerFormValues>(() => toFormValues(initialSnapshot));
   const [selectedStaff, setSelectedStaff] = useState<string[]>(() => initialSnapshot?.assignedStaffIds ?? []);
 
@@ -120,7 +115,7 @@ export default function DealerFormCard({
       setStaffLoading(true);
       setStaffError("");
       try {
-        const response = await fetch(`${API_BASE}/api/staffassign`, { cache: "no-store" });
+        const response = await fetch(`${ADMIN_STAFF_URL}?page=1&limit=100`, { cache: "no-store", credentials: "include" });
         if (!response.ok) {
           throw new Error(`Failed to load staff list (${response.status})`);
         }
@@ -152,41 +147,6 @@ export default function DealerFormCard({
     };
   }, []);
 
-  useEffect(() => {
-    const shouldGenerateCode = (mode === "admin-create" || mode === "staff-submit") && !initialSnapshot?.dealerCode;
-    if (!shouldGenerateCode) return;
-
-    let active = true;
-    queueMicrotask(() => {
-      if (!active) return;
-      setDealerCodeLoading(true);
-      setDealerCodeError("");
-
-      fetch("/api/dealer-code", { cache: "no-store" })
-        .then(async (response) => {
-          const json = await response.json();
-          if (!response.ok || !json.success || !json.dealerCode) {
-            throw new Error(json.message ?? "Failed to generate dealer code");
-          }
-          return String(json.dealerCode);
-        })
-        .then((dealerCode) => {
-          if (!active) return;
-          setFormData((prev) => ({ ...prev, dealerCode }));
-        })
-        .catch((error) => {
-          if (!active) return;
-          setDealerCodeError(error instanceof Error ? error.message : "Failed to generate dealer code.");
-        })
-        .finally(() => {
-          if (active) setDealerCodeLoading(false);
-        });
-    });
-
-    return () => {
-      active = false;
-    };
-  }, [initialSnapshot?.dealerCode, mode]);
 
   const copy = useMemo(() => getModeCopy(mode), [mode]);
 
@@ -285,11 +245,6 @@ export default function DealerFormCard({
           </div>
         ) : null}
 
-        {dealerCodeError ? (
-          <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            {dealerCodeError}
-          </div>
-        ) : null}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6">
           <Section title="Basic information">
@@ -345,10 +300,9 @@ export default function DealerFormCard({
                 <input
                   name="dealerCode"
                   type="text"
-                  value={dealerCodeLoading ? "Generating..." : formData.dealerCode}
+                  value={formData.dealerCode}
                   onChange={handleInputChange}
-                  placeholder="Auto generated"
-                  readOnly
+                  placeholder="Dealer code"
                   required
                 />
               </Field>
@@ -397,16 +351,16 @@ export default function DealerFormCard({
           <div className="flex flex-wrap gap-3 border-t border-gray-100 pt-4">
             <button
               type="submit"
-              disabled={isSubmitting || isSecondarySubmitting || dealerCodeLoading}
+              disabled={isSubmitting || isSecondarySubmitting}
               className="rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-400"
             >
-              {dealerCodeLoading ? "Generating code..." : isSubmitting ? copy.submittingLabel : copy.submitLabel}
+              {isSubmitting ? copy.submittingLabel : copy.submitLabel}
             </button>
             {secondaryAction ? (
               <button
                 type="button"
                 onClick={handleSecondaryAction}
-                disabled={isSubmitting || isSecondarySubmitting || dealerCodeLoading}
+                disabled={isSubmitting || isSecondarySubmitting}
                 className="rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-400"
               >
                 {isSecondarySubmitting ? secondaryAction.loadingLabel : secondaryAction.label}

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { Package, ArrowLeft, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL = "/api/php-compat"
 
 type ToastState = { text: string; ok: boolean } | null
 

@@ -10,7 +10,6 @@ import { toast, ToastContainer } from "react-toastify";
 import moment from "moment";
 import Select, { components, type FilterOptionOption, type StylesConfig } from "react-select";
 import { useCartStore } from "@/Store/store";
-import { fetchDealerStatus } from "@/lib/dealerStatus";
 import discountUtils from "@/lib/discount";
 import { createIdempotencyKey } from "@/lib/idempotency";
 import {
@@ -44,7 +43,6 @@ import { buildPriorityRemarks } from "@/lib/orderPriority";
 import cataloguePricing from "@/lib/cataloguePricing";
 import {
   buildOrderRemarks as buildLineRemarks,
-  verifyOrderProductNotesPersistence,
 } from "@/lib/orderProductNotes.mjs";
 
 const { calculateStackedDiscount, getDiscountStatusMessage } = discountUtils;
@@ -175,28 +173,6 @@ function payloadAmount(amount: number): string {
   return String(Math.round((amount + Number.EPSILON) * 100) / 100);
 }
 
-const ORDER_DETAILS_FALLBACK_STORAGE_KEY = "omsons.orderDetailsFallback.v1";
-
-function saveLocalOrderDetailsFallback(orderId: string, fallback: Record<string, unknown>) {
-  if (typeof window === "undefined" || !orderId) return;
-  try {
-    const raw = localStorage.getItem(ORDER_DETAILS_FALLBACK_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    const records = parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-    localStorage.setItem(ORDER_DETAILS_FALLBACK_STORAGE_KEY, JSON.stringify({
-      ...records,
-      [orderId]: {
-        ...fallback,
-        orderId,
-        order_id: orderId,
-        savedAt: new Date().toISOString(),
-      },
-    }));
-  } catch {}
-}
-
 function roundRupees(amount: number): number {
   if (!Number.isFinite(amount) || amount <= 0) return 0;
   return Math.round((amount + Number.EPSILON) * 100) / 100;
@@ -308,7 +284,7 @@ const COUPONS: Record<string, number> = {
   "VIP80": 80,
 };
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 
 type PhpExchangeLog = {
   method: "GET" | "POST";
@@ -466,14 +442,7 @@ function AddOrderPageInner() {
   const [arr1, setArr] = useState<ProductRow[]>([emptyRow()]);
 
   const ensureDealerIsActive = async () => {
-    if (!user?.Dealer_Id) {
-      throw new Error("Dealer account is missing.");
-    }
-
-    const dealerStatus = await fetchDealerStatus(String(user.Dealer_Id));
-    if (dealerStatus === "inactive") {
-      throw new Error("This dealer account is inactive. Please contact the administrator.");
-    }
+    // Dealer activity is enforced by /api/dealer-order from the authenticated session.
   };
 
   const syncDraftUrl = (draftId?: string | null) => {
@@ -1622,111 +1591,7 @@ function AddOrderPageInner() {
       .finally(() => setWalletLoading(false));
   }, [user?.Dealer_Id]);
 
-  const saveOrderNoteForHistory = async (orderId: string) => {
-    const note = orderNote.trim();
-    if (!orderId || !note || !user?.Dealer_Id) return;
-    await fetch("/api/order-notes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId,
-        dealerId: user.Dealer_Id,
-        dealerName: user.Dealer_Name,
-        note,
-      }),
-    }).catch(() => { });
-  };
-
-  const saveOrderSummaryOverride = async (orderId: string, items: Array<Record<string, unknown>>) => {
-    if (!orderId || !user?.Dealer_Id) return;
-
-    const approvedDiscountPercent = hasApprovedCustomDiscount
-      ? Number(payloadAmount(Math.max(0, approvedCustomDiscountPercent ?? 0)))
-      : 0;
-    const readableReason = discountPayload.additionalDiscountType === "custom"
-      ? `Approved custom discount applied: Rs. ${discountPayload.customDiscountAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      : discountPayload.additionalDiscountType === "slab" && discountPayload.slabDiscountAmount > 0
-        ? `slab discount applied: ${discountPayload.slabDiscountPercent}% (Rs. ${discountPayload.slabDiscountAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
-        : "frontend_discount_override";
-    const shouldSaveOverride =
-      discountPayload.discountAmount > 0 &&
-      (
-        discountPayload.additionalDiscountType !== null ||
-        discountPayload.couponDiscountPercent > 0 ||
-        approvedDiscountPercent > 0 ||
-        hasApprovedCustomDiscount ||
-        discountPayload.discountPercent > discountPayload.allocatedDiscountPercent
-      );
-
-    if (!shouldSaveOverride) return;
-
-    await fetch("/api/order-summary-overrides", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        orderId,
-        order_id: orderId,
-        dealerId: user.Dealer_Id,
-        order_dealer: user.Dealer_Id,
-        dealerName: user.Dealer_Name,
-        grossAmount: payloadAmount(discountPayload.subtotal),
-        order_amount: payloadAmount(discountPayload.subtotal),
-        discountAmount: payloadAmount(discountPayload.discountAmount),
-        discount_amount: payloadAmount(discountPayload.discountAmount),
-        netPayableAmount: payloadAmount(discountPayload.finalPayableAmount),
-        order_discount: payloadAmount(discountPayload.finalPayableAmount),
-        discountPercent: discountPayload.discountPercent,
-        allocatedDiscountPercent: discountPayload.allocatedDiscountPercent,
-        baseDiscountPercent: discountPayload.baseDiscountPercent,
-        baseDiscountAmount: payloadAmount(discountPayload.baseDiscountAmount),
-        postBaseAmount: payloadAmount(discountPayload.postBaseAmount),
-        additionalDiscountType: discountPayload.additionalDiscountType,
-        additionalDiscountAmount: payloadAmount(discountPayload.additionalDiscountAmount),
-        customDiscountAmount: payloadAmount(discountPayload.customDiscountAmount),
-        slabDiscountPercent: discountPayload.slabDiscountPercent,
-        slabDiscountAmount: payloadAmount(discountPayload.slabDiscountAmount),
-        couponDiscountPercent: discountPayload.couponDiscountPercent,
-        approvedDiscountPercent,
-        items,
-        reason: readableReason,
-      }),
-    }).catch((err) => {
-      console.error("[order-summary-overrides] save failed:", err);
-    });
-  };
-
-  // ── Submit Order ──────────────────────────────────────────────────────────
-  const verifySubmittedProductNotes = async (orderId: string) => {
-    if (!orderId || !user?.Dealer_Id) return;
-
-    const rowsWithNotes = arr1
-      .filter((row) => row.productname && String(row.productNote ?? "").trim())
-      .map((row) => ({
-        productname: row.productname,
-        variantCode: row.variantCode,
-        productNote: row.productNote ?? "",
-      }));
-
-    if (rowsWithNotes.length === 0) return;
-
-    try {
-      const summary = await verifyOrderProductNotesPersistence({
-        fetchImpl: fetch,
-        backendUrl: BACKEND_URL,
-        actualOrderId: orderId,
-        dealerId: String(user.Dealer_Id),
-        submittedRows: rowsWithNotes,
-      });
-
-      if (summary.failed > 0) {
-        console.warn("[order-product-notes] fallback incomplete", { orderId, summary });
-        toast.warn("Order placed, but some product notes could not be verified.", { autoClose: 5000 });
-      }
-    } catch (error) {
-      console.warn("[order-product-notes] verification failed", { orderId, error });
-      toast.warn("Order placed, but product note verification is still pending.", { autoClose: 5000 });
-    }
-  };
+  // New PostgreSQL orders store notes, item notes, and summary totals in /api/dealer-order.
 
   const handleSubmitProductArray = async () => {
     if (isWaitingForApproval) {
@@ -1832,62 +1697,8 @@ function AddOrderPageInner() {
         response: data,
       });
       const placedOrderId = extractOrderIdFromResponse(data) || await getLatestOrderIdForDealer();
-      const rowsUsedForOrder = arr1.filter((row) => row.productname);
-      saveLocalOrderDetailsFallback(placedOrderId, {
-        dealerId: user.Dealer_Id,
-        dealerName: user.Dealer_Name,
-        order_dealer: user.Dealer_Id,
-        Dealer_Name: user.Dealer_Name,
-        Dealer_Id: user.Dealer_Id,
-        Dealer_Email: user.Dealer_Email,
-        Dealer_Number: user.Dealer_Number,
-        Dealer_Address: user.Dealer_Address,
-        Dealer_shipto: user.Dealer_shipto,
-        Dealer_City: user.Dealer_City,
-        Dealer_Pincode: user.Dealer_Pincode,
-        Dealer_Dealercode: user.Dealer_Dealercode,
-        Dealer_Notes: user.Dealer_Notes,
-        gst: user.gst,
-        creditdays: user.creditdays,
-        discount: user.discount,
-        staffname: user.staffname,
-        note: orderNote.trim() || "",
-        order_note: orderNote.trim() || "",
-        grossAmount: payloadAmount(discountPayload.subtotal),
-        order_amount: payloadAmount(discountPayload.subtotal),
-        discountAmount: payloadAmount(discountPayload.discountAmount),
-        order_discount_amount: payloadAmount(discountPayload.discountAmount),
-        netPayableAmount: payloadAmount(discountPayload.finalPayableAmount),
-        order_net_amount: payloadAmount(discountPayload.finalPayableAmount),
-        discountPercent: discountPayload.discountPercent,
-        allocatedDiscountPercent: discountPayload.allocatedDiscountPercent,
-        baseDiscountPercent: discountPayload.baseDiscountPercent,
-        baseDiscountAmount: payloadAmount(discountPayload.baseDiscountAmount),
-        postBaseAmount: payloadAmount(discountPayload.postBaseAmount),
-        additionalDiscountType: discountPayload.additionalDiscountType,
-        additionalDiscountAmount: payloadAmount(discountPayload.additionalDiscountAmount),
-        customDiscountAmount: payloadAmount(discountPayload.customDiscountAmount),
-        slabDiscountPercent: discountPayload.slabDiscountPercent,
-        slabDiscountAmount: payloadAmount(discountPayload.slabDiscountAmount),
-        couponDiscountPercent: discountPayload.couponDiscountPercent,
-        accept_order: "0",
-        del_status: "0",
-        staffid: user.assignedstaff,
-        assignedstaff: user.assignedstaff,
-        items: payload.map((item, index) => ({
-          ...item,
-          productId: item.catNo,
-          productName: item.productName,
-          productNote: rowsUsedForOrder[index]?.productNote ?? "",
-          discountAmount: item.discount,
-          finalPrice: item.afterDiscountPrice,
-        })),
-      });
       await Promise.allSettled([
-        saveOrderNoteForHistory(placedOrderId),
-        saveOrderSummaryOverride(placedOrderId, payload),
         linkCustomDiscountRequestsToOrder(customDiscountSources, placedOrderId),
-        verifySubmittedProductNotes(placedOrderId),
       ]);
       if (placedOrderId) setExpectedOrderNumber(buildExpectedOrderNumber(placedOrderId));
       if (reorderRequest) {

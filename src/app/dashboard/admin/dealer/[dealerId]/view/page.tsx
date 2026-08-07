@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const ADMIN_DEALERS_URL = "/api/admin/dealers"
 const DEALER_LIST_ROUTE = "/dashboard/admin/dealer/DealerList"
 
 function splitCsv(value: unknown) {
@@ -24,11 +24,7 @@ export default function DealerViewPage() {
     if (!dealerId) return
     setIsLoading(true)
     try {
-      const res = await fetch(`${BACKEND_URL}/getdealer?id=${encodeURIComponent(dealerId)}`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'type' }),
-      })
+      const res = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(dealerId)}`, { credentials: "include" })
       const json = await res.json()
       if (json.status) setDealer(json.data || {})
     } catch (err) {

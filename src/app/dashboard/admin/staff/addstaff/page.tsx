@@ -2,9 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import axios from 'axios'
-
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
 
 function InputField({
   label, value, onChange, type = "text", placeholder, required = true
@@ -62,17 +59,7 @@ export default function AddStaffPage() {
     e.preventDefault()
     setIsSaving(true)
     try {
-      const formData = new FormData()
-      formData.append("staff_name", name)
-      formData.append("staff_designation", designation)
-      formData.append("staff_email", email)
-      formData.append("staff_location", location)
-      formData.append("staff_password", password)
-      formData.append("staff_roletype", role)
-
-      const res = await axios.post(`${BACKEND_URL}/staffdata`, formData)
-      showToast(res.data.msg || "Staff added successfully", 'success')
-      resetForm()
+      showToast("Staff creation is not available in Stage 3", 'error')
     } catch {
       showToast("Failed to add staff member", 'error')
     } finally {

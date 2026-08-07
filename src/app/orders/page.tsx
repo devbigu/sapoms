@@ -49,7 +49,7 @@ type OrderSummaryOverride = {
 
 const ORDER_PAGE_SIZE_OPTIONS = [10, 20, 30, 40] as const;
 const DEFAULT_PAGE_SIZE = 10;
-const BACKEND = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND = "/api/php-compat";
 
 type PhpExchangeLog = {
   method: "GET" | "POST";

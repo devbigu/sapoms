@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import axios from 'axios'
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const ADMIN_STAFF_URL = "/api/admin/staff"
 const STAFF_LIST_ROUTE = "/dashboard/admin/staff/stafflist"
 
 function InputField({
@@ -65,11 +65,7 @@ export default function EditStaffPage() {
     const fetchStaff = async () => {
       setIsLoading(true)
       try {
-        const res  = await fetch(`${BACKEND_URL}/getstaff?id=${encodeURIComponent(id)}`, {
-          method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ type: 'type' }),
-        })
+        const res  = await fetch(`${ADMIN_STAFF_URL}/${encodeURIComponent(id)}`, { credentials: "include" })
         const json = await res.json()
         if (json.status) {
           const d = json.data
@@ -102,19 +98,7 @@ export default function EditStaffPage() {
     }
     setIsSaving(true)
     try {
-      const fd = new FormData()
-      fd.append("staff_name",        name)
-      fd.append("staff_designation", designation)
-      fd.append("staff_email",       email)
-      fd.append("staff_location",    location)
-      fd.append("staff_password",    password)
-      fd.append("staff_username",    username)
-      fd.append("staff_roletype",    role)
-      fd.append("staff_id",          resolvedStaffId)
-
-      const res = await axios.post(`${BACKEND_URL}/editstaff`, fd)
-      setToastMsg({ text: res.data.msg || "Staff updated successfully", type: 'success' })
-      setTimeout(() => router.push(STAFF_LIST_ROUTE), 700)
+      setToastMsg({ text: "Staff updates are not available in Stage 3", type: 'error' })
     } catch {
       setToastMsg({ text: "Failed to update staff", type: 'error' })
     } finally {

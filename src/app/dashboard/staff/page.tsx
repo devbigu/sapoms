@@ -31,7 +31,7 @@ import {
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL = "/api/php-compat"
 const year = new Date().getFullYear()
 
 const NAV_ITEMS = [

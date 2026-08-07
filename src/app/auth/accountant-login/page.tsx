@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
+import { persistAuthenticatedSession } from "@/lib/roleAccess"
 
 export default function AccountantLogin() {
   const router = useRouter()
@@ -24,20 +25,21 @@ export default function AccountantLogin() {
     try {
       setLoading(true)
 
-      const res  = await fetch("/api/auth/accountant", {
-        method:  "POST",
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email, password }),
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
       })
       const data = await res.json()
+      const failureMessage = typeof data?.message === "string" ? data.message : "Invalid credentials"
 
-      if (data?.success) {
-        localStorage.setItem("accountant_token", data.token)
-        localStorage.setItem("AccountantData",   JSON.stringify(data.data))
-        localStorage.setItem("roletype",         "accountant")
+      if (res.ok && data?.success) {
+        persistAuthenticatedSession(localStorage, data.data, "accountant")
+        window.dispatchEvent(new Event("omsons-auth-changed"))
         router.push("/dashboard/accountant")
       } else {
-        setError(data?.message || "Login failed")
+        setError(failureMessage)
       }
     } catch {
       setError("Server error. Please try again.")
@@ -86,11 +88,11 @@ export default function AccountantLogin() {
                 <label className="block">
                   <span className="mb-1.5 block text-[12px] font-semibold text-slate-700">Email</span>
                   <input
-                    type="email"
+                    type="text"
                     placeholder="Enter your email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    autoComplete="email"
+                    autoComplete="username"
                     className="h-10 w-full rounded-full border border-slate-200 bg-white px-5 text-[13px] text-slate-900 shadow-sm outline-none transition placeholder:text-slate-300 focus:border-[#5b3ff2] focus:ring-4 focus:ring-[#5b3ff2]/10"
                   />
                 </label>

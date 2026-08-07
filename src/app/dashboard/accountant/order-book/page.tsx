@@ -12,7 +12,7 @@ import { downloadOrderInvoice, type OrderInvoiceData } from "@/lib/invoicegenera
 import { OrderAmountSource, withDisplayOrderAmounts } from "@/lib/orderAmounts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 const YEAR = new Date().getFullYear();
 const PAGE_SIZE = 20;
 const TODAY = moment().startOf("day");

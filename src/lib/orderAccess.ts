@@ -5,7 +5,7 @@ import {
 } from "@/lib/staffOrderScope.js";
 import { parsePhpJsonResponse } from "@/lib/phpJson";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 
 type OrderAccessReason = "available" | "not_found" | "forbidden" | "upstream_unavailable";
 
@@ -96,7 +96,19 @@ function forbiddenResult(): OrderAccess {
   return { visible: false, order: null, reason, message: messageForReason(reason) };
 }
 
+async function findPostgresAccessOrder(id: string): Promise<Record<string, unknown> | null> {
+  try {
+    const module = await import("@/lib/postgresOrders");
+    const order = await module.findPostgresOrderByLookupId(id);
+    return order ? module.mapPostgresOrderToLegacy(order) : null;
+  } catch {
+    return null;
+  }
+}
 function canStaffAccessOrder(order: Record<string, unknown>, options: OrderAccessOptions) {
+  if (order.__source === "postgres") {
+    return splitScopeIds([order.assignedstaff, order.staffid]).includes(safeText(options.actor.actorId));
+  }
   const dealerId = resolveOrderDealerId(order);
   if (!dealerId) return false;
 
@@ -160,6 +172,8 @@ export async function resolveOrderAccess(orderId: unknown, dealerIdOrOptions?: u
   if (!id) return result(null);
   const options = isAccessOptions(dealerIdOrOptions) ? dealerIdOrOptions : null;
   const legacyDealerId = options ? "" : safeText(dealerIdOrOptions);
+  const postgresOrder = await findPostgresAccessOrder(id);
+  if (postgresOrder) return applyActorAccess(postgresOrder, options);
   const params = new URLSearchParams({ page: "1", limit: "50", search: id });
   if (!options && legacyDealerId) params.set("id", legacyDealerId);
   const endpoint = !options && legacyDealerId ? "orderhispegination" : "orderpegination";

@@ -19,7 +19,7 @@ import { getRecentlyViewed, pushRecentlyViewed, type RecentlyViewedItem } from "
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BACKEND = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND = "/api/php-compat";
 const PLACEHOLDER_IMAGE =
   "https://omsonslabs.com/wp-content/uploads/Pycnometers-Class-A-Individual-Work-Certificate-product-image.webp";
 

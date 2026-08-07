@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
       .catch(() => new Set<string>());
     const activeRows = loaded.rows.filter((row) => {
       const orderId = String(row.order_id ?? row.orderId ?? "").trim();
-      return String(row.del_status ?? "").trim() !== "1" && (!orderId || !cancelledOrderIds.has(orderId));
+      return String(row.del_status ?? "").trim() !== "1" && (row.__source === "postgres" || !orderId || !cancelledOrderIds.has(orderId));
     });
     const amountMin = req.nextUrl.searchParams.has("amount_min")
       ? Number(req.nextUrl.searchParams.get("amount_min"))

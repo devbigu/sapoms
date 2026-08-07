@@ -1,0 +1,673 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: npx create-db
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthRole {
+  ADMIN
+  ACCOUNTANT
+  STAFF
+  DEALER
+}
+
+model AuthAuditLog {
+  id            BigInt    @id @default(autoincrement())
+  sessionId     String?   @map("session_id")
+  legacyActorId String?   @map("legacy_actor_id")
+  role          AuthRole?
+  eventType     String    @map("event_type")
+  ipAddress     String?   @map("ip_address")
+  userAgent     String?   @map("user_agent")
+  metadata      Json?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([legacyActorId, createdAt])
+  @@map("auth_audit_logs")
+}
+
+enum UserRole {
+  ADMIN
+  ACCOUNTANT
+  STAFF
+  DEALER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id                 BigInt     @id @default(autoincrement())
+  email              String
+  normalizedEmail    String     @unique @map("normalized_email")
+  username           String?
+  normalizedUsername String?    @unique @map("normalized_username")
+  passwordHash       String     @map("password_hash")
+  role               UserRole
+  status             UserStatus @default(ACTIVE)
+  tokenVersion       Int        @default(1) @map("token_version")
+  lastLoginAt        DateTime?  @map("last_login_at")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
+  deletedAt          DateTime?  @map("deleted_at")
+
+  sessions                 AuthSession[]
+  adminProfile             AdminProfile?
+  accountantProfile        AccountantProfile?
+  staffProfile             StaffProfile?
+  dealerProfile            DealerProfile?
+  createdOrders            Order[]                 @relation("OrderCreatedBy")
+  createdDealers           DealerProfile[]         @relation("DealerCreatedBy")
+  createdDealerAssignments DealerStaffAssignment[] @relation("DealerAssignmentCreatedBy")
+  reviewedCustomDiscounts  CustomDiscountRequest[] @relation("CustomDiscountReviewedBy")
+
+  @@index([role, status])
+  @@map("users")
+}
+
+model ProductCategory {
+  id          BigInt   @id @default(autoincrement())
+  name        String
+  slug        String?  @unique
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  products Product[]
+
+  @@index([name])
+  @@map("product_categories")
+}
+
+model Product {
+  id          BigInt   @id @default(autoincrement())
+  productCode String?  @unique @map("product_code")
+  name        String
+  description String?
+  imageUrl    String?  @map("image_url")
+  categoryId  BigInt?  @map("category_id")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  category ProductCategory? @relation(fields: [categoryId], references: [id])
+  variants ProductVariant[]
+  orderItems OrderItem[]
+
+  @@index([name])
+  @@index([categoryId])
+  @@map("products")
+}
+
+model ProductVariant {
+  id              BigInt   @id @default(autoincrement())
+  productId       BigInt   @map("product_id")
+  sku             String?  @unique
+  catalogueNumber String?  @map("catalogue_number")
+  unitName        String?  @map("unit_name")
+  packSize        Int?     @map("pack_size")
+  unitPricePaise  BigInt   @default(0) @map("unit_price_paise")
+  packPricePaise  BigInt   @default(0) @map("pack_price_paise")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  orderItems OrderItem[]
+
+  @@index([productId])
+  @@index([catalogueNumber])
+  @@map("product_variants")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid())
+  userId           BigInt    @map("user_id")
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  lastUsedAt       DateTime? @map("last_used_at")
+  ipAddress        String?   @map("ip_address")
+  userAgent        String?   @map("user_agent")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("auth_sessions")
+}
+
+model AdminProfile {
+  id          BigInt  @id @default(autoincrement())
+  userId      BigInt  @unique @map("user_id")
+  displayName String  @map("display_name")
+  phone       String?
+  imageUrl    String? @map("image_url")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("admin_profiles")
+}
+
+model AccountantProfile {
+  id          BigInt  @id @default(autoincrement())
+  userId      BigInt  @unique @map("user_id")
+  displayName String  @map("display_name")
+  designation String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("accountant_profiles")
+}
+
+model StaffProfile {
+  id            BigInt  @id @default(autoincrement())
+  userId        BigInt  @unique @map("user_id")
+  displayName   String  @map("display_name")
+  designation   String?
+  location      String?
+  staffRoleType String? @map("staff_role_type")
+
+  user              User                    @relation(fields: [userId], references: [id])
+  assignedOrders    Order[]
+  customDiscountRequests CustomDiscountRequest[]
+  dealerAssignments DealerStaffAssignment[]
+
+  @@map("staff_profiles")
+}
+
+model DealerProfile {
+  id               BigInt    @id @default(autoincrement())
+  userId           BigInt    @unique @map("user_id")
+  dealerCode       String?   @unique @map("dealer_code")
+  businessName     String    @map("business_name")
+  phone            String?
+  city             String?
+  address          String?
+  state            String?
+  pincode          String?
+  gstin            String?
+  discountPercent  Decimal?  @map("discount_percent") @db.Decimal(9, 4)
+  creditDays       Int?      @map("credit_days")
+  creditLimitPaise BigInt?   @map("credit_limit_paise")
+  imageUrl         String?   @map("image_url")
+  createdByUserId  BigInt?   @map("created_by_user_id")
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user             User                    @relation(fields: [userId], references: [id])
+  createdBy        User?                   @relation("DealerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  orders           Order[]
+  wallet           DealerWallet?
+  walletTransactions WalletTransaction[]
+  orderDrafts      OrderDraft[]
+  draftCart        DraftCart?
+  customDiscountRequests CustomDiscountRequest[]
+  staffAssignments DealerStaffAssignment[]
+
+  @@index([deletedAt])
+  @@map("dealer_profiles")
+}
+
+model DealerStaffAssignment {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @map("dealer_id")
+  staffId  BigInt @map("staff_id")
+
+  assignedByUserId BigInt? @map("assigned_by_user_id")
+
+  active Boolean @default(true)
+
+  assignedAt DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  removedAt  DateTime? @map("removed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  staff  StaffProfile  @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  assignedBy User? @relation("DealerAssignmentCreatedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([dealerId, staffId])
+  @@index([dealerId, active])
+  @@index([staffId, active])
+  @@map("dealer_staff_assignments")
+}
+
+enum OrderStatus {
+  DRAFT
+  AWAITING_ACCEPTANCE
+  ACCEPTED
+  DECLINED
+  PROCESSING
+  PARTIALLY_READY
+  READY
+  DISPATCHED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderAcceptanceStatus {
+  AWAITING
+  ACCEPTED
+  DECLINED
+}
+
+enum OrderFulfilmentStatus {
+  PENDING
+  IN_PROCESS
+  PARTIALLY_READY
+  READY
+  DISPATCHED
+  COMPLETED
+}
+
+enum OrderDiscountType {
+  NONE
+  SLAB
+  CUSTOM
+}
+
+enum DiscountRequestScope {
+  ORDER
+  PRODUCT
+}
+
+enum DiscountRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum WalletStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  ORDER_DEBIT
+  REFUND
+  ADJUSTMENT
+}
+
+enum OrderDraftStatus {
+  ACTIVE
+  CONVERTED
+  CANCELLED
+}
+
+model DealerRequest {
+  id                   BigInt   @id @default(autoincrement())
+  requestReference     String?  @unique @map("request_reference")
+  requestIdentityKey   String   @map("request_identity_key")
+  openRequestKey       String?  @unique @map("open_request_key")
+  status               String   @default("pending")
+  dealerName           String   @map("dealer_name")
+  dealerCode           String   @map("dealer_code")
+  city                 String
+  contactEmail         String   @map("contact_email")
+  contactPhone         String   @map("contact_phone")
+  assignedStaffIds     String[] @default([]) @map("assigned_staff_ids")
+  assignedStaffNames   String   @map("assigned_staff_names")
+  submittedById        String   @map("submitted_by_id")
+  submittedByName      String   @map("submitted_by_name")
+  reviewedById         String   @default("") @map("reviewed_by_id")
+  reviewedByName       String   @default("") @map("reviewed_by_name")
+  createdDealerId      String   @default("") @map("created_dealer_id")
+  rejectionReason      String   @default("") @map("rejection_reason")
+  lastRejectionReason  String   @default("") @map("last_rejection_reason")
+  formSnapshot         Json     @map("form_snapshot")
+  approvalLock         Json?    @map("approval_lock")
+  auditTrail           Json     @default("[]") @map("audit_trail")
+  creationAttemptCount Int      @default(0) @map("creation_attempt_count")
+  submittedAt          DateTime @map("submitted_at") @db.Timestamptz(6)
+  acceptedAt           DateTime? @map("accepted_at") @db.Timestamptz(6)
+  rejectedAt           DateTime? @map("rejected_at") @db.Timestamptz(6)
+  reviewedAt           DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  resubmittedAt        DateTime? @map("resubmitted_at") @db.Timestamptz(6)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, updatedAt])
+  @@index([submittedById, status, updatedAt])
+  @@index([dealerName])
+  @@index([dealerCode])
+  @@map("dealer_requests")
+}
+model Order {
+  id BigInt @id @default(autoincrement())
+
+  legacyPhpId String? @unique @map("legacy_php_id")
+  orderNumber String @unique @map("order_number")
+
+  dealerId        BigInt  @map("dealer_id")
+  assignedStaffId BigInt? @map("assigned_staff_id")
+  createdByUserId BigInt? @map("created_by_user_id")
+
+  // Prevent duplicate order submission
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  orderDate DateTime @default(now()) @map("order_date") @db.Timestamptz(6)
+
+  shipTo String? @map("ship_to")
+  refNo  String? @map("ref_no")
+  note   String? @db.Text
+
+  // ── Gross ──────────────────────────────
+  grossAmountPaise BigInt @default(0) @map("gross_amount_paise")
+
+  // ── Base discount ──────────────────────
+  allocatedDiscountPercent Decimal @default(0) @map("allocated_discount_percent") @db.Decimal(7, 4)
+  couponDiscountPercent    Decimal @default(0) @map("coupon_discount_percent") @db.Decimal(7, 4)
+  couponDiscountAmountPaise BigInt @default(0) @map("coupon_discount_amount_paise")
+  couponCode               String? @map("coupon_code")
+
+  baseDiscountPercent Decimal @default(0) @map("base_discount_percent") @db.Decimal(7, 4)
+  baseDiscountAmountPaise BigInt @default(0) @map("base_discount_amount_paise")
+
+  postBaseAmountPaise BigInt @default(0) @map("post_base_amount_paise")
+
+  // ── Additional discount ────────────────
+  additionalDiscountType OrderDiscountType @default(NONE) @map("additional_discount_type")
+
+  additionalDiscountAmountPaise BigInt @default(0) @map("additional_discount_amount_paise")
+
+  customDiscountAmountPaise BigInt @default(0) @map("custom_discount_amount_paise")
+
+  slabDiscountPercent Decimal @default(0) @map("slab_discount_percent") @db.Decimal(7, 4)
+
+  slabDiscountAmountPaise BigInt @default(0) @map("slab_discount_amount_paise")
+
+  // ── Final totals ───────────────────────
+  totalDiscountPercent Decimal @default(0) @map("total_discount_percent") @db.Decimal(7, 4)
+
+  totalDiscountAmountPaise BigInt @default(0) @map("total_discount_amount_paise")
+
+  finalPayableAmountPaise BigInt @default(0) @map("final_payable_amount_paise")
+
+  // ── Status ─────────────────────────────
+  status OrderStatus @default(AWAITING_ACCEPTANCE)
+
+  acceptanceStatus OrderAcceptanceStatus @default(AWAITING) @map("acceptance_status")
+
+  fulfilmentStatus OrderFulfilmentStatus @default(PENDING) @map("fulfilment_status")
+
+  acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz(6)
+  cancelledAt  DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  cancellationReason String? @map("cancellation_reason") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer        DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  assignedStaff StaffProfile? @relation(fields: [assignedStaffId], references: [id], onDelete: SetNull)
+
+  createdBy User? @relation("OrderCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  items OrderItem[]
+
+  discountRequests CustomDiscountRequest[]
+  customDiscountReorderLogs CustomDiscountReorderLog[]
+
+  walletTransactions WalletTransaction[]
+
+  sourceDraft OrderDraft?
+
+  @@index([dealerId, createdAt])
+  @@index([assignedStaffId, createdAt])
+  @@index([status, createdAt])
+  @@index([acceptanceStatus])
+  @@index([fulfilmentStatus])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+model OrderItem {
+  id BigInt @id @default(autoincrement())
+
+  orderId BigInt @map("order_id")
+
+  legacyPhpOrderItemId String? @unique @map("legacy_php_order_item_id")
+  productId        BigInt? @map("product_id")
+  productVariantId BigInt? @map("product_variant_id")
+
+  // Historical snapshot
+  productNameSnapshot     String  @map("product_name_snapshot")
+  catalogueNumberSnapshot String  @map("catalogue_number_snapshot")
+  skuSnapshot             String? @map("sku_snapshot")
+  categorySnapshot        String? @map("category_snapshot")
+
+  quantityPacks Int @map("quantity_packs")
+  packSize      Int @map("pack_size")
+  totalPieces   Int @map("total_pieces")
+
+  unitPricePaise      BigInt @default(0) @map("unit_price_paise")
+  packPricePaise      BigInt @default(0) @map("pack_price_paise")
+  listPriceTotalPaise BigInt @default(0) @map("list_price_total_paise")
+
+  discountPercent Decimal @default(0) @map("discount_percent") @db.Decimal(7, 4)
+
+  discountAmountPaise BigInt @default(0) @map("discount_amount_paise")
+
+  finalAmountPaise BigInt @default(0) @map("final_amount_paise")
+
+  isPriority Boolean @default(false) @map("is_priority")
+
+  remarks     String? @db.Text
+  productNote String? @map("product_note") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Use your actual models
+  product        Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productVariant ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([productVariantId])
+  @@index([catalogueNumberSnapshot])
+  @@map("order_items")
+}
+
+model OrderSequence {
+  year Int @id
+
+  lastValue BigInt @default(0) @map("last_value")
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("order_sequences")
+}
+
+model DealerWallet {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @unique @map("dealer_id")
+  status WalletStatus @default(INACTIVE)
+
+  balancePaise BigInt @default(0) @map("balance_paise")
+  reservedPaise BigInt @default(0) @map("reserved_paise")
+  totalConsumedPaise BigInt @default(0) @map("total_consumed_paise")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  transactions WalletTransaction[]
+
+  @@map("dealer_wallets")
+}
+
+model WalletTransaction {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @map("dealer_id")
+  walletId BigInt @map("wallet_id")
+  orderId BigInt? @map("order_id")
+
+  type WalletTransactionType
+  amountPaise BigInt @map("amount_paise")
+  balanceBeforePaise BigInt @map("balance_before_paise")
+  balanceAfterPaise BigInt @map("balance_after_paise")
+
+  idempotencyKey String? @unique @map("idempotency_key")
+  reference String?
+  note String? @db.Text
+  metadata Json?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  wallet DealerWallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([dealerId, createdAt])
+  @@index([orderId])
+  @@map("wallet_transactions")
+}
+
+model OrderDraft {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @map("dealer_id")
+  orderId BigInt? @unique @map("order_id")
+  status OrderDraftStatus @default(ACTIVE)
+  name String @default("Untitled Draft")
+  snapshot Json?
+  approvalState Json? @map("approval_state")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  discountRequests CustomDiscountRequest[]
+
+  @@index([dealerId, status])
+  @@map("order_drafts")
+}
+
+model DraftCart {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @unique @map("dealer_id")
+  items Json @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+
+  @@map("draft_carts")
+}
+model CustomDiscountRequest {
+  id BigInt @id @default(autoincrement())
+
+  dealerId BigInt @map("dealer_id")
+  staffId  BigInt? @map("staff_id")
+
+  orderId      BigInt? @map("order_id")
+  orderDraftId BigInt? @map("order_draft_id")
+
+  scope DiscountRequestScope
+
+  status DiscountRequestStatus @default(PENDING)
+
+  requestedDiscountPercent Decimal @default(0) @map("requested_discount_percent") @db.Decimal(7, 4)
+
+  currentDiscountPercent Decimal @default(0) @map("current_discount_percent") @db.Decimal(7, 4)
+
+  requestedOrderDiscountPercent Decimal? @map("requested_order_discount_percent") @db.Decimal(7, 4)
+
+  // productKey -> requested %
+  requestedProductDiscounts Json? @map("requested_product_discounts")
+
+  targetProductKey String? @map("target_product_key")
+
+  grossAmountPaise BigInt? @map("gross_amount_paise")
+
+  requestedDiscountAmountPaise BigInt? @map("requested_discount_amount_paise")
+
+  requestedNetPayableAmountPaise BigInt? @map("requested_net_payable_amount_paise")
+
+  orderSignature String? @map("order_signature")
+
+  // Preserve request-time order state
+  orderSnapshot Json? @map("order_snapshot")
+
+  adminNote String? @map("admin_note") @db.Text
+
+  allowReorder Boolean @default(false) @map("allow_reorder")
+
+  reviewedByUserId BigInt? @map("reviewed_by_user_id")
+
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dealer DealerProfile @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  staff  StaffProfile? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  orderDraft OrderDraft? @relation(fields: [orderDraftId], references: [id], onDelete: SetNull)
+
+  reviewedBy User? @relation("CustomDiscountReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  reorderLogs CustomDiscountReorderLog[]
+
+  @@index([dealerId, status])
+  @@index([orderId])
+  @@index([orderDraftId])
+  @@index([status, createdAt])
+  @@map("custom_discount_requests")
+}
+model CustomDiscountReorderLog {
+  id BigInt @id @default(autoincrement())
+
+  requestId BigInt @map("request_id")
+  orderId   BigInt @map("order_id")
+  dealerId  BigInt @map("dealer_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  request CustomDiscountRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  order   Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@index([orderId])
+  @@map("custom_discount_reorder_logs")
+}
+
+
+
+
+
+
+

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
+import { ensurePostgresDealerRequestIndexes, getPostgresDealerRequestCollection, isPostgresDealerRequestDependencyError } from "@/lib/postgresDealerRequests";
+import { findDealerCodeReservationConflict } from "@/server/modules/dealers/dealer-code.service";
 import {
   buildDealerRequestAccessQuery,
   buildDealerRequestCreateDocument,
   buildDealerRequestListSearchQuery,
   buildDealerRequestReference,
-  ensureDealerRequestIndexes,
-  getDealerRequestCollection,
   resolveDealerRequestActor,
   toDealerRequestDetail,
   toDealerRequestListItem,
@@ -26,7 +25,9 @@ function buildResponseError(message: string, status: number) {
 }
 
 function isDuplicateKeyError(error: unknown) {
-  return !!error && typeof error === "object" && "code" in error && (error as { code?: number }).code === 11000;
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = (error as { code?: number | string }).code;
+  return code === 11000 || code === "P2002";
 }
 
 export async function GET(request: NextRequest) {
@@ -62,9 +63,8 @@ export async function GET(request: NextRequest) {
       ? filters[0]
       : { $and: filters.filter((filter) => Object.keys(filter).length > 0) };
 
-    const db = await getDb();
-    await ensureDealerRequestIndexes(db);
-    const collection = getDealerRequestCollection(db);
+    await ensurePostgresDealerRequestIndexes();
+    const collection = getPostgresDealerRequestCollection();
 
     const total = await collection.countDocuments(query);
     const rows = await collection
@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[GET /api/dealer-requests]", error);
-    const status = isMongoDependencyError(error) ? 503 : 500;
+    const status = isPostgresDealerRequestDependencyError(error) ? 503 : 500;
     return buildResponseError(
       status === 503
         ? "Dealer request database is currently unavailable"
@@ -115,10 +115,19 @@ export async function POST(request: NextRequest) {
       return buildResponseError(validationError, 400);
     }
 
+    const codeConflict = await findDealerCodeReservationConflict(snapshot.dealerCode);
+    if (codeConflict) {
+      return buildResponseError(
+        codeConflict === "dealer-profile"
+          ? "Dealer code already exists"
+          : "A pending dealer request already exists for this dealer code",
+        409,
+      );
+    }
+
     const now = new Date().toISOString();
-    const db = await getDb();
-    await ensureDealerRequestIndexes(db);
-    const collection = getDealerRequestCollection(db);
+    await ensurePostgresDealerRequestIndexes();
+    const collection = getPostgresDealerRequestCollection();
 
     const doc = buildDealerRequestCreateDocument({ actor, snapshot, now });
     const existing = await collection.findOne({ openRequestKey: doc.openRequestKey });
@@ -142,7 +151,7 @@ export async function POST(request: NextRequest) {
       return buildResponseError("A pending dealer request already exists for these details", 409);
     }
     console.error("[POST /api/dealer-requests]", error);
-    const status = isMongoDependencyError(error) ? 503 : 500;
+    const status = isPostgresDealerRequestDependencyError(error) ? 503 : 500;
     return buildResponseError(
       status === 503
         ? "Dealer request database is currently unavailable"
@@ -151,3 +160,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+
+

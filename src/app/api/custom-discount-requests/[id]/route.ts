@@ -1,249 +1,146 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
-import { buildDraftApprovalState } from "@/lib/customDiscountRequests";
-import { resolveOrderAccess } from "@/lib/orderAccess";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
+import {
+  actorFromRequestHeaders,
+  assertDealerScope,
+  customDiscountInclude,
+  jsonValue,
+  mapCustomDiscount,
+  mapDraft,
+  text,
+  updateDraftApprovalState,
+} from "@/lib/postgresDiscountDrafts";
 
 export const runtime = "nodejs";
 
-function toObjectId(id: string) {
-  try { return new ObjectId(id); } catch { return null; }
-}
-
-function safeText(value: unknown, max = 1000) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
-function safePositiveNumber(value: unknown, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-function toDoc(doc: any) {
-  return {
-    ...doc,
-    id: doc._id.toString(),
-    _id: undefined,
-  };
-}
-
 const DEFAULT_REJECTION_NOTE = "Please revise the discount percentage and resubmit.";
 
-function buildDraftName(now: string) {
-  return `Disapproved Request: ${new Date(now).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })}`;
+async function getActor(req: NextRequest) {
+  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
 }
 
-function buildDraftRows(products: any[]) {
-  return (Array.isArray(products) ? products : []).slice(0, 100).map((product, index) => {
-    const productname = safeText(product?.productname, 200);
-    const variantCode = safeText(product?.variantCode, 160);
-    const displayName = safeText(product?.displayName, 300);
-
-    return {
-      key: index + 1,
-      productname: productname || variantCode,
-      displayName: displayName || productname || variantCode,
-      variantCode: variantCode || productname,
-      producQuanity: safePositiveNumber(product?.quantity ?? product?.producQuanity, 1),
-      price: safePositiveNumber(product?.price, 0),
-      packSize: safePositiveNumber(product?.packSize, 1),
-      isPriority: !!(product?.priority || product?.isPriority),
-      productNote: safeText(product?.productNote, 500),
-    };
-  });
+function jsonError(error: any, fallback: string) {
+  const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
+  return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
 }
 
-function buildDraftOrderNote(orderNote: unknown, adminNote: string) {
-  const existingNote = safeText(orderNote, 1500);
-  const rejectionNote = adminNote || DEFAULT_REJECTION_NOTE;
-  return [
-    existingNote,
-    "--- ADMIN REJECTION NOTE ---",
-    rejectionNote,
-    "Please update your cart and resubmit.",
-  ].filter(Boolean).join("\n\n");
+function statusValue(value: string) {
+  const status = value.toUpperCase();
+  if (["APPROVED", "REJECTED", "PENDING", "CANCELLED"].includes(status)) return status as "APPROVED" | "REJECTED" | "PENDING" | "CANCELLED";
+  return null;
 }
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const oid = toObjectId(id);
-  if (!oid) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
+async function loadRequest(id: string) {
+  if (!/^\d+$/.test(id)) return null;
+  return prisma.customDiscountRequest.findUnique({ where: { id: BigInt(id) }, include: customDiscountInclude });
+}
 
+function rejectionRows(request: any) {
+  const products = Array.isArray(request.orderSnapshot?.products) ? request.orderSnapshot.products : [];
+  return products.slice(0, 100).map((product: any, index: number) => ({
+    key: index + 1,
+    productname: text(product.productName || product.catalogueNumber, 200),
+    displayName: text(product.productName || product.catalogueNumber, 300),
+    variantCode: text(product.catalogueNumber || product.sku, 160),
+    producQuanity: Number(product.quantity ?? 1),
+    price: Number(product.unitPrice ?? 0),
+    packSize: Number(product.packSize ?? 1),
+    isPriority: !!product.isPriority,
+    productNote: text(product.productNote, 500),
+  }));
+}
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const db = await getDb();
-    const doc = await db.collection("custom_discount_requests").findOne({ _id: oid });
-    if (!doc) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
-    const actorRole = String(req.headers.get("x-omsons-actor-role") ?? "").trim().toLowerCase();
-    if (actorRole === "dealer") {
-      const actorId = String(req.headers.get("x-omsons-actor-id") ?? "").trim();
-      const ownerId = String(doc.dealerId ?? doc.dealer_id ?? "").trim();
-      if (!actorId) return NextResponse.json({ success: false, message: "Missing Dealer identity" }, { status: 401 });
-      if (!ownerId || actorId !== ownerId) {
-        return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
-      }
+    const { id } = await params;
+    const actor = await getActor(req);
+    const row = await loadRequest(id);
+    if (!row) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
+    if (actor?.role === "DEALER") {
+      const actorId = actor.dealerId?.toString() || "";
+      const ownerId = row.dealerId.toString();
+      if (!actorId || actorId !== ownerId) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
     }
-    const linkedOrderId = safeText(doc.orderId || doc.order_id, 120);
-    if (linkedOrderId) {
-      const access = await resolveOrderAccess(linkedOrderId, doc.dealerId);
-      if (!access.visible) return NextResponse.json({ success: false, message: access.reason }, { status: 404 });
-    }
-    return NextResponse.json({ success: true, data: toDoc(doc) });
-  } catch (e: any) {
-    console.error("[GET /api/custom-discount-requests/[id]]", e);
-    const status = isMongoDependencyError(e) ? 503 : 500;
-    return NextResponse.json({
-      success: false,
-      message: status === 503 ? "Custom discount database is currently unavailable" : "Failed to load custom discount request",
-    }, { status });
+    assertDealerScope(actor, row.dealerId);
+    return NextResponse.json({ success: true, data: mapCustomDiscount(row) });
+  } catch (error) {
+    console.error("[GET /api/custom-discount-requests/[id]]", error);
+    return jsonError(error, "Failed to load custom discount request");
   }
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const oid = toObjectId(id);
-  if (!oid) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
+    const actor = await getActor(req);
     const body = await req.json();
-    const status = safeText(body.status, 40);
-    const orderId = safeText(body.orderId || body.order_id, 120);
-    const orderNumber = safeText(body.orderNumber || body.order_number, 160);
-    const hasOrderLinkUpdate = !!orderId || !!orderNumber;
-    const isToggleOnly = status === "" && typeof body.allowReorder === "boolean" && !hasOrderLinkUpdate;
-    const isOrderLinkOnly = status === "" && hasOrderLinkUpdate && typeof body.allowReorder !== "boolean";
-
-    if (!isToggleOnly && !isOrderLinkOnly && !["approved", "rejected", "pending"].includes(status)) {
-      return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
-    }
-
-    const now = new Date().toISOString();
-    const set: Record<string, any> = isToggleOnly || isOrderLinkOnly
-      ? {
-        updatedAt: now,
-      }
-      : {
-        status,
-        adminNote: safeText(body.adminNote ?? body.admin_note, 1500),
-        reviewedBy: safeText(body.reviewedBy, 160),
-        reviewedAt: status === "pending" ? null : now,
-        updatedAt: now,
-      };
-
-    if (isToggleOnly) {
-      set.allowReorder = body.allowReorder;
-    }
-
-    if (hasOrderLinkUpdate) {
-      if (orderId) {
-        set.orderId = orderId;
-        set.order_id = orderId;
-      }
-      if (orderNumber) {
-        set.orderNumber = orderNumber;
-        set.order_number = orderNumber;
-      }
-      set.linkedOrderAt = now;
-    }
-
-    if (!isToggleOnly && !isOrderLinkOnly) {
-      if (status === "approved") {
-        set.allowReorder = true;
-      } else if (status === "rejected") {
-        set.allowReorder = false;
-      } else if (typeof body.allowReorder === "boolean") {
-        set.allowReorder = body.allowReorder;
-      }
-    }
-
-    const db = await getDb();
-    const existing = await db.collection("custom_discount_requests").findOne({ _id: oid });
+    const existing = await loadRequest(id);
     if (!existing) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
-    const existingOrderId = safeText(existing.orderId || existing.order_id, 120);
-    if (existingOrderId) {
-      const access = await resolveOrderAccess(existingOrderId, existing.dealerId);
-      if (!access.visible) return NextResponse.json({ success: false, message: access.reason }, { status: 409 });
+    if (actor?.role === "DEALER") {
+      const actorId = actor.dealerId?.toString() || "";
+      const ownerId = existing.dealerId.toString();
+      if (!actorId || actorId !== ownerId) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
     }
+    assertDealerScope(actor, existing.dealerId);
 
-    if (!isToggleOnly && status === "rejected" && !existing.rejectionDraftId) {
-      const draftResult = await db.collection("order_drafts").insertOne({
-        dealer_id: existing.dealerId,
-        name: buildDraftName(now),
-        rows: buildDraftRows(
-          Array.isArray(existing.orderSnapshot?.products) && existing.orderSnapshot.products.length > 0
-            ? existing.orderSnapshot.products
-            : Array.isArray(existing.draftProducts) && existing.draftProducts.length > 0
-              ? existing.draftProducts
-              : existing.products
-        ),
-        shipto: existing.shipto ?? null,
-        refno: existing.refno ?? null,
-        order_note: buildDraftOrderNote(existing.orderSnapshot?.orderNote ?? existing.orderNote, set.adminNote),
-        coupon_code: existing.discountBreakdown?.couponCode || null,
-        coupon_pct: existing.discountBreakdown?.couponDiscountPercent ?? null,
-        approval_state: buildDraftApprovalState({
-          approvalRequestId: existing._id.toString(),
-          status: "rejected",
-          requestedOrderDiscountPercent: existing.requestedOrderDiscountPercent ?? null,
-          requestedProductDiscounts: existing.requestedProductDiscounts ?? {},
-          updatedAt: now,
-        }),
-        source: "custom_discount_rejection",
-        source_request_id: existing._id.toString(),
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      set.rejectionDraftId = draftResult.insertedId.toString();
-      set.rejectionDraftCreatedAt = now;
+    const rawStatus = text(body.status, 40);
+    const nextStatus = rawStatus ? statusValue(rawStatus) : null;
+    const orderId = text(body.orderId || body.order_id, 80);
+    const hasOrderLink = !!orderId;
+    const reviewUpdate = !!nextStatus;
+    if (!reviewUpdate && typeof body.allowReorder !== "boolean" && !hasOrderLink) {
+      return NextResponse.json({ success: false, message: "No supported update supplied" }, { status: 400 });
     }
+    if (rawStatus && !nextStatus) return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
+    if (reviewUpdate && actor?.role !== "ADMIN") throw Object.assign(new Error("Only Admin can review custom discounts"), { status: 403 });
 
-    const updated = await db.collection("custom_discount_requests").findOneAndUpdate(
-      { _id: oid },
-      { $set: set },
-      { returnDocument: "after" }
-    );
+    const data: any = { updatedAt: new Date() };
+    if (reviewUpdate && nextStatus) {
+      data.status = nextStatus;
+      data.adminNote = text(body.adminNote ?? body.admin_note, 1500) || null;
+      data.reviewedByUserId = actor?.userId && actor.userId > BigInt(0) ? actor.userId : null;
+      data.reviewedAt = nextStatus === "PENDING" ? null : new Date();
+      data.allowReorder = nextStatus === "APPROVED" ? true : nextStatus === "REJECTED" ? false : existing.allowReorder;
+    }
+    if (typeof body.allowReorder === "boolean") data.allowReorder = body.allowReorder;
+    if (hasOrderLink) data.orderId = BigInt(orderId);
 
-    if (!updated) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
-
-    const linkedDraftId = safeText(updated.orderDraftId || updated.order_draft_id, 120);
-    const linkedDraftObjectId = toObjectId(linkedDraftId);
-    if (linkedDraftObjectId) {
-      await db.collection("order_drafts").updateOne(
-        { _id: linkedDraftObjectId, dealer_id: updated.dealerId },
-        {
-          $set: {
-            approval_state: buildDraftApprovalState({
-              approvalRequestId: updated._id.toString(),
-              status: status === "" ? updated.status : status,
-              requestedOrderDiscountPercent: updated.requestedOrderDiscountPercent ?? null,
-              requestedProductDiscounts: updated.requestedProductDiscounts ?? {},
-              updatedAt: now,
+    const updated = await prisma.$transaction(async (tx) => {
+      let rejectionDraftId: bigint | null = null;
+      if (reviewUpdate && nextStatus === "REJECTED") {
+        const draft = await tx.orderDraft.create({
+          data: {
+            dealerId: existing.dealerId,
+            name: `Disapproved Request: ${new Date().toLocaleString("en-IN")}`,
+            snapshot: jsonValue({
+              rows: rejectionRows(existing),
+              shipto: (existing.orderSnapshot as any)?.shipto ?? null,
+              refno: (existing.orderSnapshot as any)?.refno ?? null,
+              order_note: [text((existing.orderSnapshot as any)?.orderNote), "--- ADMIN REJECTION NOTE ---", data.adminNote || DEFAULT_REJECTION_NOTE, "Please update your cart and resubmit."].filter(Boolean).join("\n\n"),
+              source: "custom_discount_rejection",
+              source_request_id: existing.id.toString(),
             }),
-            updatedAt: now,
+            approvalState: jsonValue({ approvalRequestId: existing.id.toString(), status: "rejected", updatedAt: new Date().toISOString() }),
           },
-        }
-      );
-    }
+        });
+        rejectionDraftId = draft.id;
+      }
+      const row = await tx.customDiscountRequest.update({ where: { id: existing.id }, data, include: customDiscountInclude });
+      if (row.orderDraftId) {
+        await tx.orderDraft.updateMany({
+          where: { id: row.orderDraftId, dealerId: row.dealerId },
+          data: { approvalState: jsonValue({ approvalRequestId: row.id.toString(), status: String(row.status).toLowerCase(), updatedAt: new Date().toISOString() }) },
+        });
+      }
+      return { row, rejectionDraftId };
+    });
 
-    return NextResponse.json({ success: true, data: toDoc(updated) });
-  } catch (e: any) {
-    console.error("[PATCH /api/custom-discount-requests/[id]]", e);
-    const status = isMongoDependencyError(e) ? 503 : 500;
-    return NextResponse.json({
-      success: false,
-      message: status === 503 ? "Custom discount database is currently unavailable" : "Failed to update custom discount request",
-    }, { status });
+    const dto = mapCustomDiscount(updated.row) as any;
+    if (updated.rejectionDraftId) dto.rejectionDraftId = updated.rejectionDraftId.toString();
+    return NextResponse.json({ success: true, data: dto });
+  } catch (error) {
+    console.error("[PATCH /api/custom-discount-requests/[id]]", error);
+    return jsonError(error, "Failed to update custom discount request");
   }
 }

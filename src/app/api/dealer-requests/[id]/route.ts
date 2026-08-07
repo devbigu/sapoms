@@ -1,33 +1,31 @@
-import { ObjectId } from "mongodb";
+import { Prisma, type DealerRequest } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
+import { AdminRouteError } from "@/server/admin/admin-errors";
+import { prisma } from "@/server/db/prisma";
+import { parseCreateAdminDealerInput } from "@/server/modules/admin/dealers/dealers.schemas";
+import { createAdminDealer } from "@/server/modules/admin/dealers/dealers.service";
+import type { AuthActor } from "@/server/modules/admin/dealers/dealers.types";
 import { normalizeDealerFormSnapshot, validateDealerFormSnapshot } from "@/lib/dealerForm";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
+import { ensurePostgresDealerRequestIndexes, getPostgresDealerRequestCollection, isPostgresDealerRequestDependencyError } from "@/lib/postgresDealerRequests";
+import { findDealerCodeReservationConflict } from "@/server/modules/dealers/dealer-code.service";
 import { invalidateStaffAssignmentCache } from "@/lib/orderScopeServer";
 import {
   appendAuditEntry,
   buildDealerRequestAccessQuery,
   buildDealerRequestIdentityKey,
-  ensureDealerRequestIndexes,
   ensureStatusTransition,
-  getDealerRequestCollection,
-  lookupExistingDealer,
-  resolveCreatedDealerId,
   resolveDealerRequestActor,
-  submitDealerDirect,
   toDealerRequestDetail,
   type DealerRequestActor,
   type DealerRequestRecord,
 } from "@/lib/dealerRequests";
-
 export const runtime = "nodejs";
 
-function toObjectId(id: string) {
-  try {
-    return new ObjectId(id);
-  } catch {
-    return null;
-  }
+function toRequestId(id: string) {
+  const trimmed = id.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  return { toString: () => trimmed };
 }
 
 function buildResponseError(message: string, status: number) {
@@ -45,20 +43,61 @@ function buildSnapshotSummary(snapshot: ReturnType<typeof normalizeDealerFormSna
     assignedStaffNames: snapshot.staffNames,
   };
 }
+function buildDealerInputFromSnapshot(snapshot: ReturnType<typeof normalizeDealerFormSnapshot>) {
+  return parseCreateAdminDealerInput({
+    businessName: snapshot.name,
+    email: snapshot.email,
+    password: snapshot.password,
+    phone: snapshot.whatsapp,
+    dealerCode: snapshot.dealerCode,
+    address: snapshot.address,
+    city: snapshot.city,
+    pincode: snapshot.pincode,
+    gstin: snapshot.gstNo,
+    discountPercent: snapshot.discount,
+    creditDays: snapshot.creditDays,
+    creditLimitPaise: snapshot.currentLimit,
+    status: "ACTIVE",
+    assignedStaffIds: snapshot.assignedStaffIds,
+  });
+}
 
-function buildRequestQuery(actor: DealerRequestActor, oid: ObjectId) {
+function toDealerRequestRecord(row: DealerRequest): DealerRequestRecord {
+  return {
+    ...row,
+    _id: { toString: () => row.id.toString() },
+    id: row.id.toString(),
+    submittedAt: row.submittedAt.toISOString(),
+    acceptedAt: row.acceptedAt?.toISOString() ?? "",
+    rejectedAt: row.rejectedAt?.toISOString() ?? "",
+    reviewedAt: row.reviewedAt?.toISOString() ?? "",
+    resubmittedAt: row.resubmittedAt?.toISOString() ?? "",
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function toApprovingAdminActor(actor: DealerRequestActor): AuthActor | null {
+  if (!/^\d+$/.test(actor.actorId)) return null;
+  return { userId: BigInt(actor.actorId), sessionId: "", role: "ADMIN" };
+}
+
+function isConflictRouteError(error: unknown): error is AdminRouteError {
+  return error instanceof AdminRouteError && error.code === "CONFLICT";
+}
+
+function buildRequestQuery(actor: DealerRequestActor, oid: { toString(): string }) {
   const accessQuery = buildDealerRequestAccessQuery(actor);
   return Object.keys(accessQuery).length > 0
     ? { $and: [{ _id: oid }, accessQuery] }
     : { _id: oid };
 }
 
-function buildLockToken() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function isDuplicateKeyError(error: unknown) {
-  return !!error && typeof error === "object" && "code" in error && (error as { code?: number }).code === 11000;
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = (error as { code?: number | string }).code;
+  return code === 11000 || code === "P2002";
 }
 
 export async function GET(
@@ -67,7 +106,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const oid = toObjectId(id);
+    const oid = toRequestId(id);
     if (!oid) {
       return buildResponseError("Invalid dealer request id", 400);
     }
@@ -84,9 +123,8 @@ export async function GET(
       return buildResponseError("Dealer request access is restricted to admin and staff", 403);
     }
 
-    const db = await getDb();
-    await ensureDealerRequestIndexes(db);
-    const collection = getDealerRequestCollection(db);
+    await ensurePostgresDealerRequestIndexes();
+    const collection = getPostgresDealerRequestCollection();
     const doc = await collection.findOne(buildRequestQuery(actor, oid));
     if (!doc) {
       return buildResponseError("Dealer request not found", 404);
@@ -95,7 +133,7 @@ export async function GET(
     return NextResponse.json({ success: true, data: toDealerRequestDetail(doc) });
   } catch (error) {
     console.error("[GET /api/dealer-requests/[id]]", error);
-    const status = isMongoDependencyError(error) ? 503 : 500;
+    const status = isPostgresDealerRequestDependencyError(error) ? 503 : 500;
     return buildResponseError(
       status === 503
         ? "Dealer request database is currently unavailable"
@@ -111,7 +149,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const oid = toObjectId(id);
+    const oid = toRequestId(id);
     if (!oid) {
       return buildResponseError("Invalid dealer request id", 400);
     }
@@ -134,9 +172,8 @@ export async function PATCH(
       return buildResponseError("Invalid dealer request action", 400);
     }
 
-    const db = await getDb();
-    await ensureDealerRequestIndexes(db);
-    const collection = getDealerRequestCollection(db);
+    await ensurePostgresDealerRequestIndexes();
+    const collection = getPostgresDealerRequestCollection();
     const baseQuery = buildRequestQuery(actor, oid);
     const existing = await collection.findOne(baseQuery);
     if (!existing) {
@@ -154,171 +191,84 @@ export async function PATCH(
         return buildResponseError("Only admin can accept dealer requests", 403);
       }
 
+      const adminActor = toApprovingAdminActor(actor);
+      if (!adminActor) {
+        return buildResponseError("Approving admin user id is required", 400);
+      }
+
       const snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);
       const validationError = validateDealerFormSnapshot(snapshot);
       if (validationError) {
         return buildResponseError(validationError, 400);
       }
 
-      const now = new Date().toISOString();
-      const lockToken = buildLockToken();
-      const locked = await collection.findOneAndUpdate(
-        {
-          _id: oid,
-          status: "pending",
-          $or: [{ approvalLock: null }, { approvalLock: { $exists: false } }],
-        },
-        {
-            $set: {
-              ...buildSnapshotSummary(snapshot),
-              formSnapshot: snapshot,
-              requestIdentityKey: buildDealerRequestIdentityKey(snapshot, current.submittedById),
-              updatedAt: now,
-              approvalLock: {
-              token: lockToken,
-              actorId: actor.actorId,
-              actorName: actor.actorName,
-              startedAt: now,
-            },
-          },
-        },
-        { returnDocument: "after" },
-      );
-
-      if (!locked) {
-        const latest = await collection.findOne({ _id: oid });
-        const latestState = latest ? toDealerRequestDetail(latest).status : "";
-        return buildResponseError(
-          latestState === "accepted"
-            ? "This request has already been accepted"
-            : "This request is already being reviewed by another admin",
-          409,
-        );
-      }
-
-      const lockedDetail = toDealerRequestDetail(locked);
-      const auditTrail = appendAuditEntry(lockedDetail.auditTrail, {
-        action: "accept_started",
-        at: now,
-        actorId: actor.actorId,
-        actorName: actor.actorName,
-        actorRole: actor.role,
-      });
+      const dealerInput = buildDealerInputFromSnapshot(snapshot);
+      const now = new Date();
 
       try {
-        const priorAttempts = Number((locked as DealerRequestRecord).creationAttemptCount ?? 0);
-        const existingDealer = await lookupExistingDealer(snapshot);
-        let createdDealerId = String(existingDealer?.Dealer_Id ?? "").trim();
+        const accepted = await prisma.$transaction(async (tx) => {
+          const pending = await tx.dealerRequest.findFirst({
+            where: { id: BigInt(oid.toString()), status: "pending" },
+          });
 
-        if (createdDealerId && priorAttempts === 0) {
-          await collection.updateOne(
-            { _id: oid, "approvalLock.token": lockToken },
-            {
-              $set: {
-                approvalLock: null,
-                updatedAt: now,
-                auditTrail: appendAuditEntry(auditTrail, {
-                  action: "accept_blocked_duplicate",
-                  at: now,
-                  actorId: actor.actorId,
-                  actorName: actor.actorName,
-                  actorRole: actor.role,
-                  note: "A dealer with matching identity already exists.",
-                }),
-              },
-            },
-          );
-          return buildResponseError("A dealer with these details already exists", 409);
-        }
+          if (!pending) {
+            const latest = await tx.dealerRequest.findUnique({
+              where: { id: BigInt(oid.toString()) },
+              select: { status: true },
+            });
+            throw new AdminRouteError(
+              "CONFLICT",
+              latest?.status === "accepted"
+                ? "This request has already been accepted"
+                : latest?.status === "rejected"
+                  ? "This request has already been rejected"
+                  : "Only pending requests can be accepted",
+              { code: "DEALER_REQUEST_PROCESSED" },
+            );
+          }
 
-        if (!createdDealerId) {
-          await submitDealerDirect(snapshot);
-          createdDealerId = await resolveCreatedDealerId(snapshot);
-        }
+          const pendingDetail = toDealerRequestDetail(toDealerRequestRecord(pending));
+          const createdDealer = await createAdminDealer(dealerInput, adminActor, tx);
+          const auditTrail = appendAuditEntry(pendingDetail.auditTrail, {
+            action: "accepted",
+            at: now.toISOString(),
+            actorId: actor.actorId,
+            actorName: actor.actorName,
+            actorRole: actor.role,
+            note: `Dealer created with id ${createdDealer.id}`,
+          });
 
-        if (!createdDealerId) {
-          await collection.updateOne(
-            { _id: oid, "approvalLock.token": lockToken },
-            {
-              $set: {
-                approvalLock: null,
-                updatedAt: now,
-                creationAttemptCount: priorAttempts + 1,
-                auditTrail: appendAuditEntry(auditTrail, {
-                  action: "accept_pending_retry",
-                  at: now,
-                  actorId: actor.actorId,
-                  actorName: actor.actorName,
-                  actorRole: actor.role,
-                  note: "Dealer was submitted but could not be verified in the dealer list.",
-                }),
-              },
-            },
-          );
-          return buildResponseError("Dealer creation could not be verified. The request is still pending.", 502);
-        }
-
-        const accepted = await collection.findOneAndUpdate(
-          { _id: oid, status: "pending", "approvalLock.token": lockToken },
-          {
-            $set: {
+          return tx.dealerRequest.update({
+            where: { id: pending.id },
+            data: {
               ...buildSnapshotSummary(snapshot),
-              formSnapshot: snapshot,
-              requestIdentityKey: buildDealerRequestIdentityKey(snapshot, current.submittedById),
+              formSnapshot: snapshot as Prisma.InputJsonValue,
+              requestIdentityKey: buildDealerRequestIdentityKey(snapshot, pending.submittedById),
               status: "accepted",
               reviewedById: actor.actorId,
               reviewedByName: actor.actorName,
               reviewedAt: now,
               acceptedAt: now,
-              rejectedAt: "",
+              rejectedAt: null,
               rejectionReason: "",
-              createdDealerId,
+              createdDealerId: createdDealer.id,
               openRequestKey: null,
-              approvalLock: null,
+              approvalLock: Prisma.JsonNull,
               updatedAt: now,
-              auditTrail: appendAuditEntry(auditTrail, {
-                action: "accepted",
-                at: now,
-                actorId: actor.actorId,
-                actorName: actor.actorName,
-                actorRole: actor.role,
-                note: `Dealer created with id ${createdDealerId}`,
-              }),
+              auditTrail: auditTrail as Prisma.InputJsonValue,
             },
-          },
-          { returnDocument: "after" },
-        );
-
-        if (!accepted) {
-          return buildResponseError("Dealer request could not be finalized", 409);
-        }
+          });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
         invalidateStaffAssignmentCache();
-        return NextResponse.json({ success: true, data: toDealerRequestDetail(accepted) });
+        return NextResponse.json({ success: true, data: toDealerRequestDetail(toDealerRequestRecord(accepted)) });
       } catch (error) {
-        await collection.updateOne(
-          { _id: oid, "approvalLock.token": lockToken },
-          {
-            $set: {
-              approvalLock: null,
-              updatedAt: now,
-              creationAttemptCount: Number((locked as DealerRequestRecord).creationAttemptCount ?? 0) + 1,
-              auditTrail: appendAuditEntry(auditTrail, {
-                action: "accept_failed",
-                at: now,
-                actorId: actor.actorId,
-                actorName: actor.actorName,
-                actorRole: actor.role,
-                note: error instanceof Error ? error.message : "Dealer creation failed",
-              }),
-            },
-          },
-        );
-
+        if (isConflictRouteError(error)) {
+          return buildResponseError(error.message, 409);
+        }
         throw error;
       }
     }
-
     if (action === "reject") {
       if (actor.role !== "admin") {
         return buildResponseError("Only admin can reject dealer requests", 403);
@@ -389,6 +339,16 @@ export async function PATCH(
       return buildResponseError(validationError, 400);
     }
 
+    const codeConflict = await findDealerCodeReservationConflict(snapshot.dealerCode, { excludeRequestId: BigInt(oid.toString()) });
+    if (codeConflict) {
+      return buildResponseError(
+        codeConflict === "dealer-profile"
+          ? "Dealer code already exists"
+          : "A pending dealer request already exists for this dealer code",
+        409,
+      );
+    }
+
     const now = new Date().toISOString();
     try {
       const resubmitted = await collection.findOneAndUpdate(
@@ -434,7 +394,7 @@ export async function PATCH(
     }
   } catch (error) {
     console.error("[PATCH /api/dealer-requests/[id]]", error);
-    const status = isMongoDependencyError(error) ? 503 : 500;
+    const status = isPostgresDealerRequestDependencyError(error) ? 503 : 500;
     return buildResponseError(
       status === 503
         ? "Dealer request database is currently unavailable"

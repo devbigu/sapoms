@@ -1,7 +1,7 @@
 import { scanScopedOrders, type OrdersActor } from "@/lib/orderPagination";
 import { parsePhpJsonResponse } from "@/lib/phpJson";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 const UPSTREAM_PAGE_SIZE = 200;
 const MAX_UPSTREAM_PAGES = 100;
 const UPSTREAM_TIMEOUT_MS = 20_000;
@@ -18,6 +18,24 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function orderDedupeValues(order: Record<string, unknown>) {
+  return [
+    order.order_id,
+    order.orderId,
+    order.order_number,
+    order.orderNumber,
+    order.legacyPhpId,
+  ].map(text).filter(Boolean);
+}
+
+async function loadPostgresRows(actor: OrdersActor) {
+  try {
+    const module = await import("@/lib/postgresOrders");
+    return module.listPostgresOrderHeaders(actor);
+  } catch {
+    return [];
+  }
+}
 function normalizedStatus(value: unknown) {
   return text(value).toLowerCase().replace(/[\s_-]/g, "");
 }
@@ -56,6 +74,8 @@ export async function loadOrderHeaders(input: {
   assignedDealerIds?: Array<string | number>;
 }) {
   if (!ORDER_HEADER_SOURCES.has(input.source)) throw new Error(`Unsupported order header source: ${input.source}`);
+  const postgresRows = await loadPostgresRows(input.actor);
+  const seen = new Set(postgresRows.flatMap(orderDedupeValues));
   const source = resolveOrderHeaderSource(input);
   const assignedDealerIds = input.assignedDealerIds ?? [];
   let upstreamHeaders = 0;
@@ -88,9 +108,10 @@ export async function loadOrderHeaders(input: {
   const rows = input.source === "orderpeginationnew"
     ? scan.rows.filter(isPendingOrderHeader)
     : scan.rows;
+  const legacyRows = rows.filter((row) => !orderDedupeValues(row).some((value) => seen.has(value)));
 
   return {
-    rows,
+    rows: [...postgresRows, ...legacyRows],
     truncated: scan.truncated,
     totalIsExact: scan.totalIsExact,
     diagnostics: { upstreamCalls: scan.pageCalls.length, upstreamHeaders },

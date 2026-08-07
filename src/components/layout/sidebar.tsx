@@ -129,17 +129,11 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     "Staff Portal";
 
   const handleLogout = () => {
-    if (role === "accountant") {
-      localStorage.removeItem("accountant_token");
-      localStorage.removeItem("AccountantData");
-      localStorage.removeItem("roletype");
-      window.dispatchEvent(new Event("omsons-auth-changed"));
-      router.push("/auth/accountant-login");
-    } else {
+    void fetch("/api/auth/logout", { method: "POST", credentials: "include" }).finally(() => {
       clearAuthStorage(localStorage);
       window.dispatchEvent(new Event("omsons-auth-changed"));
       router.push("/auth/login");
-    }
+    });
   };
 
   // Group nav by section

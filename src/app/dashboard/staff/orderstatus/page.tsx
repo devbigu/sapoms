@@ -67,7 +67,7 @@ type OrderProductNote = {
 }
 
 const SHIMMER = "animate-pulse bg-gray-200 rounded"
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL = "/api/php-compat"
 const ITEMS_PER_PAGE = 10
 
 function statusBadge(status: string) {

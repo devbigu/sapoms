@@ -93,7 +93,7 @@ type CancelledOrderOverlay = {
   originalOrderRef?: Record<string, unknown>
 }
 
-const BACKEND_URL    = "https://mirisoft.co.in/sas/dealerapi/api"
+const BACKEND_URL    = "/api/php-compat"
 const ITEMS_PER_PAGE = 10
 const YEAR           = new Date().getFullYear()
 

@@ -28,7 +28,7 @@ import {
   useRenameDraft,
 } from "@/lib/useDrafts";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
+const BACKEND_URL = "/api/php-compat";
 const EMPTY_DRAFTS: OrderDraft[] = [];
 
 type DealerUser = {
