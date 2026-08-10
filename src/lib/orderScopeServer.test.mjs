@@ -8,10 +8,10 @@ import ts from "typescript";
 async function loadModule() {
   const filePath = path.resolve("src/lib/orderScopeServer.ts");
   const scopeUrl = pathToFileURL(path.resolve("src/lib/staffOrderScope.js")).href;
-  const source = (await fs.readFile(filePath, "utf8")).replace(
-    /from\s+["']@\/lib\/staffOrderScope\.js["']/g,
-    `from "${scopeUrl}"`,
-  );
+  const prismaStubUrl = `data:text/javascript;base64,${Buffer.from(`export const prisma = { dealerStaffAssignment: { findMany: async () => [] } };`).toString("base64")}`;
+  const source = (await fs.readFile(filePath, "utf8"))
+    .replace(/from\s+["']@\/lib\/staffOrderScope\.js["']/g, `from "${scopeUrl}"`)
+    .replace(/from\s+["']@\/server\/db\/prisma["']/g, `from "${prismaStubUrl}"`);
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
     fileName: filePath,
@@ -39,31 +39,47 @@ test("numeric and string actor IDs normalize to stable strings", () => {
   });
 });
 
-test("orders-data adapter requires an explicit role instead of endpoint inference", async () => {
+test("orders-data adapter requires authenticated session scope instead of query actor identity", async () => {
   const source = await fs.readFile(path.resolve("src/app/api/orders-data/route.ts"), "utf8");
-  assert.match(source, /parseOrderActor\(\{[\s\S]*role: String\(req\.nextUrl\.searchParams\.get\("role"\)/);
+  assert.match(source, /requireAuth\(\)/);
+  assert.match(source, /orderActorFromAuth\(authActor\)/);
+  assert.match(source, /NextResponse\.json\(serializePrismaValue\(/);
+  assert.doesNotMatch(source, /searchParams\.get\("role"\)/);
+  assert.doesNotMatch(source, /searchParams\.get\("id"\)/);
+  assert.doesNotMatch(source, /requireAuth\(\)\.catch/);
   assert.doesNotMatch(source, /fallbackRole/);
 });
 
-test("simultaneous Staff scope reads share one assignment request", async () => {
+test("order-access route ignores spoofed actor headers and query identity", async () => {
+  const source = await fs.readFile(path.resolve("src/app/api/order-access/[id]/route.ts"), "utf8");
+  assert.match(source, /requireAuth\(\)/);
+  assert.match(source, /orderActorFromAuth\(authActor\)/);
+  assert.doesNotMatch(source, /x-omsons-actor-/);
+  assert.doesNotMatch(source, /query\.get\("role"\)/);
+  assert.doesNotMatch(source, /query\.get\("actor_id"\)/);
+  assert.doesNotMatch(source, /query\.get\("dealer_id"\)/);
+  assert.doesNotMatch(source, /requireAuth\(\)\.catch/);
+});
+
+test("Staff order scope uses PostgreSQL assignments and no PHP fallback", async () => {
+  const source = await fs.readFile(path.resolve("src/lib/orderScopeServer.ts"), "utf8");
+  assert.match(source, /prisma\.dealerStaffAssignment\.findMany/);
+  assert.doesNotMatch(source, /staffDealers|BACKEND_URL|php-compat/);
+
   const originalFetch = globalThis.fetch;
   let calls = 0;
   orderScope.invalidateStaffAssignmentCache("29");
   globalThis.fetch = async () => {
     calls += 1;
-    return {
-      ok: true,
-      json: async () => ({ data: [{ Dealer_Id: "101", assignedstaff: "29" }] }),
-    };
+    throw new Error("PHP fallback should not be called");
   };
   try {
     const results = await Promise.all(
       Array.from({ length: 10 }, () => orderScope.fetchStaffAssignedDealerIds("29")),
     );
-    assert.equal(calls, 1);
-    assert.equal(results.every((ids) => ids.length === 1 && ids[0] === "101"), true);
-    assert.deepEqual(await orderScope.fetchStaffAssignedDealerIds("29"), ["101"]);
-    assert.equal(calls, 1);
+    assert.equal(calls, 0);
+    assert.equal(results.every((ids) => ids.length === 0), true);
+    assert.deepEqual(await orderScope.fetchStaffAssignedDealerIds("29"), []);
   } finally {
     orderScope.invalidateStaffAssignmentCache("29");
     globalThis.fetch = originalFetch;

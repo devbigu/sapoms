@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /**
  * app/drafts/page.tsx
@@ -28,7 +28,6 @@ import {
   useRenameDraft,
 } from "@/lib/useDrafts";
 
-const BACKEND_URL = "/api/php-compat";
 const EMPTY_DRAFTS: OrderDraft[] = [];
 
 type DealerUser = {
@@ -40,7 +39,7 @@ async function fetchLatestOrderIdForDealer(dealerId: string | undefined) {
   if (!dealerId) return "";
 
   try {
-    const res = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1&search=&id=${encodeURIComponent(dealerId)}`);
+    const res = await fetch(`/api/orders-data?page=1&limit=1&search=`);
     const json = await res.json();
     return String(json?.data?.[0]?.order_id ?? "").trim();
   } catch {

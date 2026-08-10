@@ -187,7 +187,7 @@ export function verifyAccessToken(token: string): AccessClaims {
   if (!payload || typeof payload !== "object") throw new Error("Invalid token");
   const claims = payload as AccessClaims;
   if (!claims.sub || !claims.sid || !claims.role || typeof claims.tokenVersion !== "number") throw new Error("Invalid token claims");
-  if (!["ADMIN", "ACCOUNTANT", "STAFF", "DEALER"].includes(claims.role)) throw new Error("Invalid token role");
+  if (!["ADMIN", "NSM", "ACCOUNTANT", "RSM", "STAFF", "DEALER"].includes(claims.role)) throw new Error("Invalid token role");
   return claims;
 }
 
@@ -231,7 +231,7 @@ function actorFromUser(sessionId: string, user: NonNullable<UserWithProfiles>): 
     profileId,
     ...(user.role === "ADMIN" ? { adminId: profileId } : {}),
     ...(user.role === "ACCOUNTANT" ? { accountantId: profileId } : {}),
-    ...(user.role === "STAFF" ? { staffId: profileId } : {}),
+    ...(user.role === "STAFF" || user.role === "RSM" ? { staffId: profileId } : {}),
     ...(user.role === "DEALER" ? { dealerId: profileId } : {}),
     email: user.email,
     displayName: String(profile.name ?? profile.staff_name ?? profile.Dealer_Name ?? profile.ADMIN_NAME ?? ""),

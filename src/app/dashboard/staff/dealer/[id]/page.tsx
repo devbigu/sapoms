@@ -17,7 +17,6 @@ import {
   type DealerStatus,
 } from '@/lib/dealerStatus'
 
-const BACKEND_URL = "/api/php-compat"
 const YEAR        = new Date().getFullYear()
 const ORDER_PAGE_SIZE = 15
 const ITEM_PAGE_SIZE  = 10
@@ -193,16 +192,13 @@ export default function StaffDealerViewPage() {
         return
       }
       setStaffId(actorId)
-      fetch(`${BACKEND_URL}/staffDealers?id=${encodeURIComponent(actorId)}`, { cache: "no-store" })
+      fetch(`/api/staff/dealers/${encodeURIComponent(dealerId)}`, { cache: "no-store" })
         .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
         .then((json) => {
           if (!active) return
-          const allowed = (Array.isArray(json.data) ? json.data : [])
-            .some((row: DealerInfo) => String(row.Dealer_Id) === String(dealerId))
-          if (!allowed) {
-            router.replace("/dashboard/staff")
-            return
-          }
+          if (!json.success || !json.data) { router.replace("/dashboard/staff"); return }
+          setDealer(json.data as DealerInfo)
+          setDealerStatus(normalizeDealerStatus((json.data as DealerInfo).status))
           setDealerAccessAllowed(true)
         })
         .catch(() => router.replace("/dashboard/staff"))
@@ -212,40 +208,12 @@ export default function StaffDealerViewPage() {
     return () => { active = false }
   }, [dealerId, router])
 
-  // Fetch dealer info only after assignment ownership is verified.
-  useEffect(() => {
-    if (!dealerId || !dealerAccessAllowed) return
-    let active = true
-
-    fetch(`${BACKEND_URL}/getdealer?id=${dealerId}`, {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "type" }),
-    })
-      .then(r => r.json())
-      .then(async json => {
-        if (!active || !json.status) return
-
-        const dealerData = json.data as DealerInfo
-        setDealer(dealerData)
-
-        try {
-          const status = await fetchDealerStatus(String(dealerData.Dealer_Id || dealerId))
-          if (active) setDealerStatus(status)
-        } catch {
-          if (active) setDealerStatus(normalizeDealerStatus(dealerData.status))
-        }
-      })
-      .catch(() => {})
-
-    return () => { active = false }
-  }, [dealerAccessAllowed, dealerId])
 
   // Fetch all orders (filter by dealer name client-side)
   const loadOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
-      const res  = await fetch(`/api/orders-data?source=staffOrderrPagination&role=staff&page=1&limit=1000&search=&id=${encodeURIComponent(staffId)}&target_dealer=${encodeURIComponent(dealerId)}`)
+      const res  = await fetch(`/api/orders-data?page=1&limit=1000&search=&dealer=${encodeURIComponent(dealerId)}`)
       const json = await res.json()
       setAllOrders(Array.isArray(json.data) ? json.data : [])
     } catch {
@@ -296,7 +264,7 @@ export default function StaffDealerViewPage() {
     queryKey: ['staff-dealer-items', STAFF_ORDER_SCOPE_VERSION, staffId, dealerId, itemPage, search],
     queryFn: async () => {
       const res = await axios.get(
-        `/api/orders-data?source=Orderstspegination&role=staff&page=${itemPage}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(staffId)}&target_dealer=${encodeURIComponent(dealerId)}`
+        `/api/orders-data?page=${itemPage}&search=${encodeURIComponent(search)}&dealer=${encodeURIComponent(dealerId)}`
       )
       return res.data
     },
@@ -312,7 +280,7 @@ export default function StaffDealerViewPage() {
       queryKey: ['staff-dealer-items', STAFF_ORDER_SCOPE_VERSION, staffId, dealerId, itemPage + 1, search],
       queryFn: async () => {
         const res = await axios.get(
-          `/api/orders-data?source=Orderstspegination&role=staff&page=${itemPage + 1}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(staffId)}&target_dealer=${encodeURIComponent(dealerId)}`
+          `/api/orders-data?page=${itemPage + 1}&search=${encodeURIComponent(search)}&dealer=${encodeURIComponent(dealerId)}`
         )
         return res.data
       },

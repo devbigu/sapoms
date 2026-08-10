@@ -8,9 +8,13 @@ export function mapAdminAccountant(record: AdminAccountantRecord) {
 
   return {
     id,
+    _id: id,
     name,
     email,
+    phone: "",
     designation,
+    role: "accountant",
     status: record.user.status,
+    createdAt: record.user.createdAt.toISOString(),
   };
 }

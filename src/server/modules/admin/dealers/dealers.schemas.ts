@@ -55,6 +55,7 @@ function aliases(body: Record<string, unknown>) {
     imageUrl: body.imageUrl,
     status: body.status,
     assignedStaffIds: body.assignedStaffIds ?? body.assignedstaff,
+    rsmUserId: body.rsmUserId ?? body.rsmId ?? body.regionalManagerId,
   };
 }
 
@@ -75,6 +76,7 @@ const createSchema = z.preprocess((value) => aliases((value && typeof value === 
   imageUrl: text(1000),
   status: z.enum(["ACTIVE", "INACTIVE", "SUSPENDED"]).optional(),
   assignedStaffIds: staffIds.default([]),
+  rsmUserId: optionalBigIntString,
 }));
 
 const updateSchema = z.preprocess((value) => aliases((value && typeof value === "object" ? value : {}) as Record<string, unknown>), z.object({
@@ -91,6 +93,7 @@ const updateSchema = z.preprocess((value) => aliases((value && typeof value === 
   creditDays: optionalInteger(3650),
   creditLimitPaise: optionalBigIntString,
   imageUrl: text(1000),
+  rsmUserId: optionalBigIntString,
 }).refine((value) => Object.values(value).some((entry) => entry !== undefined), "At least one field is required"));
 
 const statusSchema = z.object({
@@ -100,6 +103,7 @@ const statusSchema = z.object({
 
 const staffReplaceSchema = z.object({
   staffIds,
+  rsmUserId: optionalBigIntString,
 });
 
 function parseWith<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -126,3 +130,4 @@ export function parseUpdateDealerStatusInput(body: unknown) {
 export function parseReplaceDealerStaffInput(body: unknown) {
   return parseWith(staffReplaceSchema, body);
 }
+

@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
 import {
-  actorFromRequestHeaders,
   assertDealerScope,
+  assertDraftBelongsToDealer,
   buildCustomDiscountCreate,
   customDiscountInclude,
   dealerExists,
@@ -15,10 +15,6 @@ import { buildPendingRequestLookup } from "@/lib/customDiscountRequests";
 
 export const runtime = "nodejs";
 
-async function getActor(req: NextRequest) {
-  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
-}
-
 function jsonError(error: any, fallback: string) {
   const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
   return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
@@ -26,7 +22,7 @@ function jsonError(error: any, fallback: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const sp = req.nextUrl.searchParams;
     const dealerParam = text(sp.get("dealer_id") || sp.get("dealerId"), 80);
     const staffParam = text(sp.get("staff_id") || sp.get("assignedStaffId") || sp.get("assigned_staff_id"), 80);
@@ -59,7 +55,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const body = await req.json();
     const dealerId = actor?.role === "DEALER" && actor.dealerId
       ? actor.dealerId
@@ -70,6 +66,7 @@ export async function POST(req: NextRequest) {
     if (!orderDraftId) return NextResponse.json({ success: false, message: "orderDraftId is required" }, { status: 400 });
     const staffId = dealer.staffAssignments[0]?.staffId ?? null;
     const data = await buildCustomDiscountCreate(body, dealerId, staffId);
+    await assertDraftBelongsToDealer(data.orderDraftId, dealerId);
 
     const pendingLookup = buildPendingRequestLookup(dealerId.toString(), data.orderDraftId.toString());
     const existing = await prisma.customDiscountRequest.findFirst({ where: { dealerId: BigInt(pendingLookup.dealerId), orderDraftId: BigInt(pendingLookup.orderDraftId), status: "PENDING" }, include: customDiscountInclude });

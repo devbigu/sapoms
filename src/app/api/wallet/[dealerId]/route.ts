@@ -1,33 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
-import { fetchStaffAssignedDealerIds, parseOrderActor } from "@/lib/orderScopeServer";
-import walletUtils from "@/lib/wallet";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
+import { getWalletSnapshot } from "@/lib/postgresWallet";
 
-function actorFromRequest(req: NextRequest) {
-  return parseOrderActor({
-    role: req.headers.get("x-omsons-actor-role") || req.nextUrl.searchParams.get("role"),
-    actorId: req.headers.get("x-omsons-actor-id") || req.nextUrl.searchParams.get("actor_id"),
-  });
+export const runtime = "nodejs";
+
+function parseDealerId(value: string) {
+  if (!/^\d+$/.test(value)) throw new Error("Invalid dealer id.");
+  return BigInt(value);
+}
+
+async function canReadWallet(actor: Awaited<ReturnType<typeof requireAuth>>, dealerId: bigint) {
+  if (actor.role === "ADMIN") return true;
+  if (actor.role === "DEALER") return actor.dealerId === dealerId;
+  if (actor.role === "STAFF" && actor.staffId) {
+    const assignment = await prisma.dealerStaffAssignment.findFirst({
+      where: { dealerId, staffId: actor.staffId, active: true, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
+      select: { id: true },
+    });
+    return Boolean(assignment);
+  }
+  return false;
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ dealerId: string }> }) {
   try {
-    const actor = actorFromRequest(req);
-    if (!actor) return NextResponse.json({ success: false, message: "Missing wallet identity." }, { status: 401 });
-    const { dealerId } = await params;
-    if (actor.role === "dealer" && actor.actorId !== dealerId) {
-      return NextResponse.json({ success: false, message: "This wallet belongs to another Dealer." }, { status: 403 });
-    }
-    if (actor.role === "staff") {
-      const assigned = await fetchStaffAssignedDealerIds(actor.actorId);
-      if (!assigned.includes(dealerId)) return NextResponse.json({ success: false, message: "This Dealer is outside your assignment." }, { status: 403 });
-    }
-    if (actor.role === "accountant") return NextResponse.json({ success: false, message: "Wallet access is not available for this role." }, { status: 403 });
+    const actor = await requireAuth();
+    const { dealerId: rawDealerId } = await params;
+    const dealerId = parseDealerId(rawDealerId);
+    if (!(await canReadWallet(actor, dealerId))) return NextResponse.json({ success: false, message: "Wallet access denied." }, { status: 403 });
     const limit = Math.min(200, Math.max(1, Number(req.nextUrl.searchParams.get("limit") || 50)));
-    const data = await walletUtils.getWalletSnapshot(await getDb(), dealerId, { limit });
+    const data = await getWalletSnapshot(prisma, dealerId, { limit });
     return NextResponse.json({ success: true, ...data });
   } catch (error) {
     console.error("[GET /api/wallet/[dealerId]]", error);
-    return NextResponse.json({ success: false, message: isMongoDependencyError(error) ? "Wallet database is unavailable." : "Unable to load wallet." }, { status: isMongoDependencyError(error) ? 503 : 500 });
+    const message = error instanceof Error && error.message === "Invalid dealer id." ? error.message : "Unable to load wallet.";
+    return NextResponse.json({ success: false, message }, { status: message === "Invalid dealer id." ? 400 : 500 });
   }
 }

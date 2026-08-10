@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Prisma, type AuthRole } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
 import {
@@ -36,23 +36,6 @@ export function jsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
 }
 
-export async function actorFromRequestHeaders(headers: Headers): Promise<AuthActor | null> {
-  const role = text(headers.get("x-omsons-actor-role"), 30).toUpperCase() as AuthRole;
-  const actorId = text(headers.get("x-omsons-actor-id"), 80);
-  if (!role || !actorId || !["ADMIN", "ACCOUNTANT", "STAFF", "DEALER"].includes(role)) return null;
-  return {
-    userId: BigInt(0),
-    sessionId: "header-fallback",
-    role,
-    profileId: BigInt(actorId),
-    ...(role === "DEALER" ? { dealerId: BigInt(actorId) } : {}),
-    ...(role === "STAFF" ? { staffId: BigInt(actorId) } : {}),
-    ...(role === "ADMIN" ? { adminId: BigInt(actorId) } : {}),
-    email: "",
-    displayName: "",
-  } as AuthActor;
-}
-
 export function assertDealerScope(actor: AuthActor | null, dealerId: bigint) {
   if (!actor) return;
   if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") return;
@@ -64,6 +47,18 @@ export async function dealerExists(dealerId: bigint) {
   const dealer = await prisma.dealerProfile.findUnique({ where: { id: dealerId }, include: { staffAssignments: { where: { active: true }, take: 1 }, user: true } });
   if (!dealer || dealer.deletedAt || dealer.user.status !== "ACTIVE") throw Object.assign(new Error("Dealer not found"), { status: 404 });
   return dealer;
+}
+
+export async function assertDraftBelongsToDealer(orderDraftId: bigint, dealerId: bigint) {
+  const draft = await prisma.orderDraft.findFirst({ where: { id: orderDraftId, dealerId } });
+  if (!draft) throw Object.assign(new Error("Draft not found"), { status: 404 });
+  return draft;
+}
+
+export async function assertOrderBelongsToDealer(orderId: bigint, dealerId: bigint) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, dealerId } });
+  if (!order) throw Object.assign(new Error("Order not found"), { status: 404 });
+  return order;
 }
 
 export function mapDraft(row: any) {
@@ -185,6 +180,9 @@ export async function buildCustomDiscountCreate(body: Record<string, any>, deale
   });
   if (orderSnapshot.products.length === 0) throw Object.assign(new Error("At least one order product is required"), { status: 400 });
   if (scope === "order" && requestedDiscountPercent <= currentDiscountPercent) throw Object.assign(new Error("Requested discount must be greater than current discount"), { status: 400 });
+  if (scope === "product" && !orderSnapshot.products.some((product) => product.usesCustomDiscount)) {
+    throw Object.assign(new Error("At least one product discount must be greater than current discount"), { status: 400 });
+  }
   const draftId = text(body.orderDraftId || body.order_draft_id, 120);
   if (!draftId) throw Object.assign(new Error("orderDraftId is required"), { status: 400 });
   const orderDraftId = BigInt(draftId);

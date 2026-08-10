@@ -1,88 +1,120 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth, type AuthActor } from "@/server/auth/session";
 import { normalizeDealerStatus, type DealerStatus, type DealerStatusDocument } from "@/lib/dealerStatus";
 
 export const runtime = "nodejs";
 
-type DealerStatusDbDocument = {
-  dealerId: string;
-  status: DealerStatus;
-  updatedAt: Date;
-  updatedBy?: string;
-};
-
 type DealerStatusResponseDocument = {
   dealerId: string;
   status: DealerStatus;
-  updatedAt: string;
+  updatedAt?: string;
   updatedBy?: string;
 };
 
-const COLLECTION = "dealer_statuses";
+type DealerRow = Awaited<ReturnType<typeof loadDealerById>>;
 
-function toResponseDocument(doc: DealerStatusDbDocument): DealerStatusResponseDocument {
+function safeErrorResponse(message: string, status = 500) {
+  return NextResponse.json({ success: false, message }, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+function userStatusToDealerStatus(status: string | null | undefined): DealerStatus {
+  return status === "ACTIVE" ? "active" : "inactive";
+}
+
+function dealerStatusToUserStatus(status: DealerStatus) {
+  return status === "active" ? "ACTIVE" : "INACTIVE";
+}
+
+function parseDealerId(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  return BigInt(value);
+}
+
+function toResponseDocument(row: NonNullable<DealerRow>, updatedBy?: string): DealerStatusResponseDocument {
   return {
-    dealerId: doc.dealerId,
-    status: normalizeDealerStatus(doc.status),
-    updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt.toISOString() : new Date(doc.updatedAt).toISOString(),
-    ...(doc.updatedBy ? { updatedBy: doc.updatedBy } : {}),
+    dealerId: row.id.toString(),
+    status: userStatusToDealerStatus(row.user.status),
+    updatedAt: row.user.updatedAt.toISOString(),
+    ...(updatedBy ? { updatedBy } : {}),
   };
 }
 
-function safeErrorResponse(message: string, status = 500) {
-  return NextResponse.json({ success: false, message }, { status });
+async function loadDealerById(dealerId: bigint) {
+  return prisma.dealerProfile.findFirst({
+    where: { id: dealerId, deletedAt: null, user: { deletedAt: null } },
+    select: { id: true, userId: true, user: { select: { status: true, updatedAt: true } } },
+  });
+}
+
+async function canReadDealer(actor: AuthActor, dealerId: bigint) {
+  if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") return true;
+  if (actor.role === "DEALER") return actor.dealerId === dealerId;
+  if (actor.role === "STAFF" && actor.staffId) {
+    const assignment = await prisma.dealerStaffAssignment.findFirst({
+      where: { dealerId, staffId: actor.staffId, active: true },
+      select: { id: true },
+    });
+    return !!assignment;
+  }
+  return false;
+}
+
+async function listReadableDealers(actor: AuthActor) {
+  if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") {
+    return prisma.dealerProfile.findMany({
+      where: { deletedAt: null, user: { deletedAt: null } },
+      select: { id: true, userId: true, user: { select: { status: true, updatedAt: true } } },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
+
+  if (actor.role === "DEALER" && actor.dealerId) {
+    const row = await loadDealerById(actor.dealerId);
+    return row ? [row] : [];
+  }
+
+  if (actor.role === "STAFF" && actor.staffId) {
+    const assignments = await prisma.dealerStaffAssignment.findMany({
+      where: { staffId: actor.staffId, active: true, dealer: { deletedAt: null, user: { deletedAt: null } } },
+      select: { dealer: { select: { id: true, userId: true, user: { select: { status: true, updatedAt: true } } } } },
+      orderBy: { updatedAt: "desc" },
+    });
+    return assignments.map((row) => row.dealer);
+  }
+
+  return [];
 }
 
 export async function GET(request: NextRequest) {
-  const dealerId = request.nextUrl.searchParams.get("dealer_id")?.trim() ?? "";
-
   try {
-    const db = await getDb();
-    const collection = db.collection<DealerStatusDbDocument>(COLLECTION);
+    const actor = await requireAuth();
+    const rawDealerId = request.nextUrl.searchParams.get("dealer_id")?.trim() ?? "";
 
-    if (dealerId) {
-      const doc = await collection.findOne({ dealerId });
-      if (!doc) {
-        return NextResponse.json({
-          success: true,
-          data: {
-            dealerId,
-            status: "active",
-          } as DealerStatusResponseDocument,
-        });
-      }
+    if (rawDealerId) {
+      const dealerId = parseDealerId(rawDealerId);
+      if (!dealerId) return safeErrorResponse("Invalid dealer_id", 400);
+      if (!(await canReadDealer(actor, dealerId))) return safeErrorResponse("Forbidden", 403);
 
-      return NextResponse.json({
-        success: true,
-        data: toResponseDocument(doc),
-      });
+      const row = await loadDealerById(dealerId);
+      if (!row) return safeErrorResponse("Dealer not found", 404);
+      return NextResponse.json({ success: true, data: toResponseDocument(row) }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    const docs = await collection.find({}).sort({ updatedAt: -1 }).toArray();
-    return NextResponse.json({
-      success: true,
-      data: docs.map(toResponseDocument),
-    });
+    const rows = await listReadableDealers(actor);
+    return NextResponse.json({ success: true, data: rows.map((row) => toResponseDocument(row)) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("dealer-status GET failed", error);
-    if (isMongoDependencyError(error)) {
-      if (dealerId) {
-        return NextResponse.json({
-          success: true,
-          data: {
-            dealerId,
-            status: "active",
-          } as DealerStatusResponseDocument,
-        });
-      }
-      return safeErrorResponse("Dealer status database is currently unavailable", 503);
-    }
+    if (error instanceof Error && error.message === "Unauthenticated") return safeErrorResponse("Unauthenticated", 401);
     return safeErrorResponse("Unable to load dealer status");
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
+    const actor = await requireAuth();
+    if (actor.role !== "ADMIN") return safeErrorResponse("Forbidden", 403);
+
     const body = (await request.json().catch(() => null)) as
       | Partial<DealerStatusDocument & { dealerIds?: unknown[]; updatedBy?: string }>
       | null;
@@ -90,74 +122,54 @@ export async function PATCH(request: NextRequest) {
     const dealerIds = Array.isArray(body?.dealerIds)
       ? [...new Set(body.dealerIds.map((id) => String(id ?? "").trim()).filter(Boolean))]
       : [];
-    const rawStatus = String(body?.status ?? "").trim().toLowerCase();
-    const updatedBy = String(body?.updatedBy ?? "").trim();
+    const rawStatus = normalizeDealerStatus(String(body?.status ?? "").trim().toLowerCase(), "active");
 
-    if ((!dealerId && dealerIds.length === 0) || (rawStatus !== "active" && rawStatus !== "inactive")) {
+    if (!dealerId && dealerIds.length === 0) {
       return safeErrorResponse("dealerId or dealerIds and a valid status are required", 400);
     }
 
-    const db = await getDb();
-    const collection = db.collection<DealerStatusDbDocument>(COLLECTION);
+    const ids = (dealerIds.length > 0 ? dealerIds : [dealerId]).map(parseDealerId);
+    if (ids.some((id) => id === null)) return safeErrorResponse("Invalid dealerId", 400);
+    const uniqueIds = Array.from(new Set((ids as bigint[]).map((id) => id.toString()))).map(BigInt);
+    const userStatus = dealerStatusToUserStatus(rawStatus);
     const now = new Date();
-    const status = rawStatus as DealerStatus;
 
-    if (dealerIds.length > 0) {
-      await collection.bulkWrite(
-        dealerIds.map((id) => ({
-          updateOne: {
-            filter: { dealerId: id },
-            update: {
-              $set: {
-                dealerId: id,
-                status,
-                updatedAt: now,
-                ...(updatedBy ? { updatedBy } : {}),
-              },
-            },
-            upsert: true,
-          },
-        }))
-      );
-
-      return NextResponse.json({
-        success: true,
-        data: dealerIds.map((id) => ({
-          dealerId: id,
-          status,
-          updatedAt: now.toISOString(),
-          ...(updatedBy ? { updatedBy } : {}),
-        })) as DealerStatusResponseDocument[],
+    const rows = await prisma.$transaction(async (tx) => {
+      const dealers = await tx.dealerProfile.findMany({
+        where: { id: { in: uniqueIds }, deletedAt: null, user: { deletedAt: null } },
+        select: { id: true, userId: true, user: { select: { status: true } } },
       });
-    }
+      if (dealers.length !== uniqueIds.length) throw new Error("Dealer not found");
 
-    await collection.updateOne(
-      { dealerId },
-      {
-        $set: {
-          dealerId,
-          status,
-          updatedAt: now,
-          ...(updatedBy ? { updatedBy } : {}),
-        },
-      },
-      { upsert: true }
-    );
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        dealerId,
-        status,
-        updatedAt: now.toISOString(),
-        ...(updatedBy ? { updatedBy } : {}),
-      } as DealerStatusResponseDocument,
+      const disable = userStatus !== "ACTIVE";
+      await tx.user.updateMany({
+        where: { id: { in: dealers.map((dealer) => dealer.userId) } },
+        data: { status: userStatus, ...(disable ? { tokenVersion: { increment: 1 } } : {}) },
+      });
+      if (disable) {
+        await tx.authSession.updateMany({ where: { userId: { in: dealers.map((dealer) => dealer.userId) }, revokedAt: null }, data: { revokedAt: now } });
+      }
+      await tx.authAuditLog.createMany({
+        data: dealers.map((dealer) => ({
+          sessionId: actor.sessionId,
+          role: actor.role,
+          eventType: "DEALER_STATUS_COMPAT_CHANGED",
+          metadata: { dealerId: dealer.id.toString(), oldStatus: dealer.user.status, newStatus: userStatus, userId: actor.userId.toString() },
+        })),
+      });
+      return tx.dealerProfile.findMany({
+        where: { id: { in: uniqueIds } },
+        select: { id: true, userId: true, user: { select: { status: true, updatedAt: true } } },
+        orderBy: { id: "asc" },
+      });
     });
+
+    const data = rows.map((row) => toResponseDocument(row, actor.displayName));
+    return NextResponse.json({ success: true, data: dealerIds.length > 0 ? data : data[0] }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("dealer-status PATCH failed", error);
-    if (isMongoDependencyError(error)) {
-      return safeErrorResponse("Dealer status database is currently unavailable", 503);
-    }
+    if (error instanceof Error && error.message === "Unauthenticated") return safeErrorResponse("Unauthenticated", 401);
+    if (error instanceof Error && error.message === "Dealer not found") return safeErrorResponse("Dealer not found", 404);
     return safeErrorResponse("Unable to save dealer status");
   }
 }

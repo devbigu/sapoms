@@ -2,10 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { Save, Upload } from "lucide-react";
-
-const BACKEND_URL = "/api/php-compat";
 
 type DealerSession = {
   Dealer_Id?: string;
@@ -88,10 +85,9 @@ export default function DealerProfilePage() {
     const loadDealer = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`${BACKEND_URL}/dealerinfo?id=${encodeURIComponent(id)}`);
+        const response = await fetch("/api/dealer/profile", { cache: "no-store" });
         const json = await response.json();
-        // Prefer session/localStorage values first so recent client-side updates show immediately
-        const data = session || json.data || {};
+        const data = json.data || session || {};
         setName(data.Dealer_Name || "");
         setEmail(data.Dealer_Email || "");
         setNumber(data.Dealer_Number || "");
@@ -121,18 +117,13 @@ export default function DealerProfilePage() {
 
     setIsSaving(true);
     try {
-      const formData = new FormData();
-      formData.append("Dealer_Name", name);
-      formData.append("Dealer_Email", email);
-      formData.append("Dealer_Number", number);
-      formData.append("Dealer_City", city);
-      formData.append("Dealer_Address", address);
-      formData.append("Dealer_Pincode", pincode);
-      formData.append("Dealer_Password", password);
-      if (image) formData.append("Dealer_Image", image);
-
-      const response = await axios.post(`${BACKEND_URL}/updateDealer?id=${encodeURIComponent(dealerId)}`, formData);
-      const payload = response.data || {};
+      const response = await fetch("/api/dealer/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Dealer_Name: name, Dealer_Email: email, Dealer_Number: number, Dealer_City: city, Dealer_Address: address, Dealer_Pincode: pincode, Dealer_Password: password }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.message || "Update failed");
       const previous = readDealerSession() || {};
       const payloadData = payload?.data || {};
       const updated = {

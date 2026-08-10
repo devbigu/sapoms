@@ -39,7 +39,7 @@ type Dealer = {
   status?: string;
 };
 
-type DealerApiResponse = {
+type DealerListResponse = {
   data?: Dealer[];
 };
 
@@ -51,7 +51,6 @@ type StaffSession = {
   email: string;
 };
 
-const API_BASE = "/api/php-compat-root";
 const DEALERS_PER_PAGE = 10;
 
 function isRecord(value: unknown): value is StoredStaffRecord {
@@ -304,7 +303,7 @@ function compareNewestDealerFirst(left: Dealer, right: Dealer): number {
 
 async function parseDealerResponse(
   response: Response
-): Promise<DealerApiResponse> {
+): Promise<DealerListResponse> {
   const responseText = await response.text();
 
   if (!response.ok) {
@@ -322,7 +321,7 @@ async function parseDealerResponse(
   try {
     return JSON.parse(
       responseText
-    ) as DealerApiResponse;
+    ) as DealerListResponse;
   } catch {
     throw new Error(
       "Dealer API returned invalid JSON."
@@ -390,7 +389,7 @@ export default function StaffDealerListPage() {
         );
 
         const [response, statusOverrides] = await Promise.all([
-          fetch(`${API_BASE}/api/staffDealers?id=${encodeURIComponent(currentStaff.id)}`, {
+          fetch(`/api/staff/dealers`, {
             cache: "no-store",
             signal: controller.signal,
           }),
@@ -405,11 +404,7 @@ export default function StaffDealerListPage() {
           ? payload.data
           : [];
 
-        const assignedDealers = applyDealerStatusOverrides(allDealers, statusOverrides)
-          .filter((dealer) => {
-            const assignmentIds = getDealerAssignedStaffIds(dealer);
-            return assignmentIds.length === 0 || isDealerAssignedToStaff(dealer, currentStaff.id);
-          });
+        const assignedDealers = applyDealerStatusOverrides(allDealers, statusOverrides);
 
         console.log(
           `Found ${assignedDealers.length} assigned dealers for staff ${currentStaff.id}`

@@ -3,7 +3,8 @@ import { adminListResponse } from "@/server/admin/admin-response";
 import { adminErrorResponse } from "@/server/admin/admin-errors";
 import { auditAdminAction, requireAdmin, requestIdFrom } from "@/server/admin/admin-route";
 import { parseAdminProductListInput } from "@/server/modules/admin/products/products.schemas";
-import { listAdminProducts } from "@/server/modules/admin/products/products.service";
+import { createAdminProduct, listAdminProducts } from "@/server/modules/admin/products/products.service";
+import { parseProductWriteInput } from "@/server/modules/products/product-write";
 
 export const runtime = "nodejs";
 
@@ -18,5 +19,18 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[GET /api/admin/products]", error);
     return adminErrorResponse(error, "Products are unavailable");
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const actor = await requireAdmin();
+    const requestId = requestIdFrom(request);
+    const data = await createAdminProduct(parseProductWriteInput(await request.json()));
+    await auditAdminAction({ actor, request, eventType: "ADMIN_PRODUCT_CREATED", route: "/api/admin/products", requestId, targetId: data.id });
+    return NextResponse.json({ success: true, data }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[POST /api/admin/products]", error);
+    return adminErrorResponse(error, "Product could not be saved");
   }
 }

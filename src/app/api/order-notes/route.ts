@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
-import { filterExistingOrderIds, resolveOrderAccess } from "@/lib/orderAccess";
+import { requireAuth } from "@/server/auth/session";
+import { listOrderNotes, PostgresOrderAnnotationError, upsertOrderNote } from "@/lib/postgresOrderAnnotations";
 
-function safeText(value: unknown, max = 1200) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
-function toDoc(doc: any) {
-  return {
-    ...doc,
-    id: doc._id.toString(),
-    _id: undefined,
-  };
+function errorResponse(error: unknown) {
+  const status = error instanceof PostgresOrderAnnotationError
+    ? error.status
+    : /Unauthenticated|Invalid token|Session is not active|User is not active/i.test(String((error as Error)?.message ?? ""))
+      ? 401
+      : 500;
+  return NextResponse.json(
+    { success: false, message: status === 401 ? "Unauthenticated" : String((error as Error)?.message ?? "Unable to process order notes.") },
+    { status },
+  );
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const dealerId = req.nextUrl.searchParams.get("dealer_id");
     const orderId = req.nextUrl.searchParams.get("order_id");
     const orderIds = req.nextUrl.searchParams.get("order_ids");
     if (!orderId && !orderIds) {
@@ -26,65 +25,26 @@ export async function GET(req: NextRequest) {
     const requestedIds = orderIds
       ? orderIds.split(",").map((id) => id.trim()).filter(Boolean).slice(0, 200)
       : orderId ? [orderId] : [];
-    const visibleIds = await filterExistingOrderIds(requestedIds, dealerId);
-    if (requestedIds.length > 0 && visibleIds.size === 0) {
-      return NextResponse.json({ success: true, data: [] });
-    }
-
-    const query: Record<string, any> = {};
-    if (dealerId) query.dealerId = dealerId;
-    if (orderId) query.orderId = orderId;
-    if (orderIds) {
-      query.orderId = { $in: Array.from(visibleIds) };
-    }
-
-    const db = await getDb();
-    const docs = await db
-      .collection("order_notes")
-      .find(query)
-      .sort({ createdAt: -1 })
-      .limit(200)
-      .toArray();
-
-    return NextResponse.json({ success: true, data: docs.map(toDoc) });
-  } catch (e: any) {
-    console.error("[GET /api/order-notes]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const actor = await requireAuth();
+    const rows = await listOrderNotes(actor, requestedIds);
+    return NextResponse.json({ success: true, data: rows ?? [] }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[GET /api/order-notes]", error);
+    return errorResponse(error);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const orderId = safeText(body.orderId || body.order_id, 80);
-    const dealerId = safeText(body.dealerId || body.dealer_id, 80);
-    const note = safeText(body.note);
-
-    if (!orderId || !dealerId || !note) {
-      return NextResponse.json({ success: false, message: "orderId, dealerId, and note are required" }, { status: 400 });
+    const actor = await requireAuth();
+    const saved = await upsertOrderNote(actor, body);
+    if (!saved) {
+      return NextResponse.json({ success: false, message: "Order notes are available only for PostgreSQL orders." }, { status: 404 });
     }
-    const access = await resolveOrderAccess(orderId, dealerId);
-    if (!access.visible) return NextResponse.json({ success: false, message: access.reason }, { status: 404 });
-
-    const now = new Date().toISOString();
-    const db = await getDb();
-    await db.collection("order_notes").updateOne(
-      { orderId, dealerId },
-      {
-        $set: {
-          note,
-          dealerName: safeText(body.dealerName, 200),
-          updatedAt: now,
-        },
-        $setOnInsert: { orderId, dealerId, createdAt: now },
-      },
-      { upsert: true }
-    );
-
-    const doc = await db.collection("order_notes").findOne({ orderId, dealerId });
-    return NextResponse.json({ success: true, data: toDoc(doc!) }, { status: 201 });
-  } catch (e: any) {
-    console.error("[POST /api/order-notes]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    return NextResponse.json({ success: true, data: saved }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[POST /api/order-notes]", error);
+    return errorResponse(error);
   }
 }

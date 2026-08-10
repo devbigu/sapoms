@@ -19,7 +19,6 @@ import { downloadOrderInvoice } from '@/lib/invoicegenerator'
 import { resolveOrderAmounts } from '@/lib/orderAmounts'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const BACKEND_URL = '/api/php-compat'
 const YEAR = new Date().getFullYear()
 const TODAY = moment().startOf('day')
 const ORDERS_PAGE_SIZE = 20
@@ -337,7 +336,8 @@ export default function DealerLedgerPage() {
   const { data: staffAssignedDealers } = useQuery<{ data: { Dealer_Id: string }[] }>({
     queryKey: ['staff-assigned-dealers-check', staffId],
     queryFn: async () => {
-      const res = await fetch(`${BACKEND_URL}/staffDealers?id=${staffId}`)
+      const res = await fetch('/api/staff/dealers')
+      if (!res.ok) throw new Error('Failed to load assigned dealers')
       return res.json()
     },
     enabled: userRole === 'staff' && !!staffId && !!dealerId,
@@ -738,3 +738,4 @@ export default function DealerLedgerPage() {
     </div>
   )
 }
+

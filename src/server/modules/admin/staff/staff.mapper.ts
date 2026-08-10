@@ -7,6 +7,8 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
   const designation = record.designation || "";
   const location = record.location || "";
   const staffRoleType = record.staffRoleType || "";
+  const role = record.user.role;
+  const salesRegion = record.salesRegion || "";
 
   return {
     id,
@@ -15,6 +17,8 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
     designation,
     location,
     staffRoleType,
+    salesRegion,
+    role,
     status: record.user.status,
     assignedDealerCount: 0,
     ...(detail ? { assignedDealers: [] } : {}),
@@ -24,5 +28,6 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
     staff_designation: designation,
     staff_location: location,
     staff_roletype: staffRoleType,
+    sales_region: salesRegion,
   };
 }

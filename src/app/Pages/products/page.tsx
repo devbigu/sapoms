@@ -39,7 +39,6 @@ type ProductResponse = {
   last_page: number
 }
 
-const BACKEND_URL    = "/api/php-compat"
 const ITEMS_PER_PAGE = 10
 
 function firstNonEmpty(...values: unknown[]): string {
@@ -204,7 +203,30 @@ function ProductListContent() {
   const { data: response, isLoading, isError, refetch } = useQuery<ProductResponse>({
     queryKey: ['products', page, search, selectedCategory],
     queryFn: async () => {
-      const catalogueProducts = await loadCatalogueProducts()
+      const res = await fetch('/api/admin/products?page=1&pageSize=1000', { cache: 'no-store' })
+      if (!res.ok) throw new Error('Products unavailable')
+      const json = await res.json()
+      const catalogueProducts = (json.data ?? json.items ?? []).map((product: any) => ({
+        id: product.id,
+        sku: product.productCode || product.id,
+        name: product.name,
+        descriptionHtml: product.description || '',
+        images: product.imageUrl ? [product.imageUrl] : [],
+        category: product.category?.name || '',
+        categories: product.category?.name ? [product.category.name] : [],
+        variants: (product.variants ?? []).map((variant: any) => ({
+          id: variant.id,
+          sku: variant.sku || variant.catalogueNumber || variant.id,
+          catalogueNumber: variant.catalogueNumber || variant.sku || '',
+          name: variant.catalogueNumber || variant.sku || product.name,
+          pack: Number(variant.packSize || 1),
+          price: Number(variant.unitPricePaise || 0) / 100,
+          unitName: variant.unitName || '',
+          inStock: product.active && variant.active,
+          active: variant.active,
+          images: product.imageUrl ? [product.imageUrl] : [],
+        })),
+      }))
       const filteredProducts = filterCatalogueProducts(catalogueProducts, search, selectedCategory)
       const start = (page - 1) * ITEMS_PER_PAGE
       const pagedProducts = filteredProducts.slice(start, start + ITEMS_PER_PAGE)
@@ -233,12 +255,9 @@ function ProductListContent() {
 
   const handleDelete = async (id: string) => {
     try {
-      const fd = new FormData()
-      fd.append("id", id)
-      fd.append("tbl", "product_tbl")
-      fd.append("field", "product_id")
-      const res = await axios.post(`${BACKEND_URL}/delete`, fd)
-      setToastMsg({ text: res.data.msg || "Deleted successfully", ok: true })
+      const res = await fetch(`/api/admin/products/${encodeURIComponent(id)}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Delete failed")
+      setToastMsg({ text: "Deleted successfully", ok: true })
       refetch()
     } catch {
       setToastMsg({ text: "Failed to delete product", ok: false })

@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -49,9 +49,14 @@ function baseRecord(overrides = {}) {
   };
 }
 
-test("Order details load products by order header ID", async () => {
+test("Order details load through authenticated order access before legacy detail fallback", async () => {
   const source = await fs.readFile(orderDetailPath, "utf8");
-  assert.match(source, /orderdatalist\?id=\$\{id\}/);
+  const accessFetch = source.indexOf('fetch("/api/order-access/" + encodeURIComponent(id)');
+  const legacyFallback = source.indexOf('const loadLegacyDetails = async () =>', accessFetch);
+  assert.ok(accessFetch >= 0);
+  assert.ok(legacyFallback > accessFetch);
+  assert.match(source, /headers: buildDispatchHeaders\(currentUser\)/);
+  assert.match(source, /applyDetailPayload\(\{ data: json\.data \}, true\)/);
 });
 
 test("Dispatch updates use product orderdata_id when available", () => {
@@ -465,15 +470,18 @@ test("No request is made to PHP addremark in the new dispatch API", async () => 
   assert.doesNotMatch(source, /addremark/);
 });
 
-test("Order details fetch header access fields through the role-scoped orders-data adapter", async () => {
+test("Order details fetch header access fields through the session-scoped orders-data adapter", async () => {
   const source = await fs.readFile(orderDetailPath, "utf8");
-  assert.match(source, /orders-data\?source=\$\{source\}&role=\$\{encodeURIComponent\(actor\.role\)\}/);
-  assert.match(source, /actor\.role === "dealer" \|\| actor\.role === "staff" \? "orderhispegination"/);
+  assert.match(source, /orders-data\?page=1&limit=20&search=/);
+  assert.doesNotMatch(source, /orders-data[^`"']*source=|orders-data[^`"']*role=|orders-data[^`"']*id=/);
+  assert.doesNotMatch(source, /x-omsons-actor-/);
 });
 
-test("Dispatch API fetches header access fields from orderhispegination", async () => {
+test("Dispatch API is PostgreSQL-only and has no legacy header fetch", async () => {
   const source = await fs.readFile(dispatchApiPath, "utf8");
-  assert.match(source, /orderhispegination\?page=1&limit=20&search=/);
+  assert.match(source, /findPostgresOrderDispatchPayload\(lookup, actor\)/);
+  assert.match(source, /applyPostgresOrderDispatch\(body\.orderId, actor, body\)/);
+  assert.doesNotMatch(source, /orderhispegination|orderdatalist|php-compat|mirisoft|dealerapi|getDb|MongoClient/);
 });
 
 test("No full-page reload occurs after dispatch update", async () => {
@@ -494,13 +502,14 @@ test("Admin and Staff use the shared dispatch component on the unified order det
   assert.match(source, /resolveCurrentUser/);
 });
 
-test("UI and API rely on the shared normalized dispatch access helper", async () => {
+test("UI uses shared dispatch helper and API delegates to PostgreSQL dispatch service", async () => {
   const panelSource = await fs.readFile(dispatchPanelPath, "utf8");
   const apiSource = await fs.readFile(dispatchApiPath, "utf8");
   assert.match(panelSource, /canUserEditDispatch/);
   assert.match(panelSource, /isAcceptedOrderForDispatch/);
   assert.doesNotMatch(panelSource, /String\(acceptOrder \?\? "0"\) !== "1"/);
-  assert.match(apiSource, /canUserEditDispatch/);
+  assert.match(apiSource, /applyPostgresOrderDispatch/);
+  assert.match(apiSource, /findPostgresOrderDispatchPayload/);
 });
 
 test("Order details page wires the Staff-only selected-products dispatch flow", async () => {
@@ -517,31 +526,26 @@ test("Order details page wires the Staff-only selected-products dispatch flow", 
   assert.doesNotMatch(source, /displayOrders\.forEach\(.*fetch/s);
 });
 
-test("selected-products API reuses normalized merge, bulk plan, idempotency, and guarded Mongo updates", async () => {
+test("selected-products API routes through PostgreSQL dispatch service", async () => {
   const source = await fs.readFile(dispatchApiPath, "utf8");
-  assert.match(source, /action.*dispatch_selected/s);
-  assert.match(source, /actor\.role !== "staff"/);
-  assert.match(source, /mergeOrderItemsWithDispatchRecords\(effectiveItems, docs\)/);
-  assert.match(source, /buildBulkDispatchPlan\(mergedItems\)/);
-  assert.match(source, /bulkUpdateId\(idempotencyKey, line\)/);
-  assert.match(source, /"updates\.id": \{ \$ne: updateId \}/);
-  assert.match(source, /\$expr:\s*\{\s*\$lte:/);
-  assert.match(source, /fetchStaffAssignedDealerIds\(actor\.id\)/);
-  assert.match(source, /const dispatchQuantity = Number\(input\.dispatchQuantity\)/);
+  assert.match(source, /normalizeFulfilmentStatus\(body\.fulfilmentStatus \?\? body\.status/);
+  assert.match(source, /applyPostgresOrderDispatch\(body\.orderId, actor, body\)/);
   assert.match(source, /invalidatePendingProductsCache\(\)/);
+  assert.doesNotMatch(source, /mergeOrderItemsWithDispatchRecords|buildBulkDispatchPlan|bulkUpdateId|updates\.id|getDb|MongoClient|orderdatalist/);
 });
 
-test("Admin acceptance mirror runs only after the PHP acceptance request succeeds", async () => {
+test("Admin acceptance uses the migrated order overlay route without the old PHP acceptance request", async () => {
   const source = await fs.readFile(orderListPath, "utf8");
-  const phpCall = source.indexOf("acceptstatus_requst");
+  const overlayCall = source.indexOf("/api/order-overlays/");
   const mirrorCall = source.indexOf("mirror_acceptance");
-  assert.ok(phpCall >= 0 && mirrorCall > phpCall);
-  assert.match(source, /status === 1 && session\.role === 'admin'/);
+  assert.ok(overlayCall >= 0 && mirrorCall > overlayCall);
+  assert.doesNotMatch(source, /acceptstatus_requst/);
+  assert.match(source, /action: status === 1 \? 'mirror_acceptance' : 'decline'/);
 });
 
-test("acceptance mirror reuses the existing order overlay collection", async () => {
-  const overlaySource = await fs.readFile(path.resolve("src/lib/orderOverlays.ts"), "utf8");
-  assert.match(overlaySource, /saveAcceptedState/);
-  assert.match(overlaySource, /getOrderOverlayCollection\(\)/);
-  assert.doesNotMatch(overlaySource, /order_acceptance/);
+test("acceptance mirror writes PostgreSQL order overlay history", async () => {
+  const statusSource = await fs.readFile(path.resolve("src/lib/postgresOrderStatus.ts"), "utf8");
+  assert.match(statusSource, /tx\.orderOverlay\.create/);
+  assert.match(statusSource, /type: "acceptance"/);
+  assert.doesNotMatch(statusSource, /getOrderOverlayCollection|order_acceptance/);
 });

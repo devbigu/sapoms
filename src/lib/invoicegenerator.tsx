@@ -21,7 +21,7 @@ import {
 import { resolveStoredAuth } from "@/lib/roleAccess";
 import { normalizeScopeId, resolveOrderDealerId } from "@/lib/staffOrderScope.js";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface OrderInvoiceData {
     order_id: string;
     order_date: string;
@@ -120,9 +120,7 @@ export function canGenerateOrderInvoiceForActor(order: OrderInvoiceData, options
     return Boolean(actor.actorId && ownerId && actor.actorId === ownerId);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const BACKEND_URL = "/api/php-compat";
-
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface OrderItem {
     orderdata_id: string;
     orderdata_orderid?: string;
@@ -164,12 +162,12 @@ function buildInvoiceDescriptionMeta({
     productNote: string;
     isPriority: boolean;
 }): InvoiceDescriptionMeta {
-    const baseName = String(productName || catalogueNumber || "—").trim();
+    const baseName = String(productName || catalogueNumber || "â€”").trim();
     const catNumber = String(catalogueNumber || "").trim();
     const normalizedNote = String(productNote || "").trim();
 
     const mainLines = [
-        `${baseName}${productName && catNumber ? ` — Cat. No: ${catNumber}` : ""}`,
+        `${baseName}${productName && catNumber ? ` â€” Cat. No: ${catNumber}` : ""}`,
         isPriority ? "[PRIORITY DELIVERY]" : "",
     ].filter(Boolean);
 
@@ -200,60 +198,21 @@ async function fetchOrderSummaryOverride(order: OrderInvoiceData): Promise<Recor
 
 async function fetchOrderItems(orderId: string): Promise<OrderItem[]> {
     try {
-        const normalized = await fetch(`/api/order-access/${encodeURIComponent(orderId)}?role=admin&actor_id=admin`, { cache: "no-store" }).catch(() => null);
-        if (normalized?.ok) {
-            const payload = await normalized.json().catch(() => null);
-            const normalizedOrder = payload?.data;
-            const normalizedItems = Array.isArray(normalizedOrder?.items) ? normalizedOrder.items : Array.isArray(normalizedOrder?.productorder) ? normalizedOrder.productorder : [];
-            if (normalizedItems.length > 0) return normalizedItems as OrderItem[];
-        }
-        const res = await fetch(`${BACKEND_URL}/orderdatalist?id=${orderId}`);
-        if (!res.ok) return [];
-        const json = await res.json();
-        const raw = json.data;
-        // raw may be: array of legacy order rows, or object with items array, or array of new-style items
-        let items: any[] = [];
-        if (Array.isArray(raw)) {
-            if (raw.length > 0 && (raw[0].productId || raw[0].productName || raw[0].quantityPacks !== undefined)) {
-                items = raw;
-            } else if (raw.length > 0 && raw[0].items && Array.isArray(raw[0].items)) {
-                items = raw[0].items;
-            } else {
-                // assume legacy rows already shaped like OrderItem
-                return raw as OrderItem[];
-            }
-        } else if (raw && typeof raw === "object") {
-            if (Array.isArray(raw.items)) items = raw.items;
-        }
-
-        // Normalize new-style items into OrderItem shape used below
-        return (items ?? []).map((it: any, idx: number) => ({
-            orderdata_id: String(it.productId ?? it.id ?? `i-${idx}`),
-            orderdata_orderid: String(it.orderdata_orderid ?? it.orderId ?? orderId),
-            orderdata_cat_no: resolveCatalogueNumber(it),
-            orderdata_item_quantity: String(it.quantityPacks ?? it.quantity ?? it.orderdata_item_quantity ?? 0),
-            orderdata_price: String(it.unitPrice ?? it.unit_price ?? it.orderdata_price ?? 0),
-            orderdata_discount: String(it.discountAmount ?? it.orderdata_discount ?? 0),
-            orderdata_afterDisPrice: String(it.finalPrice ?? it.final_price ?? it.orderdata_afterDisPrice ?? 0),
-            product_name: String(it.productName ?? it.product_name ?? ""),
-            product_discription: String(it.productDescription ?? it.product_discription ?? ""),
-            product_unit: String(it.unit ?? it.product_unit ?? "Pcs"),
-            discount: String(it.totalDiscountPercent ?? it.discount ?? 0),
-            remark: it.remark ?? it.remarks ?? undefined,
-            remarks: it.remarks ?? it.remark ?? undefined,
-            priority: it.priority ?? false,
-            isPriority: it.isPriority ?? undefined,
-            is_priority: it.is_priority ?? undefined,
-            // preserve payload pack info
-            // @ts-ignore - allow extra fields
-            packSize: it.packSize ?? it.pack_size ?? undefined,
-            // @ts-ignore
-            totalPieces: it.totalPieces ?? it.total_pieces ?? undefined,
-        }));
+        const normalized = await fetch(`/api/order-access/${encodeURIComponent(orderId)}`, { cache: "no-store" }).catch(() => null);
+        if (!normalized?.ok) return [];
+        const payload = await normalized.json().catch(() => null);
+        const normalizedOrder = payload?.data;
+        const normalizedItems = Array.isArray(normalizedOrder?.items)
+            ? normalizedOrder.items
+            : Array.isArray(normalizedOrder?.productorder)
+                ? normalizedOrder.productorder
+                : [];
+        return normalizedItems as OrderItem[];
     } catch {
         return [];
     }
 }
+
 
 export function extractOrderNoteFromRemarks(value: unknown): string {
     if (typeof value !== "string") return "";
@@ -270,7 +229,7 @@ export function extractOrderNoteFromRemarks(value: unknown): string {
  *   2. note        (displayOrder.note)
  *   3. savedNote   (from /api/order-notes)
  *   4. orderRemark (order-level "Order note:" text)
- *   5. itemRemarks (item-level "Order note:" text — first match only)
+ *   5. itemRemarks (item-level "Order note:" text â€” first match only)
  *   6. reason      (displayOrder.reason)
  *   7. "N/A"
  */
@@ -303,7 +262,7 @@ export function resolveInvoiceRemark({
     const fromOrderRemark = extractOrderNoteFromRemarks(orderRemark);
     if (fromOrderRemark) return fromOrderRemark;
 
-    // 5: item-level "Order note:" — first unique match
+    // 5: item-level "Order note:" â€” first unique match
     if (Array.isArray(itemRemarks)) {
         const fromItems = itemRemarks
             .map((r) => extractOrderNoteFromRemarks(r))
@@ -357,7 +316,7 @@ async function fetchOrderProductNotes(orderId: string): Promise<Array<Record<str
     }
 }
 
-// Parse PACK OF column from description HTML table: returns { catNo → packSize }
+// Parse PACK OF column from description HTML table: returns { catNo â†’ packSize }
 function parsePackSizes(html: string): Record<string, number> {
     const result: Record<string, number> = {};
     if (!html) return result;
@@ -477,30 +436,41 @@ function resolveCatalogueNumber(item: any): string {
 }
 
 
-// ─── Main PDF Generator ───────────────────────────────────────────────────────
+// â”€â”€â”€ Main PDF Generator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?: InvoiceDownloadOptions): Promise<Blob> {
     if (!canGenerateOrderInvoiceForActor(order, options)) throw new Error("Unauthorized invoice access");
     const dp = getDealerProfile();
-    const summaryOverride = await fetchOrderSummaryOverride(order);
+    const inlineSummaryOverride = (order as any).__source === "postgres" && Array.isArray((order as any).summaryOverrides)
+        ? (order as any).summaryOverrides[0] ?? null
+        : null;
+    const summaryOverride = inlineSummaryOverride ?? ((order as any).__source === "postgres" ? null : await fetchOrderSummaryOverride(order));
     const displayOrder = summaryOverride ? { ...(order as any), ...summaryOverride } : order;
     const dealerSource = { ...(displayOrder as any), ...(dp ?? {}) };
 
-    // Fetch detailed order items (product names) from the API or prefer inlined `order.items` if present
+    const isPostgresOrder = (displayOrder as any).__source === "postgres";
+
+    // PostgreSQL detail is already normalized by /api/order-access; do not
+    // refetch legacy detail or recalculate row amounts from another source.
     let orderItems: OrderItem[] = [];
-    if (Array.isArray((displayOrder as any).items)) {
-        const raw = (displayOrder as any).items as any[];
+    const inlineItems = Array.isArray((displayOrder as any).items)
+        ? (displayOrder as any).items as any[]
+        : Array.isArray((displayOrder as any).productorder)
+            ? (displayOrder as any).productorder as any[]
+            : [];
+    if (inlineItems.length > 0) {
+        const raw = inlineItems;
         orderItems = raw.map((it: any, idx: number) => ({
             orderdata_id: String(it.productId ?? it.id ?? `i-${idx}`),
             orderdata_orderid: String(it.orderdata_orderid ?? it.orderId ?? displayOrder.order_id),
-            orderdata_cat_no: String(it.productId ?? it.catNo ?? it.orderdata_cat_no ?? ""),
+            orderdata_cat_no: String(it.catNo ?? it.orderdata_cat_no ?? it.catalogueNumber ?? it.productId ?? ""),
             orderdata_item_quantity: String(it.quantityPacks ?? it.quantity ?? it.orderdata_item_quantity ?? 0),
             orderdata_price: String(it.unitPrice ?? it.unit_price ?? it.orderdata_price ?? 0),
             orderdata_discount: String(it.discountAmount ?? it.orderdata_discount ?? 0),
-            orderdata_afterDisPrice: String(it.finalPrice ?? it.final_price ?? it.orderdata_afterDisPrice ?? 0),
+            orderdata_afterDisPrice: String(it.finalAmount ?? it.finalPrice ?? it.final_price ?? it.orderdata_afterDisPrice ?? 0),
             product_name: String(it.productName ?? it.product_name ?? ""),
             product_discription: String(it.productDescription ?? it.product_discription ?? ""),
             product_unit: String(it.unit ?? it.product_unit ?? "Pcs"),
-            discount: String(it.totalDiscountPercent ?? it.discount ?? 0),
+            discount: String(it.totalDiscountPercent ?? it.discountPercent ?? it.discount ?? 0),
             remark: it.remark ?? it.remarks ?? undefined,
             remarks: it.remarks ?? it.remark ?? undefined,
             priority: it.priority ?? false,
@@ -510,16 +480,31 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
             packSize: it.packSize ?? it.pack_size ?? undefined,
             // @ts-ignore
             totalPieces: it.totalPieces ?? it.total_pieces ?? undefined,
+            // @ts-ignore
+            quantityPacks: it.quantityPacks ?? it.quantity_packs ?? undefined,
+            // @ts-ignore
+            listPriceTotal: it.grossAmount ?? it.listPriceTotal ?? it.list_price_total ?? undefined,
+            // @ts-ignore
+            discountAmount: it.discountAmount ?? it.discount_amount ?? undefined,
+            // @ts-ignore
+            finalPrice: it.finalAmount ?? it.finalPrice ?? it.final_price ?? undefined,
+            productNote: it.productNote ?? it.product_note ?? undefined,
         }));
-    } else {
+    } else if (!isPostgresOrder) {
         orderItems = await fetchOrderItems(displayOrder.order_id);
     }
 
-    const productNotes = await fetchOrderProductNotes(String(displayOrder.order_id));
+    const productNotes = Array.isArray((displayOrder as any).orderProductNotes)
+        ? (displayOrder as any).orderProductNotes
+        : isPostgresOrder
+            ? []
+            : await fetchOrderProductNotes(String(displayOrder.order_id));
     orderItems = mergeProductNotesIntoInvoiceItems(orderItems, productNotes) as OrderItem[];
 
     // Resolve the order note used in the invoice Remarks section.
-    const savedNote = await fetchSavedOrderNote(String(displayOrder.order_id));
+    const savedNote = isPostgresOrder
+        ? String((displayOrder as any).order_note ?? (displayOrder as any).note ?? (displayOrder as any).orderNotes?.[0]?.note ?? "")
+        : await fetchSavedOrderNote(String(displayOrder.order_id));
 
     // Collect item-level remark strings for the helper.
     const itemRemarkStrings = orderItems.flatMap((item) =>
@@ -551,7 +536,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
 
     let y = 12;
 
-    // ── LOGO ─────────────────────────────────────────────────────────────────
+    // â”€â”€ LOGO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const LOGO_W = 28;
     const LOGO_H = 16;
 
@@ -562,8 +547,8 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         console.warn("Logo could not be loaded; skipping.");
     }
 
-    // ── HEADER — 8 mm gap between logo right edge and company name ───────────
-    const infoX = ML + LOGO_W + 8;   // ← was +5
+    // â”€â”€ HEADER â€” 8 mm gap between logo right edge and company name â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const infoX = ML + LOGO_W + 8;   // â† was +5
 
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(13);
@@ -578,17 +563,17 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         "PAN: AAACO1234F  |  GSTIN: 06AAACO1234F1Z5  |  CIN: U12345HR2000PTC012345",
     ].forEach((line, i) => doc.text(line, infoX, y + 11 + i * 4));
 
-    y += LOGO_H + 10;   // ← was +8; extra bottom room below header
+    y += LOGO_H + 10;   // â† was +8; extra bottom room below header
 
-    // ── SEPARATOR — consistent left/right margins ─────────────────────────────
+    // â”€â”€ SEPARATOR â€” consistent left/right margins â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.setDrawColor(160, 160, 160);
     doc.setLineWidth(0.4);
-    doc.line(ML, y, PW - MR, y);   // ML … PW-MR — same as all boxes
+    doc.line(ML, y, PW - MR, y);   // ML â€¦ PW-MR â€” same as all boxes
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.2);
     y += 6;
 
-    // ── DOCUMENT TITLE ────────────────────────────────────────────────────────
+    // â”€â”€ DOCUMENT TITLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(11);
     const isApproved = (displayOrder as any).accept_order === "1" || Number(displayOrder.mtstatus ?? 0) >= 2 || String(displayOrder.mtstatus ?? "").toLowerCase().includes("completed");
@@ -603,7 +588,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.setLineWidth(0.2);
     y += 6;
 
-    // ── META TABLE ────────────────────────────────────────────────────────────
+    // â”€â”€ META TABLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const half = CW / 2;
     const LBW = 32;
     const VW = half - LBW;
@@ -614,8 +599,8 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         isApproved ? "Invoice Date" : "PO Date", moment(displayOrder.order_date).format("DD-MM-YYYY")],
         ["Order Date", moment(displayOrder.order_date).format("DD-MM-YYYY"),
             "Order Time", moment(displayOrder.order_date).format("hh:mm A")],
-        ["Dealer", dealerSource.Dealer_Name || displayOrder.Dealer_Name || "—",
-            "Outstanding Date", displayOrder.outstandingDate ? moment(displayOrder.outstandingDate).format("DD-MM-YYYY") : "—"],
+        ["Dealer", dealerSource.Dealer_Name || displayOrder.Dealer_Name || "â€”",
+            "Outstanding Date", displayOrder.outstandingDate ? moment(displayOrder.outstandingDate).format("DD-MM-YYYY") : "â€”"],
     ];
 
     metaRows.forEach(([l1, v1, l2, v2], i) => {
@@ -628,7 +613,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
 
     y += metaRows.length * RH + 5;
 
-    // ── DEALER / SHIP-TO ──────────────────────────────────────────────────────
+    // â”€â”€ DEALER / SHIP-TO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const SEC_HDR_H = 6;
 
     const dealerLines: [string, string][] = [];
@@ -652,7 +637,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.rect(ML, y, half, DEALER_BOD_H);
     doc.rect(ML + half, y, half, DEALER_BOD_H);
 
-    // Dealer rows — PAD from left, LAB_W for label column
+    // Dealer rows â€” PAD from left, LAB_W for label column
     dealerLines.forEach(([label, value], i) => {
         const lineY = y + 7 + i * ROW_STEP;
         doc.setFont("Helvetica", "bold"); doc.setFontSize(7.5);
@@ -662,7 +647,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         doc.text(wrapped[0], ML + PAD + LAB_W, lineY);
     });
 
-    // Ship To — same PAD / LAB_W convention
+    // Ship To â€” same PAD / LAB_W convention
     const shipAddr = dealerSource.Dealer_shipto
         || "Omsons Glassware Pvt. Ltd., KHATA No. 278/364 AND 285/372 HADBAST No. 66, Ambala, Haryana 133104";
 
@@ -670,19 +655,19 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.text("Name :", ML + half + PAD, y + 7);
     doc.text("Address :", ML + half + PAD, y + 13);
     doc.setFont("Helvetica", "normal"); doc.setFontSize(7);
-    doc.text(dealerSource.Dealer_Name || displayOrder.Dealer_Name || "—", ML + half + PAD + LAB_W, y + 7);
+    doc.text(dealerSource.Dealer_Name || displayOrder.Dealer_Name || "â€”", ML + half + PAD + LAB_W, y + 7);
     const shipWrapped = doc.splitTextToSize(shipAddr, half - PAD - LAB_W - PAD);
     doc.text(shipWrapped, ML + half + PAD + LAB_W, y + 13);
 
     y += DEALER_BOD_H + 5;
 
-    // ── ITEMS LABEL ───────────────────────────────────────────────────────────
+    // â”€â”€ ITEMS LABEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(8.5);
     doc.text("Items", ML, y);
     y += 4;
 
-    // ── ITEMS TABLE ───────────────────────────────────────────────────────────
+    // â”€â”€ ITEMS TABLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Build item rows from fetched order items, or fall back to a single row
     const itemRows: any[][] = [];
     let totalQty = 0;
@@ -933,7 +918,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
 
     y = (doc as any).lastAutoTable.finalY + 3;
 
-    // ── REMARKS + T&C (left) | SUMMARY (right) ───────────────────────────────
+    // â”€â”€ REMARKS + T&C (left) | SUMMARY (right) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const SUM_W = 78;
     const LEFT_W = CW - SUM_W;
 
@@ -970,7 +955,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
         ML + PAD + 2,
         y + PAD + 8
     );
-    // T&C — all four sides use PAD
+    // T&C â€” all four sides use PAD
     const tcY = y + REM_H;
     doc.rect(ML, tcY, LEFT_W, TC_H);
     doc.setFont("Helvetica", "bold"); doc.setFontSize(8);
@@ -979,8 +964,8 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     tcLines().forEach((t, i) =>
         doc.text(
             `${i + 1}. ${t}`,
-            ML + PAD,                                       // ← left = PAD
-            tcY + PAD + 3 + 4 + i * TC_LINE_H              // ← top = PAD
+            ML + PAD,                                       // â† left = PAD
+            tcY + PAD + 3 + 4 + i * TC_LINE_H              // â† top = PAD
         )
     );
 
@@ -1009,7 +994,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
 
     y += TOTAL_L_H;
 
-    // ── AMOUNT IN WORDS ───────────────────────────────────────────────────────
+    // â”€â”€ AMOUNT IN WORDS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const FRH = 6;
     doc.rect(ML, y, CW, FRH);
     doc.setFont("Helvetica", "bold"); doc.setFontSize(7.5);
@@ -1020,7 +1005,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.text(wrappedWords[0], ML + 36, y + FRH * 0.63);
     y += FRH;
 
-    // ── PAYMENT TERMS ─────────────────────────────────────────────────────────
+    // â”€â”€ PAYMENT TERMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.rect(ML, y, CW, FRH);
     doc.setFont("Helvetica", "bold"); doc.setFontSize(7.5);
     doc.text("Payment Terms:", ML + PAD, y + FRH * 0.63);
@@ -1029,7 +1014,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.text(pt, ML + 32, y + FRH * 0.63);
     y += FRH + 14;
 
-    // ── SIGNATURES ────────────────────────────────────────────────────────────
+    // â”€â”€ SIGNATURES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.setFont("Helvetica", "normal"); doc.setFontSize(7.5);
     doc.text("Checked By", ML, y);
     doc.setLineWidth(0.3);
@@ -1044,7 +1029,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     doc.text("Authorized Signatory", PW_R, y + 14, { align: "right" });
     y += 22;
 
-    // ── PAGE FOOTER ───────────────────────────────────────────────────────────
+    // â”€â”€ PAGE FOOTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     doc.setFont("Helvetica", "normal"); doc.setFontSize(7);
     doc.setTextColor(100, 100, 100);
     doc.text("Page 1 of 1", PW_R, y, { align: "right" });
@@ -1055,7 +1040,7 @@ export async function generateOrderInvoicePDF(order: OrderInvoiceData, options?:
     return doc.output("blob");
 }
 
-// ── T&C lines extracted so they can be reused for height calc ────────────────
+// â”€â”€ T&C lines extracted so they can be reused for height calc â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function tcLines(): string[] {
     return [
         "Goods once sold will not be taken back.",
@@ -1067,7 +1052,7 @@ function tcLines(): string[] {
     ];
 }
 
-// ─── Upload to Supabase ────────────────────────────────────────────────────────
+// â”€â”€â”€ Upload to Supabase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function uploadOrderInvoiceToSupabase(
     pdfBlob: Blob,
     order: OrderInvoiceData,
@@ -1075,7 +1060,10 @@ export async function uploadOrderInvoiceToSupabase(
 ): Promise<InvoiceResult> {
     if (!canGenerateOrderInvoiceForActor(order, options)) return { success: false, message: "Unauthorized invoice access" };
     try {
-        const summaryOverride = await fetchOrderSummaryOverride(order);
+        const inlineSummaryOverride = (order as any).__source === "postgres" && Array.isArray((order as any).summaryOverrides)
+            ? (order as any).summaryOverrides[0] ?? null
+            : null;
+        const summaryOverride = inlineSummaryOverride ?? ((order as any).__source === "postgres" ? null : await fetchOrderSummaryOverride(order));
         const displayOrder = summaryOverride ? { ...(order as any), ...summaryOverride } : order;
         const invNo = invoiceNumber(order.order_id);
         const timestamp = moment().format("YYYY-MM-DD_HH-mm-ss");
@@ -1111,7 +1099,7 @@ export async function uploadOrderInvoiceToSupabase(
     }
 }
 
-// ─── Download to device ────────────────────────────────────────────────────────
+// â”€â”€â”€ Download to device â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function downloadOrderInvoice(order: OrderInvoiceData, options?: InvoiceDownloadOptions): Promise<InvoiceResult> {
     if (!canGenerateOrderInvoiceForActor(order, options)) throw new Error("Unauthorized invoice access");
     try {
@@ -1130,7 +1118,7 @@ export async function downloadOrderInvoice(order: OrderInvoiceData, options?: In
     }
 }
 
-// ─── List invoices ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ List invoices â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function listInvoices(dealerId: string, limit = 100) {
     try {
         let query = supabase
@@ -1145,7 +1133,7 @@ export async function listInvoices(dealerId: string, limit = 100) {
     }
 }
 
-// ─── Delete invoice ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Delete invoice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export async function deleteInvoice(invoiceId: string, filePath: string) {
     try {
         const { data: invoice } = await supabase

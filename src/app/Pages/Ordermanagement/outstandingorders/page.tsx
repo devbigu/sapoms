@@ -177,7 +177,7 @@ export default function PendingOrdersPage() {
     queryKey: ['pendingorders', STAFF_ORDER_SCOPE_VERSION, viewerRole, viewerId, page, search, statusFilter, acceptFilter],
     enabled: authResolved && hasAccess,
     queryFn: async () => {
-      const res = await axios.get(`/api/orders-data?source=orderpeginationnew&role=${viewerRole}&id=${encodeURIComponent(viewerId)}&page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&order_status=${encodeURIComponent(statusFilter)}&accepted=${encodeURIComponent(acceptFilter)}`)
+      const res = await axios.get(`/api/orders-data?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&order_status=${encodeURIComponent(statusFilter)}&accepted=${encodeURIComponent(acceptFilter)}`)
       return res.data
     },
     placeholderData: keepPreviousData, staleTime: 5 * 60 * 1000,
@@ -218,7 +218,7 @@ export default function PendingOrdersPage() {
     if (page >= totalPages) return
     queryClient.prefetchQuery({
       queryKey: ['pendingorders', STAFF_ORDER_SCOPE_VERSION, viewerRole, viewerId, page + 1, search, statusFilter, acceptFilter],
-      queryFn: async () => { const res = await axios.get(`/api/orders-data?source=orderpeginationnew&role=${viewerRole}&id=${encodeURIComponent(viewerId)}&page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&order_status=${encodeURIComponent(statusFilter)}&accepted=${encodeURIComponent(acceptFilter)}`); return res.data },
+      queryFn: async () => { const res = await axios.get(`/api/orders-data?page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&order_status=${encodeURIComponent(statusFilter)}&accepted=${encodeURIComponent(acceptFilter)}`); return res.data },
     })
   }, [acceptFilter, authResolved, hasAccess, page, queryClient, search, statusFilter, totalPages, viewerId, viewerRole])
 

@@ -3,7 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import { paginationToPrisma } from "@/server/admin/admin-pagination";
-import type { AdminProductListInput, AdminProductRecord } from "./products.types";
+import type { AdminProductListInput, AdminProductRecord, ProductWriteInput } from "./products.types";
 
 function buildWhere(input: AdminProductListInput): Prisma.ProductWhereInput {
   const search = input.search.trim();
@@ -37,6 +37,31 @@ export class PostgresAdminProductRepository {
 
   async findById(productId: bigint): Promise<AdminProductRecord | null> {
     return prisma.product.findUnique({ where: { id: productId }, include });
+  }
+
+  async create(input: ProductWriteInput): Promise<AdminProductRecord> {
+    return prisma.product.create({
+      data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, active: input.active ?? true, variants: { create: input.variants.map((variant) => ({ sku: variant.sku || null, catalogueNumber: variant.catalogueNumber || variant.sku || null, unitName: variant.unitName || null, packSize: variant.packSize ?? null, unitPricePaise: variant.unitPricePaise ?? BigInt(0), packPricePaise: variant.packPricePaise ?? BigInt(0), active: variant.active ?? true })) } },
+      include,
+    });
+  }
+
+  async update(productId: bigint, input: ProductWriteInput): Promise<AdminProductRecord> {
+    return prisma.$transaction(async (tx) => {
+      await tx.product.update({ where: { id: productId }, data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, active: input.active ?? true } });
+      const keepVariantIds = input.variants.map((variant) => variant.id).filter((id): id is string => Boolean(id && /^\d+$/.test(id))).map((id) => BigInt(id));
+      await tx.productVariant.deleteMany({ where: { productId, ...(keepVariantIds.length ? { id: { notIn: keepVariantIds } } : {}) } });
+      for (const variant of input.variants) {
+        const data = { sku: variant.sku || null, catalogueNumber: variant.catalogueNumber || variant.sku || null, unitName: variant.unitName || null, packSize: variant.packSize ?? null, unitPricePaise: variant.unitPricePaise ?? BigInt(0), packPricePaise: variant.packPricePaise ?? BigInt(0), active: variant.active ?? true };
+        if (variant.id && /^\d+$/.test(variant.id)) await tx.productVariant.update({ where: { id: BigInt(variant.id), productId }, data });
+        else await tx.productVariant.create({ data: { ...data, productId } });
+      }
+      return tx.product.findUniqueOrThrow({ where: { id: productId }, include });
+    });
+  }
+
+  async delete(productId: bigint): Promise<void> {
+    await prisma.product.update({ where: { id: productId }, data: { active: false, variants: { updateMany: { where: {}, data: { active: false } } } } });
   }
 }
 

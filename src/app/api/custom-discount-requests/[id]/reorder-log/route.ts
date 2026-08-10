@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
-import { actorFromRequestHeaders, assertDealerScope, customDiscountInclude, mapCustomDiscount, text } from "@/lib/postgresDiscountDrafts";
+import { assertDealerScope, assertOrderBelongsToDealer, customDiscountInclude, mapCustomDiscount, text } from "@/lib/postgresDiscountDrafts";
 
 export const runtime = "nodejs";
 
-async function getActor(req: NextRequest) {
-  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
-}
-
 function jsonError(error: any) {
-  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
   return NextResponse.json({ success: false, message: status >= 500 ? "Failed to write reorder log" : error.message }, { status });
 }
 
@@ -18,7 +14,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params;
     if (!/^\d+$/.test(id)) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const body = await req.json();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealerId || body.dealer_id, 80));
     const orderId = text(body.orderId || body.order_id, 80);
@@ -29,6 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     assertDealerScope(actor, existing.dealerId);
     if (existing.dealerId !== dealerId) return NextResponse.json({ success: false, message: "Request belongs to another dealer" }, { status: 403 });
     if (existing.status !== "APPROVED" || !existing.allowReorder) return NextResponse.json({ success: false, message: "Reorder is not allowed" }, { status: 409 });
+    await assertOrderBelongsToDealer(BigInt(orderId), dealerId);
 
     const updated = await prisma.$transaction(async (tx) => {
       await tx.customDiscountReorderLog.create({ data: { requestId: existing.id, dealerId, orderId: BigInt(orderId) } });

@@ -2,35 +2,26 @@
 
 
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 type SliderImage = {
   id: string;
-  image_url: string;
+  imageUrl: string;
+  image_url?: string;
   title?: string;
-  created_at: string;
+  created_at?: string;
+  createdAt?: string;
 };
 
 
 type SliderManagerProps = {
   /** Optional heading shown at the top of the component */
   title?: string;
-  /** Supabase storage bucket name (default: "slider") */
-  bucket?: string;
-  /** Supabase table name (default: "slider_images") */
-  table?: string;
 };
 
 export default function SliderManager({
   title = "Slider Images",
-  bucket = "slider",
-  table = "slider_images",
 }: SliderManagerProps) {
   const [images, setImages] = useState<SliderImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,11 +40,9 @@ export default function SliderManager({
 
   const fetchImages = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from(table)
-      .select("*")
-      .order("created_at", { ascending: true });
-    setImages(data ?? []);
+    const res = await fetch("/api/admin/slider", { credentials: "include", cache: "no-store" });
+    const payload = await res.json();
+    setImages(Array.isArray(payload?.data) ? payload.data : []);
     setLoading(false);
   };
   const router = useRouter();
@@ -79,23 +68,13 @@ export default function SliderManager({
     if (!file) return;
     setUploading(true);
     try {
-      const ext = file.name.split(".").pop();
-      const fileName = `${Date.now()}.${ext}`;
-
-      const { error: storageErr } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, file, { cacheControl: "3600", upsert: false });
-      if (storageErr) {
-        console.error("STORAGE ERROR:", storageErr);
-        throw storageErr;
-      }
-
-      const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fileName);
-
-      const { error: dbErr } = await supabase
-        .from(table)
-        .insert({ image_url: urlData.publicUrl, title: label.trim() || null });
-      if (dbErr) throw dbErr;
+      const form = new FormData();
+      form.append("image", file);
+      form.append("title", label.trim());
+      form.append("position", String(images.length));
+      const res = await fetch("/api/admin/slider", { method: "POST", body: form, credentials: "include" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.success === false) throw new Error(payload?.message || "Upload failed.");
 
       showToast("Image uploaded and live on slider!", true);
       clearForm();
@@ -111,13 +90,9 @@ export default function SliderManager({
     if (!confirm(`Remove "${img.title || "this image"}" from the slider?`)) return;
     setDeleting(img.id);
     try {
-      // Only remove from storage if it's a Supabase-hosted file (not an external URL)
-      const supabaseBase = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (supabaseBase && img.image_url.includes(supabaseBase)) {
-        const fileName = img.image_url.split("/").pop();
-        if (fileName) await supabase.storage.from(bucket).remove([fileName]);
-      }
-      await supabase.from(table).delete().eq("id", img.id);
+      const res = await fetch(`/api/admin/slider/${img.id}`, { method: "DELETE", credentials: "include" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.success === false) throw new Error(payload?.message || "Delete failed.");
       showToast("Image removed.", true);
       fetchImages();
     } catch {
@@ -253,10 +228,12 @@ export default function SliderManager({
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {images.map((img, i) => (
+            {images.map((img, i) => {
+              const createdAt = img.created_at ?? img.createdAt;
+              return (
               <div key={img.id} className="group relative rounded-xl overflow-hidden border border-gray-100">
                 <img
-                  src={img.image_url}
+                  src={(img.imageUrl ?? img.image_url ?? "")}
                   alt={img.title ?? `slide ${i + 1}`}
                   className="w-full object-cover"
                   style={{ aspectRatio: "16/5" }}
@@ -285,16 +262,17 @@ export default function SliderManager({
                 </div>
 
                 {/* Title + date footer */}
-                {(img.title || img.created_at) && (
+                {(img.title || createdAt) && (
                   <div className="bg-white px-3 py-2 border-t border-gray-100 flex items-center justify-between">
                     <p className="text-[12px] font-medium text-gray-700 truncate">{img.title || "—"}</p>
                     <p className="text-[10px] text-gray-400 font-mono flex-shrink-0 ml-2">
-                      {new Date(img.created_at).toLocaleDateString()}
+                      {createdAt ? new Date(createdAt).toLocaleDateString() : ""}
                     </p>
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

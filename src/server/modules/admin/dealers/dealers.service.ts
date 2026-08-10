@@ -34,6 +34,6 @@ export async function getAdminDealerStaffAssignments(dealerId: bigint) {
   return (await adminDealerRepository.getStaffAssignments(dealerId)).map(mapAdminDealerStaffAssignment);
 }
 
-export async function replaceAdminDealerStaffAssignments(dealerId: bigint, staffIds: bigint[], actor: AuthActor) {
-  return (await adminDealerRepository.replaceStaffAssignments(dealerId, staffIds, actor)).map(mapAdminDealerStaffAssignment);
+export async function replaceAdminDealerStaffAssignments(dealerId: bigint, staffIds: bigint[], actor: AuthActor, rsmUserId?: bigint) {
+  return (await adminDealerRepository.replaceStaffAssignments(dealerId, staffIds, actor, rsmUserId)).map(mapAdminDealerStaffAssignment);
 }

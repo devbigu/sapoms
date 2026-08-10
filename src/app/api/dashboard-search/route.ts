@@ -1,267 +1,65 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadOrderHeaders } from "@/lib/orderHeaders";
-import catalogueProducts from "../../../../public/data/omsons_products_from_excel_with_images.json";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth, type AuthActor } from "@/server/auth/session";
 import dashboardSearch from "@/lib/dashboardSearch.js";
-import { filterOrdersForActor } from "@/lib/staffOrderScope.js";
+import { mapPostgresOrderToLegacy, type PostgresOrderRecord } from "@/lib/postgresOrders";
 
 export const runtime = "nodejs";
 
-const BACKEND_URL = "https://mirisoft.co.in/sas/dealerapi/api";
-const ORDER_ITEM_CACHE_TTL_MS = 5 * 60 * 1000;
+const SEARCH_LIMIT = 12;
+const ORDER_LIMIT = 25;
 
-type DashboardRole = "admin" | "staff" | "dealer";
-
-type DashboardActor = {
-  role: DashboardRole;
-  actorId: string;
-  roletype: string;
-};
+type DashboardRole = "admin" | "staff" | "dealer" | "accountant";
 
 type SearchResponse = {
   success: boolean;
   query: string;
   results: unknown[];
   groups: Record<string, unknown[]>;
-  limitation?: string;
 };
 
-type DealerRow = Record<string, unknown> & {
-  Dealer_Id?: string;
-  Dealer_Name?: string;
-  Dealer_Dealercode?: string;
-  Dealer_City?: string;
-  staffname?: string;
-};
+type ProductWithVariants = Prisma.ProductGetPayload<{
+  include: { category: true; variants: true };
+}>;
 
-type StaffRow = Record<string, unknown> & {
-  staff_id?: string;
-  staff_name?: string;
-  staff_email?: string;
-  staff_roletype?: string;
-};
+type DealerWithUser = Prisma.DealerProfileGetPayload<{
+  include: { user: true; staffAssignments: { where: { active: true; removedAt: null }; include: { staff: true } } };
+}>;
 
-type OrderRow = Record<string, unknown> & {
-  order_id?: string;
-  order_date?: string;
-  orderDate?: string;
-  Dealer_Name?: string;
-  order_status?: string;
-  status?: string;
-  order_amount?: string | number;
-  order_net_amount?: string | number;
-  netPayableAmount?: string | number;
-  order_dealer?: string;
-  orderdata_dealerid?: string;
-  Dealer_Id?: string;
-};
+type StaffWithUser = Prisma.StaffProfileGetPayload<{
+  include: { user: true };
+}>;
 
-type StaffDealerResponse = {
-  data?: DealerRow[];
-};
+const orderInclude = {
+  dealer: {
+    select: {
+      id: true,
+      businessName: true,
+      dealerCode: true,
+      phone: true,
+      city: true,
+      address: true,
+      pincode: true,
+      gstin: true,
+      discountPercent: true,
+    },
+  },
+  assignedStaff: { select: { id: true, displayName: true } },
+  items: { orderBy: { id: "asc" as const } },
+} satisfies Prisma.OrderInclude;
 
-const orderItemSummaryCache = new Map<string, {
-  cachedAt: number;
-  searchText: string;
-}>();
+type OrderWithRelations = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
-function safeText(value: unknown, max = 200) {
+function safeText(value: unknown, max = 240) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-function parseActor(req: NextRequest): DashboardActor | null {
-  const role = safeText(req.headers.get("x-omsons-actor-role"), 20).toLowerCase();
-  const actorId = safeText(req.headers.get("x-omsons-actor-id"), 120);
-  const roletype = safeText(req.headers.get("x-omsons-actor-roletype"), 20);
-
-  if (role !== "admin" && role !== "staff" && role !== "dealer") return null;
-  if (role !== "admin" && !actorId) return null;
-
-  return {
-    role,
-    actorId,
-    roletype,
-  };
+function toDashboardRole(actor: AuthActor): DashboardRole {
+  return actor.role.toLowerCase() as DashboardRole;
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { cache: "no-store" });
-  const responseText = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`External API failed with ${response.status}`);
-  }
-
-  if (/^\s*</.test(responseText)) {
-    throw new Error("External API returned HTML instead of JSON");
-  }
-
-  try {
-    return JSON.parse(responseText) as T;
-  } catch {
-    throw new Error("External API returned invalid JSON");
-  }
-}
-
-async function fetchStaffAssignedDealerIds(staffId: string) {
-  const json = await fetchJson<StaffDealerResponse>(`${BACKEND_URL}/staffDealers?id=${encodeURIComponent(staffId)}`);
-  return new Set(
-    (Array.isArray(json.data) ? json.data : [])
-      .map((dealer) => safeText(String(dealer.Dealer_Id ?? "")))
-      .filter(Boolean)
-  );
-}
-
-async function fetchCandidateOrders(actor: DashboardActor, query: string) {
-  const queryInfo = dashboardSearch.getDashboardQueryInfo(query);
-  const queryTerms = Array.from(new Set([
-    queryInfo.rawQuery,
-    queryInfo.orderInfo.exactOrderId,
-  ].map((term) => safeText(term, 120)).filter(Boolean)));
-
-  if (queryTerms.length === 0) return [];
-
-  const assignedDealerIds = actor.role === "staff"
-    ? Array.from(await fetchStaffAssignedDealerIds(actor.actorId))
-    : [];
-  if (actor.role === "staff" && assignedDealerIds.length === 0) return [];
-
-  const source = actor.role === "admin"
-    ? "orderpegination"
-    : actor.role === "staff"
-      ? "staffOrderrPagination"
-      : "orderhispegination";
-  const loaded = await loadOrderHeaders({ source, actor, assignedDealerIds });
-  const scoped = filterOrdersForActor({
-    role: actor.role,
-    actorId: actor.actorId,
-    assignedDealerIds,
-    orders: loaded.rows,
-  }) as OrderRow[];
-  const loweredTerms = queryTerms.map((term) => term.toLowerCase());
-  const headerMatches = scoped.filter((order) => {
-    const searchable = Object.values(order)
-      .map((value) => safeText(String(value), 240).toLowerCase())
-      .join(" ");
-    return loweredTerms.some((term) => searchable.includes(term));
-  });
-
-  // Item text is fetched only for a bounded fallback set and cached separately.
-  return headerMatches.length > 0 ? headerMatches : scoped;
-}
-
-function collapseWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function stripHtml(value: string) {
-  return collapseWhitespace(value.replace(/<[^>]*>/g, " "));
-}
-
-function normalizeText(value: string) {
-  return stripHtml(value)
-    .toLowerCase()
-    .replace(/[’‘]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[^a-z0-9/+\-.()\s]+/g, " ");
-}
-
-function collectItemSearchText(rows: Record<string, unknown>[]) {
-  return normalizeText(
-    rows
-      .map((row) => [
-        safeText(String(row.orderdata_cat_no ?? row.catNo ?? row.productId ?? ""), 120),
-        safeText(String(row.product_name ?? row.productName ?? row.order_item_description ?? ""), 240),
-      ].filter(Boolean).join(" "))
-      .filter(Boolean)
-      .join(" ")
-  );
-}
-
-async function fetchOrderItemSearchText(orderId: string, actor: DashboardActor) {
-  const cacheKey = `all-orders-v1:${actor.role}:${actor.actorId || "admin"}:${orderId}`;
-  const cached = orderItemSummaryCache.get(cacheKey);
-  if (cached && Date.now() - cached.cachedAt < ORDER_ITEM_CACHE_TTL_MS) {
-    return cached.searchText;
-  }
-
-  const json = await fetchJson<{ data?: unknown }>(
-    `${BACKEND_URL}/orderdatalist?id=${encodeURIComponent(orderId)}`
-  );
-  const raw = json.data;
-
-  let rows: Record<string, unknown>[] = [];
-  if (Array.isArray(raw)) {
-    if (raw.length > 0 && typeof raw[0] === "object" && raw[0] && Array.isArray((raw[0] as { items?: unknown[] }).items)) {
-      rows = ((raw[0] as { items?: unknown[] }).items ?? []).filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
-    } else {
-      rows = raw.filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
-    }
-  } else if (typeof raw === "object" && raw !== null && Array.isArray((raw as { items?: unknown[] }).items)) {
-    rows = ((raw as { items?: unknown[] }).items ?? []).filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null);
-  }
-
-  const searchText = collectItemSearchText(rows);
-  orderItemSummaryCache.set(cacheKey, { cachedAt: Date.now(), searchText });
-  return searchText;
-}
-
-async function buildItemSummariesByOrderId(orders: OrderRow[], query: string, actor: DashboardActor) {
-  const queryInfo = dashboardSearch.getDashboardQueryInfo(query);
-  const orderIds = orders
-    .map((order) => safeText(String(order.order_id ?? "")))
-    .filter(Boolean)
-    .slice(0, 12);
-
-  const settled = await Promise.allSettled(
-    orderIds.map(async (orderId) => {
-      const searchText = await fetchOrderItemSearchText(orderId, actor);
-      const normalizedQuery = normalizeText(queryInfo.normalizedText);
-      const matchedByItemText = Boolean(
-        normalizedQuery &&
-        searchText.includes(normalizedQuery)
-      );
-
-      let matchedLabel = "";
-      if (matchedByItemText) {
-        const prettyWords = queryInfo.keywords.slice(0, 3).join(" ");
-        matchedLabel = prettyWords || queryInfo.rawQuery;
-      }
-
-      return [
-        orderId,
-        {
-          searchText,
-          matchedByItemText,
-          matchedLabel,
-        },
-      ] as const;
-    })
-  );
-
-  const map: Record<string, { searchText?: string; matchedByItemText?: boolean; matchedLabel?: string }> = {};
-  for (const entry of settled) {
-    if (entry.status !== "fulfilled") continue;
-    const [orderId, summary] = entry.value;
-    map[orderId] = summary;
-  }
-  return map;
-}
-
-async function fetchAdminDealers(query: string) {
-  const json = await fetchJson<{ data?: DealerRow[] }>(
-    `${BACKEND_URL}/dealerpegination?page=1&limit=10&search=${encodeURIComponent(query)}`
-  );
-  return Array.isArray(json.data) ? json.data : [];
-}
-
-async function fetchAdminStaff(query: string) {
-  const json = await fetchJson<{ data?: StaffRow[] }>(
-    `${BACKEND_URL}/staffpegination?page=1&limit=10&search=${encodeURIComponent(query)}`
-  );
-  return Array.isArray(json.data) ? json.data : [];
-}
-
-function emptyResponse(query: string, limitation?: string): SearchResponse {
+function emptyResponse(query: string): SearchResponse {
   return {
     success: true,
     query,
@@ -272,45 +70,223 @@ function emptyResponse(query: string, limitation?: string): SearchResponse {
       dealers: [],
       staff: [],
     },
-    ...(limitation ? { limitation } : {}),
   };
 }
 
+function buildProductWhere(query: string): Prisma.ProductWhereInput {
+  return {
+    active: true,
+    OR: [
+      { name: { contains: query, mode: "insensitive" } },
+      { productCode: { contains: query, mode: "insensitive" } },
+      { description: { contains: query, mode: "insensitive" } },
+      { category: { name: { contains: query, mode: "insensitive" } } },
+      {
+        variants: {
+          some: {
+            active: true,
+            OR: [
+              { sku: { contains: query, mode: "insensitive" } },
+              { catalogueNumber: { contains: query, mode: "insensitive" } },
+              { unitName: { contains: query, mode: "insensitive" } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+function buildDealerWhere(query: string): Prisma.DealerProfileWhereInput {
+  return {
+    deletedAt: null,
+    user: { status: "ACTIVE", deletedAt: null },
+    OR: [
+      { businessName: { contains: query, mode: "insensitive" } },
+      { dealerCode: { contains: query, mode: "insensitive" } },
+      { city: { contains: query, mode: "insensitive" } },
+      { phone: { contains: query, mode: "insensitive" } },
+      { gstin: { contains: query, mode: "insensitive" } },
+      { user: { email: { contains: query, mode: "insensitive" } } },
+      { user: { username: { contains: query, mode: "insensitive" } } },
+    ],
+  };
+}
+
+function buildStaffWhere(query: string): Prisma.StaffProfileWhereInput {
+  return {
+    user: { status: "ACTIVE", deletedAt: null },
+    OR: [
+      { displayName: { contains: query, mode: "insensitive" } },
+      { designation: { contains: query, mode: "insensitive" } },
+      { location: { contains: query, mode: "insensitive" } },
+      { staffRoleType: { contains: query, mode: "insensitive" } },
+      { user: { email: { contains: query, mode: "insensitive" } } },
+      { user: { username: { contains: query, mode: "insensitive" } } },
+    ],
+  };
+}
+
+function buildOrderSearchWhere(query: string): Prisma.OrderWhereInput {
+  return {
+    OR: [
+      { orderNumber: { contains: query, mode: "insensitive" } },
+      { legacyPhpId: { contains: query, mode: "insensitive" } },
+      { dealer: { businessName: { contains: query, mode: "insensitive" } } },
+      { dealer: { dealerCode: { contains: query, mode: "insensitive" } } },
+      { assignedStaff: { displayName: { contains: query, mode: "insensitive" } } },
+      {
+        items: {
+          some: {
+            OR: [
+              { productNameSnapshot: { contains: query, mode: "insensitive" } },
+              { catalogueNumberSnapshot: { contains: query, mode: "insensitive" } },
+              { skuSnapshot: { contains: query, mode: "insensitive" } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
+
+async function getAssignedDealerIds(actor: AuthActor) {
+  if (actor.role !== "STAFF" || !actor.staffId) return [] as bigint[];
+  const rows = await prisma.dealerStaffAssignment.findMany({
+    where: { staffId: actor.staffId, active: true, removedAt: null, dealer: { deletedAt: null, user: { status: "ACTIVE", deletedAt: null } } },
+    select: { dealerId: true },
+  });
+  return rows.map((row) => row.dealerId);
+}
+
+function buildOrderScope(actor: AuthActor, assignedDealerIds: bigint[]): Prisma.OrderWhereInput | null {
+  if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") return {};
+  if (actor.role === "DEALER") return actor.dealerId ? { dealerId: actor.dealerId } : null;
+  if (actor.role === "STAFF") {
+    const scopes: Prisma.OrderWhereInput[] = [];
+    if (actor.staffId) scopes.push({ assignedStaffId: actor.staffId });
+    if (assignedDealerIds.length > 0) scopes.push({ dealerId: { in: assignedDealerIds } });
+    return scopes.length > 0 ? { OR: scopes } : null;
+  }
+  return null;
+}
+
+function mapProduct(product: ProductWithVariants) {
+  return {
+    id: product.id.toString(),
+    name: product.name,
+    productName: product.name,
+    product_name: product.name,
+    catalogueNumber: product.productCode || product.variants[0]?.catalogueNumber || product.variants[0]?.sku || product.id.toString(),
+    sku: product.variants[0]?.sku || product.productCode || "",
+    description: product.description || "",
+    categoryName: product.category?.name || "",
+    category: product.category?.name || "",
+    image: product.imageUrl || "",
+    variants: product.variants.map((variant) => ({
+      id: variant.id.toString(),
+      sku: variant.sku || "",
+      catalogueNumber: variant.catalogueNumber || variant.sku || "",
+      productName: product.name,
+      name: product.name,
+      unitName: variant.unitName || "",
+    })),
+  };
+}
+
+function mapDealer(dealer: DealerWithUser) {
+  return {
+    Dealer_Id: dealer.id.toString(),
+    Dealer_Name: dealer.businessName,
+    Dealer_Dealercode: dealer.dealerCode || "",
+    Dealer_City: dealer.city || "",
+    Dealer_Number: dealer.phone || "",
+    Dealer_Email: dealer.user.email,
+    gst: dealer.gstin || "",
+    staffname: dealer.staffAssignments.map((assignment) => assignment.staff.displayName).filter(Boolean).join(", "),
+  };
+}
+
+function mapStaff(staff: StaffWithUser) {
+  return {
+    staff_id: staff.id.toString(),
+    staff_name: staff.displayName,
+    staff_email: staff.user.email,
+    staff_location: staff.location || "",
+    staff_designation: staff.designation || "",
+    staff_roletype: staff.staffRoleType || "",
+  };
+}
+
+function buildItemSummariesByOrderId(orders: OrderWithRelations[]) {
+  const summaries: Record<string, { searchText: string }> = {};
+  for (const order of orders) {
+    const legacy = mapPostgresOrderToLegacy(order as PostgresOrderRecord) as { order_id?: string; items?: Array<Record<string, unknown>> };
+    const orderId = String(legacy.order_id || order.id.toString());
+    summaries[orderId] = {
+      searchText: (legacy.items || [])
+        .map((item) => [item.catNo, item.catalogueNumber, item.skuSnapshot, item.productName].filter(Boolean).join(" "))
+        .join(" ")
+        .toLowerCase(),
+    };
+  }
+  return summaries;
+}
+
 export async function GET(req: NextRequest) {
-  const query = safeText(req.nextUrl.searchParams.get("q"), 240);
-  const actor = parseActor(req);
-
-  if (!actor) {
-    return NextResponse.json(
-      { success: false, message: "Missing dashboard search identity" },
-      { status: 401 }
-    );
-  }
-
-  const queryInfo = dashboardSearch.getDashboardQueryInfo(query);
-  if (!queryInfo.canSearch) {
-    return NextResponse.json(emptyResponse(query));
-  }
-
+  const query = safeText(req.nextUrl.searchParams.get("q"));
   try {
-    const candidateOrdersPromise = fetchCandidateOrders(actor, query);
-    const dealersPromise = actor.role === "admin" ? fetchAdminDealers(query) : Promise.resolve([]);
-    const staffPromise = actor.role === "admin" ? fetchAdminStaff(query) : Promise.resolve([]);
-    const candidateOrders = await candidateOrdersPromise;
-    const [dealers, staff, itemSummariesByOrderId] = await Promise.all([
-      dealersPromise,
-      staffPromise,
-      buildItemSummariesByOrderId(candidateOrders, query, actor),
-    ]);
+    const actor = await requireAuth();
+    const queryInfo = dashboardSearch.getDashboardQueryInfo(query);
+    if (!queryInfo.canSearch) return NextResponse.json(emptyResponse(query));
+    const role = toDashboardRole(actor);
+    const assignedDealerIds = await getAssignedDealerIds(actor);
+    const orderScope = buildOrderScope(actor, assignedDealerIds);
+    if (!orderScope) return NextResponse.json(emptyResponse(query));
 
+    const productsPromise = actor.role === "ACCOUNTANT"
+      ? Promise.resolve([])
+      : prisma.product.findMany({
+          where: buildProductWhere(query),
+          include: { category: true, variants: { where: { active: true }, orderBy: [{ catalogueNumber: "asc" }, { sku: "asc" }] } },
+          orderBy: { name: "asc" },
+          take: SEARCH_LIMIT,
+        });
+    const dealersPromise = actor.role === "ADMIN" || actor.role === "STAFF"
+      ? prisma.dealerProfile.findMany({
+          where: actor.role === "STAFF" && actor.staffId
+            ? { AND: [buildDealerWhere(query), { staffAssignments: { some: { staffId: actor.staffId, active: true, removedAt: null } } }] }
+            : buildDealerWhere(query),
+          include: { user: true, staffAssignments: { where: { active: true, removedAt: null }, include: { staff: true } } },
+          orderBy: { businessName: "asc" },
+          take: SEARCH_LIMIT,
+        })
+      : Promise.resolve([]);
+    const staffPromise = actor.role === "ADMIN"
+      ? prisma.staffProfile.findMany({
+          where: buildStaffWhere(query),
+          include: { user: true },
+          orderBy: { displayName: "asc" },
+          take: SEARCH_LIMIT,
+        })
+      : Promise.resolve([]);
+    const ordersPromise = prisma.order.findMany({
+      where: { AND: [orderScope, buildOrderSearchWhere(query)] },
+      include: orderInclude,
+      orderBy: { orderDate: "desc" },
+      take: ORDER_LIMIT,
+    });
+
+    const [products, dealers, staff, orders] = await Promise.all([productsPromise, dealersPromise, staffPromise, ordersPromise]);
+    const legacyOrders = orders.map((order) => mapPostgresOrderToLegacy(order as PostgresOrderRecord));
     const response = dashboardSearch.buildDashboardSearchResponse({
-      role: actor.role,
+      role,
       query,
-      products: Array.isArray(catalogueProducts) ? catalogueProducts : [],
-      orders: candidateOrders,
-      dealers,
-      staff,
-      itemSummariesByOrderId,
+      products: products.map(mapProduct),
+      orders: legacyOrders,
+      dealers: dealers.map(mapDealer),
+      staff: staff.map(mapStaff),
+      itemSummariesByOrderId: buildItemSummariesByOrderId(orders),
     });
 
     return NextResponse.json({
@@ -318,14 +294,17 @@ export async function GET(req: NextRequest) {
       query,
       results: response.results,
       groups: response.groups,
-      limitation:
-        "Results are filtered in this Next.js API, but the current app does not expose a server-verifiable login session for stronger authorization.",
     } satisfies SearchResponse);
   } catch (error) {
     console.error("[GET /api/dashboard-search]", error);
+    const message = error instanceof Error && error.message === "Unauthenticated"
+      ? "Unauthenticated"
+      : "Dashboard search is unavailable right now.";
     return NextResponse.json(
-      { success: false, message: "Dashboard search is unavailable right now." },
-      { status: 500 }
+      { success: false, message },
+      { status: message === "Unauthenticated" ? 401 : 500 }
     );
   }
 }
+
+

@@ -1,4 +1,4 @@
-export const PRODUCT_NOTE_LIMIT = 500;
+﻿export const PRODUCT_NOTE_LIMIT = 500;
 
 const EXPECTED_ORDER_NUMBER_PATTERN = /^OM\/\d{4}\//i;
 
@@ -404,17 +404,15 @@ function sleep(ms) {
 export async function verifyOrderProductNotesPersistence(input) {
   const {
     fetchImpl,
-    backendUrl,
     actualOrderId,
     dealerId,
     submittedRows,
     fallbackApiPath = "/api/order-product-notes",
-    maxAttempts = 3,
   } = input;
 
   const normalizedOrderId = String(actualOrderId ?? "").trim();
   if (!normalizedOrderId || isExpectedOrderNumber(normalizedOrderId)) {
-    throw new Error("Actual PHP order ID is required for product note verification");
+    throw new Error("Actual order ID is required for product note verification");
   }
 
   const normalizedDealerId = String(dealerId ?? "").trim();
@@ -422,61 +420,17 @@ export async function verifyOrderProductNotesPersistence(input) {
     .map((row) => ({ ...row, productNote: normalizeProductNote(row?.productNote) }))
     .filter((row) => row.productNote);
 
-  if (rowsWithNotes.length === 0) {
-    return { verifiedInPhp: 0, savedToFallback: 0, failed: 0 };
-  }
-
-  /** @type {Array<Record<string, any>>} */
-  let phpRows = [];
-  let lastFetchError = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await fetchImpl(
-        `${backendUrl}/orderdatalist?id=${encodeURIComponent(normalizedOrderId)}`,
-        { cache: "no-store" }
-      );
-      if (!response.ok) {
-        throw new Error(`orderdatalist failed with ${response.status}`);
-      }
-      const payload = await response.json();
-      phpRows = normalizePhpOrderItems(payload, normalizedOrderId);
-      if (phpRows.length > 0 || attempt === maxAttempts) break;
-    } catch (error) {
-      lastFetchError = error;
-      if (attempt === maxAttempts) break;
-    }
-
-    await sleep(delayForAttempt(attempt));
-  }
-
-  const matches = buildMatchedOrderRows(rowsWithNotes, phpRows);
-  let verifiedInPhp = 0;
   let savedToFallback = 0;
   let failed = 0;
 
-  for (const match of matches) {
-    const note = normalizeProductNote(match.submittedRow?.productNote);
-    if (!note) continue;
-
-    const phpRemark = getCombinedRemarkText(match.phpRow);
-    if (remarksContainProductNote(phpRemark, note)) {
-      verifiedInPhp += 1;
-      continue;
-    }
-
+  for (const row of rowsWithNotes) {
     const fallbackPayload = {
       orderId: normalizedOrderId,
-      orderItemId: normalizeOrderItemId(match.phpRow?.orderdata_id),
-      sku: String(
-        match.submittedRow?.variantCode
-        ?? match.submittedRow?.productname
-        ?? match.phpRow?.orderdata_cat_no
-        ?? ""
-      ).trim(),
-      occurrence: match.occurrence,
+      orderItemId: normalizeOrderItemId(row?.orderdata_id ?? row?.orderItemId ?? row?.id),
+      sku: String(row?.variantCode ?? row?.productname ?? row?.orderdata_cat_no ?? "").trim(),
+      occurrence: Number(row?.occurrence) || 1,
       dealerId: normalizedDealerId,
-      note,
+      note: row.productNote,
     };
 
     try {
@@ -497,9 +451,5 @@ export async function verifyOrderProductNotesPersistence(input) {
     }
   }
 
-  if (failed > 0 && lastFetchError) {
-    return { verifiedInPhp, savedToFallback, failed };
-  }
-
-  return { verifiedInPhp, savedToFallback, failed };
+  return { verifiedInPhp: 0, savedToFallback, failed };
 }

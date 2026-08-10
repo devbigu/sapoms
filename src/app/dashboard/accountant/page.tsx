@@ -22,7 +22,6 @@ import { downloadOrderInvoice } from "@/lib/invoicegenerator";
 import { OrderAmountSource, withDisplayOrderAmounts } from "@/lib/orderAmounts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const BACKEND_URL = "/api/php-compat";
 const YEAR = new Date().getFullYear();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +57,14 @@ type ChartDealer = { Dealer_Name: string; total: string };
 type LedgerSummary = { netBalance: number };
 type LedgerResponse = { data: LedgerSummary[] };
 type OrderSummaryOverride = OrderAmountSource & { orderId?: string; order_id?: string };
+type AccountantDashboardResponse = {
+  data?: Stats[];
+  stats?: Stats;
+  top?: ChartDealer[];
+  chartOrders?: ChartOrder[];
+  recentOrders?: Order[];
+  pendingOrders?: PendingOrder[];
+};
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
 function downloadCSV(rows: Record<string, any>[], filename: string) {
@@ -265,34 +272,18 @@ function AccountantDashboardInner() {
   useEffect(() => {
     async function load() {
       try {
-        const [cDealRes, statsRes, pendingRes, ordersRes] = await Promise.all([
-          fetch(`${BACKEND_URL}/getMonthlyreporttopdealer`),
-          fetch(`${BACKEND_URL}/dealercount`),
-          fetch(`/api/orders-data?source=orderpeginationnew&role=accountant&page=1&limit=10&search=`),
-          fetch(`/api/orders-data?source=orderpegination&role=accountant&page=1&limit=10&search=`),
-        ]);
+        const dashboard = await fetchJson<AccountantDashboardResponse>("/api/accountant/dashboard");
+        const activeRecent = (dashboard.recentOrders || []).slice(0, 10);
+        const activePending = (dashboard.pendingOrders || []).slice(0, 10);
 
-        const [cDeal, statsJson, pendingJson, ordersJson] = await Promise.all([
-          cDealRes.json(), statsRes.json(), pendingRes.json(), ordersRes.json(),
-        ]);
-
-        const activeRecent = ((ordersJson.data || []) as Order[]).slice(0, 10);
-        setChartOrders(activeRecent
-          .map((order) => ({ order_id: order.order_id, total: String(order.order_net_amount ?? order.order_discount ?? order.order_amount ?? 0) }))
-          .sort((left, right) => Number(right.total) - Number(left.total)));
-        setChartDealers(cDeal.top || []);
-
-        const sd = Array.isArray(statsJson.data) ? statsJson.data[0] : statsJson.data;
-        setStats(sd || { dealerCount:0, staffCount:0, orderCount:0, PorderCount:0 });
-
-        const activePending = ((pendingJson.data || []) as PendingOrder[]).slice(0, 10);
+        setChartOrders((dashboard.chartOrders || activeRecent.map((order) => ({
+          order_id: order.order_id,
+          total: String(order.order_net_amount ?? order.netPayableAmount ?? order.order_amount ?? 0),
+        }))).sort((left, right) => Number(right.total) - Number(left.total)));
+        setChartDealers(dashboard.top || []);
+        setStats(dashboard.stats || (Array.isArray(dashboard.data) ? dashboard.data[0] : undefined) || { dealerCount:0, staffCount:0, orderCount:0, PorderCount:0 });
         setPendingOrders(activePending);
         setRecentOrders(activeRecent);
-        setStats((current) => ({
-          ...current,
-          orderCount: Number(ordersJson.total ?? activeRecent.length),
-          PorderCount: Number(pendingJson.total ?? activePending.length),
-        }));
       } catch (e) {
         console.error("Dashboard load error:", e);
       } finally {
@@ -331,17 +322,9 @@ function AccountantDashboardInner() {
   }, [recentOrders, pendingOrders]);
 
   const [
-    pendingVerificationQ,
     ledgerQ,
   ] = useQueries({
     queries: [
-      {
-        queryKey: ["accountantSidebarSummary", "pendingVerification"],
-        queryFn: async () => {
-          const result = await fetchJson<{ data: PendingOrder[] }>(`/api/orders-data?source=orderpeginationnew&role=accountant&page=1&limit=1000&search=`);
-          return result;
-        },
-      },
       {
         queryKey: ["accountantSidebarSummary", "ledger"],
         queryFn: () => fetchJson<LedgerResponse>("/api/ledger"),
@@ -349,10 +332,9 @@ function AccountantDashboardInner() {
     ],
   });
 
-  const summaryLoading = [pendingVerificationQ, ledgerQ].some(q => q.isLoading);
-  const summaryError = [pendingVerificationQ, ledgerQ].find(q => q.isError);
+  const summaryLoading = [ledgerQ].some(q => q.isLoading);
+  const summaryError = [ledgerQ].find(q => q.isError);
   const retrySummary = () => {
-    pendingVerificationQ.refetch();
     ledgerQ.refetch();
   };
 
@@ -367,7 +349,7 @@ function AccountantDashboardInner() {
   const totalSale         = chartOrders.reduce((s, o) => s + Number(o.total), 0);
   const pendingPayment    = pricedPendingOrders.reduce((s, o) => s + (Number(o.order_amount) - Number(o.order_discount)), 0);
   const pendingPayCount   = pendingOrders.filter(o => o.accept_order === "0" || o.order_status !== "1").length;
-  const pendingVerification = (pendingVerificationQ.data?.data ?? pendingOrders).filter(o => o.order_status === "0").length;
+  const pendingVerification = pendingOrders.filter(o => o.order_status === "0").length;
   const ledgerRows = ledgerQ.data?.data ?? [];
   const totalOutstandingValue = ledgerRows.reduce((sum, row) => sum + Math.max(0, Number(row.netBalance) || 0), 0);
   const pendingInvoicesCount = ledgerRows.filter(row => Number(row.netBalance) > 0).length;
@@ -677,3 +659,5 @@ function AccountantDashboardInner() {
     </div>
   );
 }
+
+

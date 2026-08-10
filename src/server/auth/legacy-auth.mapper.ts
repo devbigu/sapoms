@@ -73,12 +73,14 @@ export function mapPostgresUserToLegacyProfile(user: User & {
 }) {
   switch (user.role as AuthRole) {
     case "ADMIN":
+    case "NSM":
       if (!user.adminProfile) throw new Error("Missing role profile");
       return withClientRole(mapAdminProfile(user, user.adminProfile), user.role);
     case "ACCOUNTANT":
       if (!user.accountantProfile) throw new Error("Missing role profile");
       return withClientRole(mapAccountantProfile(user, user.accountantProfile), user.role);
     case "STAFF":
+    case "RSM":
       if (!user.staffProfile) throw new Error("Missing role profile");
       return withClientRole(mapStaffProfile(user, user.staffProfile), user.role);
     case "DEALER":
@@ -96,9 +98,10 @@ export function getProfileId(user: {
   staffProfile?: Pick<StaffProfile, "id"> | null;
   dealerProfile?: Pick<DealerProfile, "id"> | null;
 }) {
-  if (user.role === "ADMIN" && user.adminProfile) return user.adminProfile.id;
+  if ((user.role === "ADMIN" || user.role === "NSM") && user.adminProfile) return user.adminProfile.id;
   if (user.role === "ACCOUNTANT" && user.accountantProfile) return user.accountantProfile.id;
-  if (user.role === "STAFF" && user.staffProfile) return user.staffProfile.id;
+  if ((user.role === "STAFF" || user.role === "RSM") && user.staffProfile) return user.staffProfile.id;
   if (user.role === "DEALER" && user.dealerProfile) return user.dealerProfile.id;
   throw new Error("Missing role profile");
 }
+

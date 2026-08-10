@@ -194,11 +194,7 @@ function resolveDashboardSession(): DashboardSession | null {
 }
 
 function buildActorHeaders(session: DashboardSession | null): HeadersInit {
-  return {
-    ...(session?.role ? { 'x-omsons-actor-role': session.role } : {}),
-    ...(session?.id ? { 'x-omsons-actor-id': session.id } : {}),
-    ...(session?.roletype ? { 'x-omsons-actor-roletype': session.roletype } : {}),
-  }
+  return {}
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {

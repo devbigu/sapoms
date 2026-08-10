@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { Package, ArrowLeft, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 
-const BACKEND_URL = "/api/php-compat"
-
 type ToastState = { text: string; ok: boolean } | null
 
 export default function AddProductPage() {
@@ -40,16 +38,23 @@ export default function AddProductPage() {
     }
     setLoading(true)
     try {
-      const fd = new FormData()
-      fd.append("product_name",        name)
-      fd.append("product_discription", discription)
-      fd.append("product_unit",        unit)
-      fd.append("product_quantity",    quantity)
-      fd.append("product_cat",         cat)
-      fd.append("product_price",       price)
-
-      const res = await axios.post(`${BACKEND_URL}/addproduct`, fd)
-      showToast(res.data?.msg || "Product added successfully!", true)
+      const res = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: discription,
+          variants: [{
+            sku: cat,
+            catalogueNumber: cat,
+            unitName: unit,
+            packSize: Number(quantity) || 1,
+            unitPrice: Number(price) || 0,
+          }],
+        }),
+      })
+      if (!res.ok) throw new Error("Save failed")
+      showToast("Product added successfully!", true)
       resetForm()
     } catch {
       showToast("Failed to add product. Please try again.", false)

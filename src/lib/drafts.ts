@@ -1,8 +1,8 @@
 /**
  * lib/drafts.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Named-draft CRUD helpers backed by MongoDB via /api/drafts.
- * Dealer isolation is enforced by always sending dealer_id.
+ * Named-draft CRUD helpers backed by PostgreSQL via /api/drafts.
+ * Dealer isolation is enforced server-side from the authenticated session; dealer_id is kept as a compatibility hint.
  * Function signatures are identical to the former Supabase version so that
  * AddOrderForm needs no changes.
  * ─────────────────────────────────────────────────────────────────────────────

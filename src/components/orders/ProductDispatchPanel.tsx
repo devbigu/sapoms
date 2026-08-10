@@ -63,9 +63,8 @@ const REMARK_LIMIT = 500;
 function buildAuthHeaders(user: DispatchUserSession | null): HeadersInit {
   return {
     "Content-Type": "application/json",
-    ...(user?.id ? { "x-omsons-actor-id": user.id } : {}),
-    ...(user?.role ? { "x-omsons-actor-role": user.role } : {}),
-    ...(user?.roletype ? { "x-omsons-actor-roletype": user.roletype } : {}),
+
+
   };
 }
 

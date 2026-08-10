@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
-import { actorFromRequestHeaders, assertDealerScope, jsonValue, text } from "@/lib/postgresDiscountDrafts";
+import { assertDealerScope, jsonValue, text } from "@/lib/postgresDiscountDrafts";
 
 export const runtime = "nodejs";
 
-async function getActor(req: NextRequest) {
-  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
-}
-
 function jsonError(error: any, fallback: string) {
-  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
   return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
 }
 
@@ -29,7 +25,7 @@ function mapCart(row: any) {
 
 export async function GET(req: NextRequest) {
   try {
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
     assertDealerScope(actor, dealerId);
     const cart = await prisma.draftCart.findUnique({ where: { dealerId } });
@@ -42,7 +38,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const body = await req.json();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealer_id || body.dealerId, 80));
     assertDealerScope(actor, dealerId);
@@ -61,7 +57,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
     assertDealerScope(actor, dealerId);
     await prisma.draftCart.deleteMany({ where: { dealerId } });

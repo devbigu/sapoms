@@ -166,10 +166,7 @@ export default function DealerLedgerPage() {
     queryFn: async () => {
       const session = resolveStoredAuth(window.localStorage)
       if (session.status !== 'authenticated') throw new Error('Missing wallet identity')
-      const res = await axios.get(`/api/wallet/${dealerId}`, { headers: {
-        'x-omsons-actor-role': session.role,
-        'x-omsons-actor-id': String(session.user.staff_id ?? session.user.admin_id ?? session.user.Admin_Id ?? session.user.id ?? ''),
-      } })
+      const res = await axios.get(`/api/wallet/${dealerId}`)
       return res.data
     },
     enabled: !!dealerId && !redirectingStaff,
@@ -253,9 +250,6 @@ export default function DealerLedgerPage() {
         transactionDate: walletTransactionDate,
         idempotencyKey,
       }, { headers: {
-        'x-omsons-actor-role': session.role,
-        'x-omsons-actor-id': String(session.user.staff_id ?? session.user.admin_id ?? session.user.Admin_Id ?? session.user.id ?? ''),
-        'x-omsons-actor-name': String(session.user.staff_name ?? session.user.name ?? session.user.username ?? ''),
         'idempotency-key': idempotencyKey,
       } })
       if (response.data.success) {

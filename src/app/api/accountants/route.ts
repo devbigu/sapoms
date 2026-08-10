@@ -1,65 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
-import { scryptSync, randomBytes } from "crypto";
+import { adminListResponse, adminMutationResponse } from "@/server/admin/admin-response";
+import { adminErrorResponse } from "@/server/admin/admin-errors";
+import { requireAdmin } from "@/server/admin/admin-route";
+import { parseAdminAccountantListInput, parseCreateAdminAccountantInput } from "@/server/modules/admin/accountants/accountants.schemas";
+import { createAdminAccountant, listAdminAccountants } from "@/server/modules/admin/accountants/accountants.service";
 
-function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
+export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const db   = await getDb();
-    const docs  = await db
-      .collection("accountants")
-      .find({}, { projection: { password: 0 } })
-      .toArray();
-
-    const accountants = docs.map(d => ({ ...d, _id: d._id.toString() }));
-    return NextResponse.json({ success: true, data: accountants });
-  } catch (e: any) {
-    console.error("[GET /api/accountants]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    await requireAdmin();
+    const input = parseAdminAccountantListInput(request.nextUrl.searchParams);
+    const result = await listAdminAccountants(input);
+    return NextResponse.json(adminListResponse({ items: result.items, page: input.page, pageSize: input.pageSize, total: result.total }), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[GET /api/accountants]", error);
+    return adminErrorResponse(error, "Accountants are unavailable");
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { name, email, password, phone } = await req.json();
-
-    if (!name?.trim() || !email?.trim() || !password || !phone?.trim()) {
-      return NextResponse.json({ success: false, message: "All fields are required" }, { status: 400 });
-    }
-
-    const db       = await getDb();
-    const existing = await db.collection("accountants").findOne({ email: email.trim().toLowerCase() });
-    if (existing) {
-      return NextResponse.json({ success: false, message: "Email already registered" }, { status: 409 });
-    }
-
-    const result = await db.collection("accountants").insertOne({
-      name:      name.trim(),
-      email:     email.trim().toLowerCase(),
-      password:  hashPassword(password),
-      phone:     phone.trim(),
-      role:      "accountant",
-      createdAt: new Date().toISOString(),
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        _id:       result.insertedId.toString(),
-        name:      name.trim(),
-        email:     email.trim().toLowerCase(),
-        phone:     phone.trim(),
-        role:      "accountant",
-        createdAt: new Date().toISOString(),
-      },
-    });
-  } catch (e: any) {
-    console.error("[POST /api/accountants]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    await requireAdmin();
+    const input = await parseCreateAdminAccountantInput(request);
+    const data = await createAdminAccountant(input);
+    return NextResponse.json(adminMutationResponse("Accountant created", data), { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[POST /api/accountants]", error);
+    return adminErrorResponse(error, "Accountant could not be created");
   }
 }

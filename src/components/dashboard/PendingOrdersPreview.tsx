@@ -47,7 +47,7 @@ function toneStyles(tone: PendingPreviewItem["statusTone"]) {
 
 export default function PendingOrdersPreview({
   title = "Top 10 Pending Orders",
-  subtitle = "Latest pending orders from the Mirisoft PHP API",
+  subtitle = "Latest pending orders from PostgreSQL order data",
   moreHref,
   moreLabel = "More",
   loading = false,

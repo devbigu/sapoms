@@ -39,6 +39,15 @@ export function mapAdminDealer(record: AdminDealerRecord) {
     .filter((assignment) => assignment.active && !assignment.staff.user.deletedAt && assignment.staff.user.status === "ACTIVE")
     .map(mapAdminDealerStaffAssignment);
   const assignedstaff = assignedStaff.map((staff) => staff.staffId).join(",");
+  const region = record.region || "";
+  const rsm = record.regionalManager?.staffProfile ? {
+    id: record.regionalManager.id.toString(),
+    userId: record.regionalManager.id.toString(),
+    name: record.regionalManager.staffProfile.displayName || "",
+    email: record.regionalManager.email || "",
+    role: "RSM",
+    region: record.regionalManager.staffProfile.salesRegion || region,
+  } : null;
   const staffname = assignedStaff.map((staff) => staff.name).filter(Boolean).join(", ");
 
   return {
@@ -57,6 +66,12 @@ export function mapAdminDealer(record: AdminDealerRecord) {
     creditLimitPaise,
     status: record.user.status,
     assignedStaff,
+    region,
+    rsmUserId: record.rsmUserId?.toString() || "",
+    rsm,
+    regionalManager: rsm,
+    Dealer_Region: region,
+    Dealer_RSM: rsm?.name || "",
     Dealer_Id: id,
     Dealer_Name: businessName,
     Dealer_Email: email,

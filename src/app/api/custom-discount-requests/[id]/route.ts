@@ -2,23 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
 import {
-  actorFromRequestHeaders,
   assertDealerScope,
+  assertDraftBelongsToDealer,
+  assertOrderBelongsToDealer,
+  buildCustomDiscountCreate,
   customDiscountInclude,
   jsonValue,
   mapCustomDiscount,
-  mapDraft,
   text,
-  updateDraftApprovalState,
 } from "@/lib/postgresDiscountDrafts";
 
 export const runtime = "nodejs";
 
 const DEFAULT_REJECTION_NOTE = "Please revise the discount percentage and resubmit.";
-
-async function getActor(req: NextRequest) {
-  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
-}
 
 function jsonError(error: any, fallback: string) {
   const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
@@ -54,7 +50,7 @@ function rejectionRows(request: any) {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const row = await loadRequest(id);
     if (!row) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
     if (actor?.role === "DEALER") {
@@ -73,7 +69,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const body = await req.json();
     const existing = await loadRequest(id);
     if (!existing) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
@@ -89,11 +85,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const orderId = text(body.orderId || body.order_id, 80);
     const hasOrderLink = !!orderId;
     const reviewUpdate = !!nextStatus;
-    if (!reviewUpdate && typeof body.allowReorder !== "boolean" && !hasOrderLink) {
+    if (rawStatus && !nextStatus) return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
+    const wantsResubmit = text(body.action, 40).toLowerCase() === "resubmit" || body.orderSnapshot !== undefined || body.products !== undefined || body.requestedDiscountPercent !== undefined || body.requestedProductDiscounts !== undefined;
+    if (reviewUpdate && actor?.role !== "ADMIN") throw Object.assign(new Error("Only Admin can review custom discounts"), { status: 403 });
+    if (wantsResubmit && actor?.role === "ADMIN") throw Object.assign(new Error("Admin cannot resubmit dealer custom discounts"), { status: 403 });
+    if (wantsResubmit && !["PENDING", "REJECTED"].includes(String(existing.status))) throw Object.assign(new Error("Only pending or rejected requests can be resubmitted"), { status: 409 });
+    if (!reviewUpdate && typeof body.allowReorder !== "boolean" && !hasOrderLink && !wantsResubmit) {
       return NextResponse.json({ success: false, message: "No supported update supplied" }, { status: 400 });
     }
-    if (rawStatus && !nextStatus) return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
-    if (reviewUpdate && actor?.role !== "ADMIN") throw Object.assign(new Error("Only Admin can review custom discounts"), { status: 403 });
 
     const data: any = { updatedAt: new Date() };
     if (reviewUpdate && nextStatus) {
@@ -103,8 +102,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       data.reviewedAt = nextStatus === "PENDING" ? null : new Date();
       data.allowReorder = nextStatus === "APPROVED" ? true : nextStatus === "REJECTED" ? false : existing.allowReorder;
     }
-    if (typeof body.allowReorder === "boolean") data.allowReorder = body.allowReorder;
-    if (hasOrderLink) data.orderId = BigInt(orderId);
+    if (typeof body.allowReorder === "boolean") {
+      if (actor?.role !== "ADMIN") throw Object.assign(new Error("Only Admin can change reorder permission"), { status: 403 });
+      data.allowReorder = body.allowReorder;
+    }
+    if (hasOrderLink) {
+      const linkedOrderId = BigInt(orderId);
+      await assertOrderBelongsToDealer(linkedOrderId, existing.dealerId);
+      if (existing.status !== "APPROVED") throw Object.assign(new Error("Only approved requests can link to an order"), { status: 409 });
+      data.orderId = linkedOrderId;
+    }
+    if (wantsResubmit) {
+      const rebuilt = await buildCustomDiscountCreate({
+        ...body,
+        orderDraftId: body.orderDraftId ?? body.order_draft_id ?? existing.orderDraftId?.toString(),
+      }, existing.dealerId, existing.staffId);
+      await assertDraftBelongsToDealer(rebuilt.orderDraftId, existing.dealerId);
+      Object.assign(data, rebuilt, { status: "PENDING", adminNote: null, reviewedByUserId: null, reviewedAt: null, allowReorder: false });
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       let rejectionDraftId: bigint | null = null;

@@ -46,8 +46,8 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 async function fetchAllStaffOrders(staffId: string): Promise<SalesOrder[]> {
   const pageSize = 500
-  const scope = `role=staff&id=${encodeURIComponent(staffId)}`
-  const first = await fetchJson<OrderResponse>(`/api/orders-data?source=staffOrderrPagination&${scope}&page=1&limit=${pageSize}&search=`)
+  const scope = `role=staff`
+  const first = await fetchJson<OrderResponse>(`/api/orders-data?page=1&limit=${pageSize}&search=`)
   const firstRows = first.data ?? []
   const totalRows = first.total ?? first.count ?? firstRows.length
   const totalPages = first.last_page ?? Math.max(1, Math.ceil(totalRows / pageSize))
@@ -56,7 +56,7 @@ async function fetchAllStaffOrders(staffId: string): Promise<SalesOrder[]> {
 
   const rest = await Promise.all(
     Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2).map(page =>
-      fetchJson<OrderResponse>(`/api/orders-data?source=staffOrderrPagination&${scope}&page=${page}&limit=${pageSize}&search=`)
+      fetchJson<OrderResponse>(`/api/orders-data?page=${page}&limit=${pageSize}&search=`)
     )
   )
 

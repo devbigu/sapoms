@@ -1,5 +1,5 @@
 import type { AdminListInput } from "@/server/admin/admin.types";
-import type { Prisma, UserStatus } from "@prisma/client";
+import type { Prisma, SalesRegion, UserStatus } from "@prisma/client";
 
 export type AdminDealerListInput = AdminListInput;
 
@@ -32,6 +32,9 @@ export type AdminDealerRecord = {
   imageUrl?: string | null;
   deletedAt?: Date | null;
   user: { id: bigint; email: string; username?: string | null; status: string; deletedAt?: Date | null };
+  region?: SalesRegion | null;
+  rsmUserId?: bigint | null;
+  regionalManager?: { id: bigint; email: string; staffProfile: { displayName: string; salesRegion: SalesRegion | null } | null } | null;
   staffAssignments?: AdminDealerStaffAssignment[];
 };
 
@@ -52,6 +55,7 @@ export type CreateAdminDealerInput = {
   imageUrl?: string;
   status?: UserStatus;
   assignedStaffIds: string[];
+  rsmUserId?: string;
 };
 
 export type UpdateAdminDealerInput = Partial<Omit<CreateAdminDealerInput, "password" | "status" | "assignedStaffIds">>;
@@ -75,5 +79,7 @@ export interface AdminDealerRepository {
   updateStatus(dealerId: bigint, input: UpdateDealerStatusInput, actor: AuthActor): Promise<AdminDealerRecord>;
   softDelete(dealerId: bigint, actor: AuthActor): Promise<void>;
   getStaffAssignments(dealerId: bigint): Promise<AdminDealerStaffAssignment[]>;
-  replaceStaffAssignments(dealerId: bigint, staffIds: bigint[], actor: AuthActor): Promise<AdminDealerStaffAssignment[]>;
+  replaceStaffAssignments(dealerId: bigint, staffIds: bigint[], actor: AuthActor, rsmUserId?: bigint): Promise<AdminDealerStaffAssignment[]>;
 }
+
+

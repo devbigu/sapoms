@@ -19,7 +19,6 @@ import { getRecentlyViewed, pushRecentlyViewed, type RecentlyViewedItem } from "
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BACKEND = "/api/php-compat";
 const PLACEHOLDER_IMAGE =
   "https://omsonslabs.com/wp-content/uploads/Pycnometers-Class-A-Individual-Work-Certificate-product-image.webp";
 
@@ -115,7 +114,7 @@ type CatalogRouteResolver = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function fetchOrders(id: string): Promise<ApiResponse> {
-  const r = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=10&search=&id=${encodeURIComponent(id)}`);
+  const r = await fetch(`/api/orders-data?page=1&limit=10&search=`);
   if (!r.ok) throw new Error("Failed to fetch orders");
   return r.json();
 }

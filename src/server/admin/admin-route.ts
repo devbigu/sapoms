@@ -2,12 +2,13 @@ import { randomUUID } from "crypto";
 import type { NextRequest } from "next/server";
 import { requireAuth, writeAuthAuditLog, type AuthActor } from "@/server/auth/session";
 import type { AuthRole } from "@/server/auth/providers/types";
+import { isAdminLike } from "@/server/auth/sales-scope";
 import { AdminRouteError } from "./admin-errors";
 import type { AdminActor } from "./admin.types";
 
 export async function requireAdmin(): Promise<AdminActor> {
   const actor = await requireAuth();
-  requireRole(actor, ["ADMIN"]);
+  if (!isAdminLike(actor)) throw new Error("Forbidden");
   return actor as AdminActor;
 }
 
@@ -49,3 +50,4 @@ export function parseBigIntRouteParam(value: string, label: string) {
   }
   return BigInt(value);
 }
+

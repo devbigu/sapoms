@@ -12,7 +12,6 @@ import { downloadOrderInvoice, type OrderInvoiceData } from "@/lib/invoicegenera
 import { OrderAmountSource, withDisplayOrderAmounts } from "@/lib/orderAmounts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const BACKEND_URL = "/api/php-compat";
 const YEAR = new Date().getFullYear();
 const PAGE_SIZE = 20;
 const TODAY = moment().startOf("day");
@@ -238,7 +237,7 @@ export default function OrderBookPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res  = await fetch(`/api/orders-data?source=orderpegination&role=accountant&page=1&limit=1000&search=`);
+      const res  = await fetch(`/api/orders-data?page=1&limit=1000&search=`);
       const json = await res.json();
       setOrders(Array.isArray(json.data) ? json.data : []);
     } catch {

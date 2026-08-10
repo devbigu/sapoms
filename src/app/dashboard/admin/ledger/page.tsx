@@ -55,6 +55,7 @@ type LedgerResponse = {
 type DealerDetail = {
   dealer: Dealer
   orders: RawOrder[]
+  bills: Bill[]
 }
 
 type Bill = {
@@ -77,7 +78,7 @@ type Toast = {
 
 const ITEMS_PER_PAGE = 10
 const DEFAULT_CREDIT_DAYS = 60
-const PAYMENT_MODES = ['Cash', 'Cheque', 'NEFT', 'UPI']
+const PAYMENT_MODES = ['Cash', 'Cheque', 'NEFT', 'UPI', 'IMPF']
 const EMPTY_BILL_FORM = {
   orderNumber: '',
   billAmount: '',
@@ -251,12 +252,14 @@ export default function DealerLedgerShellPage() {
         const detail: DealerDetail = {
           dealer: { ...dealer, ...(res.data?.dealer || {}) },
           orders: Array.isArray(res.data?.orders) ? res.data.orders : [],
+          bills: Array.isArray(res.data?.bills) ? res.data.bills : [],
         }
         setDealerDetails((prev) => ({ ...prev, [dealer.Dealer_Id]: detail }))
+        setBillsByDealer((prev) => ({ ...prev, [dealer.Dealer_Id]: detail.bills || [] }))
         return detail
       } catch (detailError) {
         console.error('[ledger dealer detail]', detailError)
-        const fallback = { dealer, orders: [] }
+        const fallback = { dealer, orders: [], bills: [] }
         setDealerDetails((prev) => ({ ...prev, [dealer.Dealer_Id]: fallback }))
         showToast({ type: 'error', text: 'Could not load orders for this dealer' })
         return fallback
@@ -315,34 +318,31 @@ export default function DealerLedgerShellPage() {
 
     setIsSavingBill(true)
 
-    window.setTimeout(() => {
-      let pdfUrl: string | undefined
-      if (billFile) {
-        pdfUrl = URL.createObjectURL(billFile)
-        objectUrls.current.push(pdfUrl)
-      }
-
-      const bill: Bill = {
-        id: `mock-bill-${billDealer.Dealer_Id}-${Date.now()}`,
-        dealerId: billDealer.Dealer_Id,
+    try {
+      const response = await axios.post(`/api/ledger/${encodeURIComponent(billDealer.Dealer_Id)}`, {
         orderNumber: billForm.orderNumber,
         billAmount: amount,
         gstPercent: gst,
         billDate: billForm.billDate,
-        pdfName: billFile?.name || 'Bill PDF pending',
-        pdfUrl,
-        paidAmount: 0,
-      }
+        pdfName: billFile?.name || undefined,
+      })
+
+      const savedBill: Bill | undefined = response.data?.bill
+      if (!savedBill) throw new Error('Saved bill payload missing')
 
       setBillsByDealer((prev) => ({
         ...prev,
-        [billDealer.Dealer_Id]: [bill, ...(prev[billDealer.Dealer_Id] || [])],
+        [billDealer.Dealer_Id]: [savedBill, ...(prev[billDealer.Dealer_Id] || []).filter((bill) => bill.id !== savedBill.id)],
       }))
       setExpandedDealerId(billDealer.Dealer_Id)
-      setIsSavingBill(false)
       closeBillModal()
-      showToast({ type: 'success', text: 'Bill saved for demo ledger' })
-    }, 500)
+      showToast({ type: 'success', text: 'Bill saved' })
+    } catch (billError) {
+      console.error('[ledger bill]', billError)
+      showToast({ type: 'error', text: 'Could not save bill to backend' })
+    } finally {
+      setIsSavingBill(false)
+    }
   }
 
   const openPaymentModal = (dealer: Dealer, bill: Bill) => {
@@ -369,40 +369,43 @@ export default function DealerLedgerShellPage() {
     }
 
     setIsSavingPayment(true)
-    let savedToApi = true
 
     try {
-      await axios.post(`/api/ledger/${encodeURIComponent(paymentTarget.dealer.Dealer_Id)}/pay`, {
+      const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ledger-payment-${paymentTarget.bill.id}-${Date.now()}`
+      const response = await axios.post(`/api/ledger/${encodeURIComponent(paymentTarget.dealer.Dealer_Id)}/pay`, {
+        idempotencyKey,
+        billId: paymentTarget.bill.id,
         amount,
         paymentMode: paymentForm.paymentMode,
         paymentDate: paymentForm.paymentDate,
         referenceId: paymentForm.reference || paymentTarget.bill.orderNumber,
         narration: paymentForm.notes || `Payment against bill ${paymentTarget.bill.orderNumber}`,
       })
+
+      const savedBill: Bill | undefined = response.data?.bill
+      setBillsByDealer((prev) => ({
+        ...prev,
+        [paymentTarget.dealer.Dealer_Id]: (prev[paymentTarget.dealer.Dealer_Id] || []).map((bill) =>
+          bill.id === paymentTarget.bill.id
+            ? (savedBill || {
+                ...bill,
+                paidAmount: Math.min(bill.billAmount, bill.paidAmount + amount),
+                lastPaymentDate: paymentForm.paymentDate,
+              })
+            : bill
+        ),
+      }))
+
+      closePaymentModal()
+      showToast({ type: 'success', text: 'Payment recorded' })
     } catch (paymentError) {
-      savedToApi = false
       console.error('[ledger payment]', paymentError)
+      showToast({ type: 'error', text: 'Could not record payment in backend' })
+    } finally {
+      setIsSavingPayment(false)
     }
-
-    setBillsByDealer((prev) => ({
-      ...prev,
-      [paymentTarget.dealer.Dealer_Id]: (prev[paymentTarget.dealer.Dealer_Id] || []).map((bill) =>
-        bill.id === paymentTarget.bill.id
-          ? {
-              ...bill,
-              paidAmount: Math.min(bill.billAmount, bill.paidAmount + amount),
-              lastPaymentDate: paymentForm.paymentDate,
-            }
-          : bill
-      ),
-    }))
-
-    setIsSavingPayment(false)
-    closePaymentModal()
-    showToast({
-      type: 'success',
-      text: savedToApi ? 'Payment recorded' : 'Payment saved locally for demo',
-    })
   }
 
   if (redirectingStaff) {
@@ -601,7 +604,7 @@ export default function DealerLedgerShellPage() {
                 onChange={(value) => setBillForm((prev) => ({ ...prev, billAmount: value }))}
                 required
               />
-              <FormField
+              {/* <FormField
                 label="GST %"
                 type="number"
                 min="0"
@@ -609,7 +612,7 @@ export default function DealerLedgerShellPage() {
                 value={billForm.gstPercent}
                 onChange={(value) => setBillForm((prev) => ({ ...prev, gstPercent: value }))}
                 required
-              />
+              /> */} <h1 className="text-black justify-content justify-center my-auto mt-7 italic">*GST included</h1>
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -703,14 +706,20 @@ export default function DealerLedgerShellPage() {
               value={paymentForm.reference}
               onChange={(value) => setPaymentForm((prev) => ({ ...prev, reference: value }))}
             />
+             {/* <FormField
+              label="Cheque/UTR"
+              value={paymentForm.notes}
+              onChange={(event) => setPaymentForm((prev) => ({  ...prev, notes: event.target.value  }))}
+            /> */}
 
-            <textarea
+            {/* <textarea
+            label="Reference / Notes"
               value={paymentForm.notes}
               onChange={(event) => setPaymentForm((prev) => ({ ...prev, notes: event.target.value }))}
               placeholder="Notes"
               rows={3}
               className="w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            /> */}
 
             <div className="flex justify-end gap-2 pt-2">
               <button

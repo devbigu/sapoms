@@ -37,10 +37,10 @@ async function apiFetch(path: string, init?: RequestInit) {
 }
 
 const api = {
-  list:   ()                              => apiFetch("/accountants"),
-  create: (body: FormState)              => apiFetch("/accountants",       { method: "POST",   body: JSON.stringify(body) }),
-  update: (id: string, body: Partial<FormState>) => apiFetch(`/accountants/${id}`, { method: "PUT",    body: JSON.stringify(body) }),
-  remove: (id: string)                   => apiFetch(`/accountants/${id}`, { method: "DELETE" }),
+  list:   ()                              => apiFetch("/admin/accountants"),
+  create: (body: FormState)              => apiFetch("/admin/accountants", { method: "POST", body: JSON.stringify(body) }),
+  update: (id: string, body: Partial<FormState>) => apiFetch(`/admin/accountants/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  remove: (id: string)                   => apiFetch(`/admin/accountants/${id}`, { method: "DELETE" }),
 };
 
 // ─── Toast ───────────────────────────────────────────────────────────────────
@@ -486,3 +486,4 @@ export default function ManageAccountantsPage() {
     </div>
   );
 }
+

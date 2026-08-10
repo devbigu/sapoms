@@ -1,96 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/mongodb";
-import { ObjectId } from "mongodb";
-import { scryptSync, randomBytes } from "crypto";
+import { adminDetailResponse, adminMutationResponse } from "@/server/admin/admin-response";
+import { adminErrorResponse } from "@/server/admin/admin-errors";
+import { parseBigIntRouteParam, requireAdmin } from "@/server/admin/admin-route";
+import { parseUpdateAdminAccountantInput } from "@/server/modules/admin/accountants/accountants.schemas";
+import { deactivateAdminAccountant, getAdminAccountant, updateAdminAccountant } from "@/server/modules/admin/accountants/accountants.service";
 
-function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
+export const runtime = "nodejs";
 
-function toObjectId(id: string) {
-  try { return new ObjectId(id); } catch { return null; }
-}
-
-export async function GET(
-  _: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requireAdmin();
     const { id } = await params;
-    const oid    = toObjectId(id);
-    if (!oid) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-
-    const db          = await getDb();
-    const doc         = await db
-      .collection("accountants")
-      .findOne({ _id: oid }, { projection: { password: 0 } });
-
-    if (!doc) return NextResponse.json({ success: false, message: "Not found" }, { status: 404 });
-
-    return NextResponse.json({ success: true, data: { ...doc, _id: doc._id.toString() } });
-  } catch (e: any) {
-    console.error("[GET /api/accountants/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const data = await getAdminAccountant(parseBigIntRouteParam(id, "id"));
+    return NextResponse.json(adminDetailResponse(data), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[GET /api/accountants/[id]]", error);
+    return adminErrorResponse(error, "Accountant is unavailable");
   }
 }
 
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requireAdmin();
     const { id } = await params;
-    const oid    = toObjectId(id);
-    if (!oid) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-
-    const body                       = await req.json();
-    const update: Record<string, string> = {};
-    if (body.name?.trim())     update.name     = body.name.trim();
-    if (body.email?.trim())    update.email    = body.email.trim().toLowerCase();
-    if (body.phone?.trim())    update.phone    = body.phone.trim();
-    if (body.password)         update.password = hashPassword(body.password);
-
-    if (Object.keys(update).length === 0) {
-      return NextResponse.json({ success: false, message: "Nothing to update" }, { status: 400 });
-    }
-
-    const db = await getDb();
-    const result = await db
-      .collection("accountants")
-      .updateOne({ _id: oid }, { $set: update });
-
-    if (result.matchedCount === 0) {
-      return NextResponse.json({ success: false, message: "Accountant not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("[PUT /api/accountants/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const input = await parseUpdateAdminAccountantInput(request);
+    const data = await updateAdminAccountant(parseBigIntRouteParam(id, "id"), input);
+    return NextResponse.json(adminMutationResponse("Accountant updated", data), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[PUT /api/accountants/[id]]", error);
+    return adminErrorResponse(error, "Accountant could not be updated");
   }
 }
 
-export async function DELETE(
-  _: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    await requireAdmin();
     const { id } = await params;
-    const oid    = toObjectId(id);
-    if (!oid) return NextResponse.json({ success: false, message: "Invalid id" }, { status: 400 });
-
-    const db     = await getDb();
-    const result = await db.collection("accountants").deleteOne({ _id: oid });
-
-    if (result.deletedCount === 0) {
-      return NextResponse.json({ success: false, message: "Accountant not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (e: any) {
-    console.error("[DELETE /api/accountants/[id]]", e);
-    return NextResponse.json({ success: false, message: e.message }, { status: 500 });
+    const data = await deactivateAdminAccountant(parseBigIntRouteParam(id, "id"));
+    return NextResponse.json(adminMutationResponse("Accountant deactivated", data), { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("[DELETE /api/accountants/[id]]", error);
+    return adminErrorResponse(error, "Accountant could not be deactivated");
   }
 }

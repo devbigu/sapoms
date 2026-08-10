@@ -27,6 +27,10 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function normalizeLoginIdentifier(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function displayNameFromProfile(profile: Record<string, unknown>, role: AuthRole) {
   const keys = role === "DEALER" ? ["Dealer_Name", "name"] : ["name", "staff_name", "ADMIN_NAME"];
   for (const key of keys) {
@@ -38,12 +42,20 @@ function displayNameFromProfile(profile: Record<string, unknown>, role: AuthRole
 
 export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticationProvider {
   async authenticate(input: { email: string; password: string; roleType?: string }): Promise<AuthenticatedPostgresUser> {
+    const loginIdentifier = normalizeLoginIdentifier(input.email);
     const normalizedEmail = normalizeEmail(input.email);
     const expectedRole = input.roleType ? LEGACY_ROLE_MAP[input.roleType as LegacyRoleType] : undefined;
-    if (!normalizedEmail || (input.roleType && !expectedRole)) throw new Error("Invalid credentials");
+    if (!loginIdentifier || (input.roleType && !expectedRole)) throw new Error("Invalid credentials");
 
-    const user = await prisma.user.findUnique({
-      where: { normalizedEmail },
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { normalizedEmail },
+          { normalizedUsername: loginIdentifier },
+          { dealerProfile: { dealerCode: input.email.trim() } },
+          { dealerProfile: { legacyPhpId: input.email.trim() } },
+        ],
+      },
       include: {
         adminProfile: true,
         accountantProfile: true,

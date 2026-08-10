@@ -67,7 +67,7 @@ type OrderProductNote = {
 }
 
 const SHIMMER = "animate-pulse bg-gray-200 rounded"
-const BACKEND_URL = "/api/php-compat"
+const PROFILE_API_MIGRATED = "/api/staff/dealers"
 const ITEMS_PER_PAGE = 10
 
 function statusBadge(status: string) {
@@ -110,7 +110,7 @@ export default function DispatchStatusPage() {
     queryKey: ['dispatchstatus', STAFF_ORDER_SCOPE_VERSION, page, search, user?.staff_id],
     queryFn: async () => {
       const res = await axios.get(
-        `/api/orders-data?source=Orderstspegination&role=staff&page=${page}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(user?.staff_id || "")}`
+        `/api/orders-data?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`
       )
       return res.data
     },
@@ -155,7 +155,7 @@ export default function DispatchStatusPage() {
       queryKey: ['dispatchstatus', STAFF_ORDER_SCOPE_VERSION, page + 1, search, user.staff_id],
       queryFn: async () => {
         const res = await axios.get(
-          `/api/orders-data?source=Orderstspegination&role=staff&page=${page + 1}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(user.staff_id || "")}`
+          `/api/orders-data?page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`
         )
         return res.data
       },

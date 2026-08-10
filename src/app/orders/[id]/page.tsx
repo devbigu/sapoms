@@ -34,6 +34,7 @@ import {
   type DispatchStatus,
 } from "@/lib/orderDispatch";
 import { PenLine, Trash2 } from "lucide-react";
+import { fetchLegacyDealerProfile, fetchLegacyOrderDetail } from "@/lib/legacyOrderDetail";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -206,41 +207,7 @@ type EffectiveOrderOverlayState = {
   acceptance?: { status?: string; rawStatus?: string; acceptedAt?: string } | null;
 };
 
-const BACKEND = "/api/php-compat";
 const ORDER_DETAILS_FALLBACK_STORAGE_KEY = "omsons.orderDetailsFallback.v1";
-
-type PhpExchangeLog = {
-  method: "GET" | "POST";
-  url: string;
-  request?: unknown;
-  response?: unknown;
-  error?: unknown;
-};
-
-function logPhpExchange(label: string, details: PhpExchangeLog) {
-  console.groupCollapsed(`[PHP backend] ${label}`);
-  console.info("method", details.method);
-  console.info("url", details.url);
-  if (details.request !== undefined) console.info("sending to PHP", details.request);
-  if (details.response !== undefined) console.info("received from PHP", details.response);
-  if (details.error !== undefined) console.error("PHP request failed", details.error);
-  console.groupEnd();
-}
-
-function parsePhpJsonText(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    for (let index = trimmed.indexOf("{"); index >= 0; index = trimmed.indexOf("{", index + 1)) {
-      try {
-        return JSON.parse(trimmed.slice(index));
-      } catch {}
-    }
-    throw new SyntaxError("Unable to parse PHP JSON response");
-  }
-}
 
 function readLocalOrderDetailsFallback(orderId: string): OrderSummaryOverride | null {
   if (typeof window === "undefined" || !orderId) return null;
@@ -299,14 +266,13 @@ async function fetchOrderDispatchAccessMeta(
   dealerId: string,
   actor: DispatchUserSession
 ): Promise<OrderDispatchAccessMeta | null> {
-  const source = actor.role === "dealer" || actor.role === "staff" ? "orderhispegination" : "orderpegination";
-  const targetDealer = actor.role === "staff" && dealerId
-    ? `&target_dealer=${encodeURIComponent(dealerId)}`
+  const dealerFilter = actor.role === "staff" && dealerId
+    ? `&dealer=${encodeURIComponent(dealerId)}`
     : "";
-  const url = `/api/orders-data?source=${source}&role=${encodeURIComponent(actor.role)}&page=1&limit=20&search=${encodeURIComponent(orderId)}${actor.id ? `&id=${encodeURIComponent(actor.id)}` : ""}${targetDealer}`;
+  const url = `/api/orders-data?page=1&limit=20&search=${encodeURIComponent(orderId)}${dealerFilter}`;
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`orderhispegination failed with ${response.status}`);
+    throw new Error(`orders-data failed with ${response.status}`);
   }
 
   const payload = await response.json();
@@ -387,11 +353,7 @@ function resolveCurrentUser(): DispatchUserSession | null {
 }
 
 function buildDispatchHeaders(user: DispatchUserSession | null): HeadersInit {
-  return {
-    ...(user?.id ? { "x-omsons-actor-id": user.id } : {}),
-    ...(user?.role ? { "x-omsons-actor-role": user.role } : {}),
-    ...(user?.roletype ? { "x-omsons-actor-roletype": user.roletype } : {}),
-  };
+  return {};
 }
 
 function buildDispatchRecordFallbackKey(record: Partial<OrderDispatchRecord>) {
@@ -918,6 +880,7 @@ export default function ViewOrderDealerPage() {
   const [packLookup, setPackLookup] = useState<Record<string, number>>({});
   const [orderMeta, setOrderMeta] = useState<OrderMeta | null>(null);
   const [activeOrderHeader, setActiveOrderHeader] = useState<ActiveOrderHeader | null>(null);
+  const isPostgresDetail = activeOrderHeader?.__source === "postgres";
   const [orderAccessState, setOrderAccessState] = useState<OrderDispatchAccessState>({ key: "", meta: null });
   const [summaryOverride, setSummaryOverride] = useState<OrderSummaryOverride | null>(null);
   const [localOrderFallback, setLocalOrderFallback] = useState<OrderSummaryOverride | null>(null);
@@ -993,44 +956,83 @@ export default function ViewOrderDealerPage() {
 
   useEffect(() => {
     if (!id) return;
-    const url = `${BACKEND}/orderdatalist?id=${id}`;
-    fetch(url)
-      .then(r => r.text().then(parsePhpJsonText))
-      .then(d => {
-        logPhpExchange("orderdatalist", {
-          method: "GET",
-          url,
-          request: { id },
-          response: d,
-        });
+    let cancelled = false;
+
+    const applyDetailPayload = (payload: unknown, persistFallback: boolean) => {
+      const normalized = normalizeOrderDetailResponse(payload, id);
+      if (cancelled) return normalized;
+      setPhpOrders(normalized.items as OrderData[]);
+      setOrderMeta(normalized.meta as OrderMeta);
+      if (normalized.items.length > 0 && persistFallback) {
+        const fallback = { ...(normalized.meta ?? {}), items: normalized.items };
+        saveLocalOrderDetailsFallback(id, fallback);
+        setLocalOrderFallback(fallback as OrderSummaryOverride);
+      }
+      return normalized;
+    };
+
+    const finishLoading = () => {
+      if (cancelled) return;
+      setOrderAccessVerified(true);
+      setLoading(false);
+    };
+
+    const loadPostgresDetails = async () => {
+      const response = await fetch("/api/order-access/" + encodeURIComponent(id), { cache: "no-store" });
+      if (!response.ok) return false;
+      const json = await response.json();
+      if (!json?.success || !json.data || json.data.__source !== "postgres") return false;
+      const normalized = applyDetailPayload({ data: json.data }, true);
+      if (!cancelled) {
+        setActiveOrderHeader(json.data as ActiveOrderHeader);
+        setLocalOrderNote(String(json.data.order_note ?? json.data.note ?? json.data.orderNotes?.[0]?.note ?? ""));
+        setFallbackProductNotes(Array.isArray(json.data.orderProductNotes) ? json.data.orderProductNotes : []);
+        setSummaryOverride(Array.isArray(json.data.summaryOverrides) ? json.data.summaryOverrides[0] ?? null : null);
+        setOverlayTotals(null);
+        setOverlayItems(null);
+        setOverlayState({ isCancelled: String(json.data.status ?? "") === "CANCELLED", isEdited: false, latestRevision: 0, acceptance: null });
+        setDispatchRecords(Array.isArray(json.data.dispatchRecords) ? json.data.dispatchRecords : []);
+        setDispatchRecordsLoaded(true);
+        setDispatchRecordsOrderId(id);
+        setDispatchRecordsError("");
+      }
+      return normalized.items.length > 0;
+    };
+
+    const loadLegacyDetails = async () => {
+      const payload = await fetchLegacyOrderDetail(id);
+      const normalized = applyDetailPayload(payload, true);
+      if (!cancelled) setActiveOrderHeader(normalized.meta as ActiveOrderHeader);
+      return normalized.items.length > 0;
+    };
+
+    loadPostgresDetails()
+      .then(async (loaded) => {
+        if (!loaded) await loadLegacyDetails();
+      })
+      .catch(async () => {
         try {
-          const normalized = normalizeOrderDetailResponse(d, id);
-          setPhpOrders(normalized.items as OrderData[]);
-          setOrderMeta(normalized.meta as OrderMeta);
-          if (normalized.items.length > 0) {
-            const fallback = { ...(normalized.meta ?? {}), items: normalized.items };
-            saveLocalOrderDetailsFallback(id, fallback);
-            setLocalOrderFallback(fallback as OrderSummaryOverride);
+          if (!await loadLegacyDetails() && !cancelled) {
+            setActiveOrderHeader(null);
+            setPhpOrders([]);
           }
         } catch {
-          setPhpOrders([]);
-          setOrderMeta(null);
+          if (!cancelled) {
+            setActiveOrderHeader(null);
+            setPhpOrders([]);
+            setOrderMeta(null);
+          }
         }
-        setActiveOrderHeader(null);
-        setOrderAccessVerified(true);
-        setLoading(false);
       })
-      .catch(() => {
-        setActiveOrderHeader(null);
-        setPhpOrders([]);
-        setOrderMeta(null);
-        setOrderAccessVerified(true);
-        setLoading(false);
-      });
-  }, [id]);
+      .finally(finishLoading);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, id]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id || !orderAccessKey || !currentUser) return;
+    if (!orderAccessVerified || isPostgresDetail || !id || !orderAccessKey || !currentUser) return;
 
     let cancelled = false;
 
@@ -1057,10 +1059,10 @@ export default function ViewOrderDealerPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, id, orderAccessDealerId, orderAccessKey, orderAccessVerified]);
+  }, [currentUser, id, orderAccessDealerId, orderAccessKey, isPostgresDetail, orderAccessVerified]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id) return;
+    if (!orderAccessVerified || isPostgresDetail || !id) return;
 
     let cancelled = false;
     fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
@@ -1104,20 +1106,20 @@ export default function ViewOrderDealerPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser, id, orderAccessVerified]);
+  }, [currentUser, id, isPostgresDetail, orderAccessVerified]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id) return;
+    if (!orderAccessVerified || isPostgresDetail || !id) return;
     fetch(`/api/order-notes?order_id=${encodeURIComponent(id)}`)
       .then(r => r.json())
       .then(json => {
         if (json.success && json.data?.[0]?.note) setLocalOrderNote(json.data[0].note);
       })
       .catch(() => {});
-  }, [id, orderAccessVerified]);
+  }, [id, isPostgresDetail, orderAccessVerified]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id) return;
+    if (!orderAccessVerified || isPostgresDetail || !id) return;
     fetch(`/api/order-product-notes?orderId=${encodeURIComponent(id)}`, { cache: "no-store" })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((json) => {
@@ -1129,10 +1131,10 @@ export default function ViewOrderDealerPage() {
         }
       })
       .catch(() => setProductNotesError("Product Notes could not be loaded."));
-  }, [id, orderAccessVerified]);
+  }, [id, isPostgresDetail, orderAccessVerified]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id) return;
+    if (!orderAccessVerified || isPostgresDetail || !id) return;
     const params = new URLSearchParams({ order_id: id });
     if (orderAccessDealerId) params.set("dealer_id", orderAccessDealerId);
     fetch(`/api/order-summary-overrides?${params.toString()}`, { cache: "no-store" })
@@ -1148,10 +1150,10 @@ export default function ViewOrderDealerPage() {
         }
       })
       .catch(() => setSummaryError("Discount metadata could not be loaded; stored order totals remain visible."));
-  }, [id, orderAccessDealerId, orderAccessVerified]);
+  }, [id, orderAccessDealerId, isPostgresDetail, orderAccessVerified]);
 
   useEffect(() => {
-    if (!orderAccessVerified || !id || !currentUser?.id) return;
+    if (!orderAccessVerified || isPostgresDetail || !id || !currentUser?.id) return;
 
     fetch(`/api/order-dispatch?orderId=${encodeURIComponent(id)}`, {
       cache: "no-store",
@@ -1177,7 +1179,7 @@ export default function ViewOrderDealerPage() {
         setDispatchRecordsOrderId(id);
         setDispatchRecordsError("Dispatch data could not be verified.");
       });
-  }, [currentUser, id, orderAccessVerified]);
+  }, [currentUser, id, isPostgresDetail, orderAccessVerified]);
 
   // Load product pack sizes (catNo → packSize) from local product data
   useEffect(() => {
@@ -1289,12 +1291,13 @@ export default function ViewOrderDealerPage() {
     }
 
     let cancelled = false;
-    fetch(`${BACKEND}/getdealer?id=${encodeURIComponent(dealerIdForDispatch)}`, { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    fetchLegacyDealerProfile(dealerIdForDispatch)
       .then((json) => {
         if (cancelled) return;
-        const data = json?.data;
-        setOrderDealerProfile(data && typeof data === "object" && data.Dealer_Id ? data as DealerInfo : null);
+        const payload = json && typeof json === "object" ? json as Record<string, unknown> : {};
+        const data = payload.data;
+        const record = data && typeof data === "object" ? data as Record<string, unknown> : null;
+        setOrderDealerProfile(record?.Dealer_Id ? record as DealerInfo : null);
       })
       .catch(() => {
         if (!cancelled) setOrderDealerProfile(null);
@@ -1410,6 +1413,11 @@ export default function ViewOrderDealerPage() {
     orderdata_item_quantity: String(totals.qty),
     mtstatus: displayOrderMeta?.mtstatus || firstOrder?.orderdata_status || "",
     outstandingDate: displayOrderMeta?.outstandingDate || "",
+    __source: displayOrderMeta?.__source,
+    orderNotes: (displayOrderMeta as any)?.orderNotes,
+    orderProductNotes: (displayOrderMeta as any)?.orderProductNotes,
+    summaryOverrides: (displayOrderMeta as any)?.summaryOverrides,
+    dispatchRecords: (displayOrderMeta as any)?.dispatchRecords,
     items: displayOrders.map((o, index) => {
       const pricing = rowPricings[index] ?? getRowPricing(o, packLookup, displayOrderMeta);
       return {

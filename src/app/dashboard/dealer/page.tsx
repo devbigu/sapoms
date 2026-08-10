@@ -176,10 +176,6 @@ function DealerDashboardInner() {
 
         fetch(`/api/wallet/${encodeURIComponent(dealerId)}?limit=5`, {
           cache: "no-store",
-          headers: {
-            "x-omsons-actor-role": "dealer",
-            "x-omsons-actor-id": String(dealerId),
-          },
         })
           .then((response) => response.ok ? response.json() : Promise.reject(new Error("wallet unavailable")))
           .then((payload) => { if (payload.success) setWallet(payload); })
@@ -187,7 +183,7 @@ function DealerDashboardInner() {
           .finally(() => setWalletLoading(false));
 
         const activeResponse = await fetchJson<{ data: OrderHistoryItem[] }>(
-          `/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(dealerId)}`
+          `/api/orders-data?page=1&limit=1000&search=`
         );
         const orderView = buildDealerOrderView(activeResponse.data, dealerId);
         setMonthlyOrders(orderView.monthly);
@@ -343,7 +339,7 @@ function DealerDashboardInner() {
       },
       {
         queryKey: ["dealerSidebarSummary", "orders", "dealer", dealer.Dealer_Id],
-        queryFn: () => fetchJson<{ data: OrderHistoryItem[] }>(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(dealer.Dealer_Id)}`),
+        queryFn: () => fetchJson<{ data: OrderHistoryItem[] }>(`/api/orders-data?page=1&limit=1000&search=`),
         enabled: !!dealer.Dealer_Id,
       },
     ],

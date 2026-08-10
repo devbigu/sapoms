@@ -23,3 +23,23 @@ export type AdminProductVariantRecord = {
   packPricePaise: bigint;
   active: boolean;
 };
+
+export type ProductVariantWriteInput = {
+  id?: string;
+  sku?: string;
+  catalogueNumber?: string;
+  unitName?: string;
+  packSize?: number;
+  unitPricePaise?: bigint;
+  packPricePaise?: bigint;
+  active?: boolean;
+};
+
+export type ProductWriteInput = {
+  productCode?: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  active?: boolean;
+  variants: ProductVariantWriteInput[];
+};

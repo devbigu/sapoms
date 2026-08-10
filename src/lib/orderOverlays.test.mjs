@@ -217,3 +217,57 @@ test("latest edit revision supplies effective items and change history", () => {
   assert.equal(effective.effectiveItems[1].orderdata_item_quantity, "25");
   assert.equal(effective.changeHistory[0].type, "quantity_changed");
 });
+
+test("PostgreSQL edit normalization preserves packs, pack size, and total pieces", () => {
+  const normalized = overlays.normalizeOrderItems({
+    data: {
+      items: [
+        {
+          orderdata_id: "PG-1",
+          orderdata_cat_no: "A-12",
+          product_name: "Product A",
+          quantityPacks: 4,
+          packSize: 12,
+          totalPieces: 48,
+          orderdata_price: "10",
+        },
+        {
+          orderdata_id: "PG-2",
+          orderdata_cat_no: "B-5",
+          product_name: "Product B",
+          quantityPacks: 7,
+          packSize: 5,
+          totalPieces: 35,
+          orderdata_price: "20",
+        },
+      ],
+    },
+  }, "9001");
+
+  assert.equal(normalized.items[0].orderdata_item_quantity, "4");
+  assert.equal(normalized.items[0].quantityPacks, 4);
+  assert.equal(normalized.items[0].packSize, 12);
+  assert.equal(normalized.items[0].totalPieces, 48);
+  assert.equal(normalized.items[1].orderdata_item_quantity, "7");
+  assert.equal(normalized.items[1].quantityPacks, 7);
+  assert.equal(normalized.items[1].packSize, 5);
+  assert.equal(normalized.items[1].totalPieces, 35);
+
+  const revision = overlays.buildOrderEditRevision({
+    orderId: "9001",
+    baseOrder: { order_amount: "830", order_discount_amount: "0", order_net_amount: "830" },
+    originalItems: normalized.items,
+    requestedItems: [
+      { ...normalized.items[0], originalLineId: "PG-1", orderdata_item_quantity: "6", quantityPacks: 6 },
+      { ...normalized.items[1], originalLineId: "PG-2" },
+    ],
+    expectedRevision: 0,
+    idempotencyKey: "edit-packs-1",
+    actor: { role: "dealer", actorId: "D-1" },
+  });
+
+  assert.equal(revision.effectiveItems[0].orderdata_item_quantity, "6");
+  assert.equal(revision.effectiveItems[0].quantityPacks, 6);
+  assert.equal(revision.effectiveItems[0].packSize, 12);
+  assert.equal(revision.effectiveItems[0].totalPieces, 72);
+});

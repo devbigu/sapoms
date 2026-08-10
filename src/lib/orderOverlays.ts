@@ -190,12 +190,23 @@ function stableLineId(item: Record<string, unknown>, orderId: string, occurrence
 
 function normalizeItem(item: Record<string, unknown>, orderId: string, index: number): OrderOverlayItem {
   const lineId = stableLineId(item, orderId, index);
+  const packSize = Math.max(1, numberValue(item.packSize ?? item.pack_size) || 1);
+  const quantityPacks = Math.max(0, numberValue(item.quantityPacks ?? item.quantity_packs ?? item.packs ?? item.orderdata_item_quantity ?? item.quantity));
+  const totalPieces = quantityPacks * packSize;
   return {
     ...item,
     orderdata_id: lineId,
     orderdata_orderid: firstNonEmpty(item.orderdata_orderid, item.orderId, orderId),
     orderdata_cat_no: firstNonEmpty(item.orderdata_cat_no, item.catNo, item.productId, item.sku),
-    orderdata_item_quantity: scalar(item.orderdata_item_quantity ?? item.quantityPacks ?? item.quantity, 0),
+    orderdata_item_quantity: String(quantityPacks),
+    quantityPacks,
+    quantity_packs: quantityPacks,
+    packs: quantityPacks,
+    packSize,
+    pack_size: packSize,
+    totalPieces,
+    total_pieces: totalPieces,
+    pieces: totalPieces,
     orderdata_price: scalar(item.orderdata_price ?? item.unitPrice ?? item.unit_price, 0),
     orderdata_discount: scalar(item.orderdata_discount ?? item.discountAmount ?? item.discount_amount, 0),
     orderdata_afterDisPrice: scalar(item.orderdata_afterDisPrice ?? item.finalPrice ?? item.final_price, 0),

@@ -45,7 +45,26 @@ test("invoice generation checks actor access before summary overrides and item r
   assert.ok(itemRequest > accessGuard);
 });
 
-test("stored invoice upload keeps actor access and listing/deletion have no date predicate", async () => {
+
+test("PostgreSQL invoice uses inline native detail without fallback detail requests", async () => {
+  const source = await fs.readFile(path.resolve("src/lib/invoicegenerator.tsx"), "utf8");
+  const generationStart = source.indexOf("export async function generateOrderInvoicePDF");
+  const isPostgresGuard = source.indexOf("const isPostgresOrder", generationStart);
+  const inlineItems = source.indexOf("const inlineItems = Array.isArray((displayOrder as any).items)", generationStart);
+  const legacyItemFetch = source.indexOf("orderItems = await fetchOrderItems(displayOrder.order_id)", generationStart);
+  const productNoteFallback = source.indexOf("await fetchOrderProductNotes(String(displayOrder.order_id))", generationStart);
+  const savedNoteFallback = source.indexOf("await fetchSavedOrderNote(String(displayOrder.order_id))", generationStart);
+
+  assert.ok(generationStart >= 0);
+  assert.ok(isPostgresGuard > generationStart);
+  assert.ok(inlineItems > isPostgresGuard);
+  assert.ok(legacyItemFetch > inlineItems);
+  assert.match(source.slice(inlineItems, legacyItemFetch), /else if \(!isPostgresOrder\)/);
+  assert.ok(productNoteFallback > inlineItems);
+  assert.ok(savedNoteFallback > inlineItems);
+  assert.match(source.slice(inlineItems, productNoteFallback), /: isPostgresOrder\s*\? \[\]/);
+  assert.match(source.slice(inlineItems, savedNoteFallback), /const savedNote = isPostgresOrder/);
+});test("stored invoice upload keeps actor access and listing/deletion have no date predicate", async () => {
   const source = await fs.readFile(path.resolve("src/lib/invoicegenerator.tsx"), "utf8");
   assert.match(source, /if \(!canGenerateOrderInvoiceForActor\(order, options\)\) return \{ success: false/);
   assert.doesNotMatch(source, /\.gte\("invoice_date"/);

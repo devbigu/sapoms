@@ -30,7 +30,6 @@ type AppRole = 'admin' | 'staff' | 'accountant' | 'dealer'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SHIMMER = 'animate-pulse bg-gray-200 rounded'
-const BACKEND_URL = '/api/php-compat'
 const ITEMS_PER_PAGE = 10
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -67,9 +66,16 @@ function initials(name: string) {
 }
 
 function statusBadge(s: string) {
-  return s === '1'
+  return s === '1' || s === 'ACTIVE'
     ? { bg: 'bg-emerald-50', text: 'text-emerald-700', label: 'Active' }
     : { bg: 'bg-red-50',     text: 'text-red-600',     label: 'Inactive' }
+}
+
+function normalizeDealer(dealer: Dealer): Dealer {
+  return {
+    ...dealer,
+    status: dealer.status === 'ACTIVE' ? '1' : dealer.status,
+  }
 }
 
 // ─── Main component ──────────────────────────────────────────────────────────
@@ -106,7 +112,8 @@ export default function LedgerDealerListPage() {
   const { data: response, isLoading: isPaginatedLoading, isError: isPaginatedError } = useQuery<DealerResponse>({
     queryKey: ['ledger-dealers', page, search],
     queryFn: async () => {
-      const res = await fetch(`${BACKEND_URL}/dealerpegination?page=${page}&search=${search}`)
+      const res = await fetch('/api/ledger')
+      if (!res.ok) throw new Error('Failed to load ledger dealers')
       return res.json()
     },
     placeholderData: keepPreviousData,
@@ -115,10 +122,11 @@ export default function LedgerDealerListPage() {
   })
 
   // ── Fetch staff-assigned dealers (staff only) ──
-  const { data: staffDealersResponse, isLoading: isStaffLoading, isError: isStaffError } = useQuery<StaffDealerResponse>({
+  const { data: assignedDealersResponse, isLoading: isStaffLoading, isError: isStaffError } = useQuery<StaffDealerResponse>({
     queryKey: ['staff-assigned-dealers', staffId],
     queryFn: async () => {
-      const res = await fetch(`${BACKEND_URL}/staffDealers?id=${staffId}`)
+      const res = await fetch('/api/staff/dealers')
+      if (!res.ok) throw new Error('Failed to load assigned dealers')
       return res.json()
     },
     staleTime: 5 * 60 * 1000,
@@ -131,7 +139,8 @@ export default function LedgerDealerListPage() {
     queryClient.prefetchQuery({
       queryKey: ['ledger-dealers', page + 1, search],
       queryFn: async () => {
-        const res = await fetch(`${BACKEND_URL}/dealerpegination?page=${page + 1}&search=${search}`)
+        const res = await fetch('/api/ledger')
+        if (!res.ok) throw new Error('Failed to load ledger dealers')
         return res.json()
       },
     })
@@ -144,8 +153,8 @@ export default function LedgerDealerListPage() {
 
   // Staff: client-side search + pagination over assigned dealers
   const staffFilteredDealers = useMemo(() => {
-    if (!isStaffRole || !staffDealersResponse?.data) return []
-    const all = staffDealersResponse.data
+    if (!isStaffRole || !assignedDealersResponse?.data) return []
+    const all = assignedDealersResponse.data.map(normalizeDealer)
     if (!search) return all
     const q = search.toLowerCase()
     return all.filter(d =>
@@ -154,27 +163,32 @@ export default function LedgerDealerListPage() {
       d.Dealer_Email?.toLowerCase().includes(q) ||
       d.Dealer_Number?.includes(q)
     )
-  }, [isStaffRole, staffDealersResponse?.data, search])
+  }, [isStaffRole, assignedDealersResponse?.data, search])
 
-  // Admin/accountant: use paginated API data
-  const paginatedData: Dealer[] = response?.data || []
+  const allLedgerDealers: Dealer[] = useMemo(() => {
+    const rows = (response?.data || []).map(normalizeDealer)
+    if (!search) return rows
+    const q = search.toLowerCase()
+    return rows.filter(d =>
+      d.Dealer_Name?.toLowerCase().includes(q) ||
+      d.Dealer_City?.toLowerCase().includes(q) ||
+      d.Dealer_Email?.toLowerCase().includes(q) ||
+      d.Dealer_Number?.includes(q)
+    )
+  }, [response?.data, search])
 
   // Unified data for the current page
   const data: Dealer[] = isStaffRole
     ? staffFilteredDealers.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
-    : paginatedData
+    : allLedgerDealers.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
 
   const total = isStaffRole
     ? staffFilteredDealers.length
-    : (typeof response?.total === 'number'
-        ? response.total
-        : (page - 1) * ITEMS_PER_PAGE + paginatedData.length)
+    : allLedgerDealers.length
 
   const totalPages = isStaffRole
     ? Math.max(1, Math.ceil(staffFilteredDealers.length / ITEMS_PER_PAGE))
-    : (response?.last_page ||
-       Math.ceil(total / ITEMS_PER_PAGE) ||
-       (paginatedData.length < ITEMS_PER_PAGE ? page : page + 1))
+    : Math.max(1, Math.ceil(total / ITEMS_PER_PAGE))
 
   function pageNumbers(): (number | '…')[] {
     const pages: (number | '…')[] = []
@@ -412,3 +426,4 @@ export default function LedgerDealerListPage() {
     </div>
   )
 }
+

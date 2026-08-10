@@ -93,7 +93,6 @@ type CancelledOrderOverlay = {
   originalOrderRef?: Record<string, unknown>
 }
 
-const BACKEND_URL    = "/api/php-compat"
 const ITEMS_PER_PAGE = 10
 const YEAR           = new Date().getFullYear()
 
@@ -108,7 +107,7 @@ const ROLE_CONFIG: Record<Role, {
   admin: {
     label: 'Admin', pillCls: 'role-admin', caption: 'All dealer orders across the system',
     endpoint: (_id, page, search) =>
-      `/api/orders-data?source=orderpegination&role=admin&page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`,
+      `/api/orders-data?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`,
     showDealerCol: true, showActions: true,
     canDelete: (_s, row) => row.accept_order === '0' && row.del_status === '0',
     canAccept: (_s, row) => row.del_status === '0',
@@ -117,7 +116,7 @@ const ROLE_CONFIG: Record<Role, {
   dealer: {
     label: 'Dealer', pillCls: 'role-dealer', caption: 'Your order history',
     endpoint: (id, page, search) =>
-      `/api/orders-data?source=orderhispegination&role=dealer&page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(id)}`,
+      `/api/orders-data?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`,
     showDealerCol: false, showActions: true,
     canDelete: (_s, row) => row.accept_order === '0' && row.del_status === '0',
     canAccept: () => false,
@@ -126,7 +125,7 @@ const ROLE_CONFIG: Record<Role, {
   staff: {
     label: 'Staff', pillCls: 'role-staff', caption: 'Orders assigned to you',
     endpoint: (id, page, search) =>
-      `/api/orders-data?source=staffOrderrPagination&role=staff&page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}&id=${encodeURIComponent(id)}`,
+      `/api/orders-data?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`,
     showDealerCol: true, showActions: true,
     canDelete: () => false,
     canAccept: (s, row) => s.roletype !== '2' && row.del_status === '0',
@@ -210,6 +209,45 @@ function getDispatchLeftQuantity(item: DispatchOrderProduct): number {
 
 function getOriginalProductRemarks(item: DispatchOrderProduct): string {
   return [item.remark, item.remarks].filter(Boolean).join(' | ')
+}
+
+function dispatchProductFromRecord(record: Record<string, unknown>): DispatchOrderProduct {
+  const orderedQuantity = String(record.orderedQuantity ?? record.orderdata_item_quantity ?? '0')
+  const dispatchedQuantity = String(record.dispatchedQuantity ?? record.readyquantity ?? '0')
+  const updates = Array.isArray(record.updates) ? record.updates as Array<Record<string, unknown>> : []
+  const latestUpdate = updates[updates.length - 1] ?? {}
+  return {
+    orderdata_id: String(record.orderItemId ?? record.orderdata_id ?? record.id ?? ''),
+    orderdata_orderid: String(record.orderId ?? record.orderdata_orderid ?? ''),
+    orderdata_cat_no: String(record.sku ?? record.orderdata_cat_no ?? ''),
+    orderdata_item_quantity: orderedQuantity,
+    orderdata_status: String(record.currentStatus ?? record.orderdata_status ?? ''),
+    readyquantity: dispatchedQuantity,
+    product_name: String(record.productName ?? record.product_name ?? record.sku ?? record.orderdata_cat_no ?? ''),
+    product_discription: String(record.productDescription ?? record.product_discription ?? ''),
+    remark: String(latestUpdate.remark ?? record.remark ?? ''),
+    remarks: String(record.remarks ?? ''),
+  }
+}
+
+function dispatchHistoryFromRecord(record: Record<string, unknown> | null): DispatchRemark[] {
+  const updates = Array.isArray(record?.updates) ? record.updates as Array<Record<string, unknown>> : []
+  return updates.slice().reverse().map((update) => ({
+    remark: String(update.remark ?? ''),
+    readyquantity: String(update.quantity ?? ''),
+    status: String(update.status ?? ''),
+    datetime: String(update.createdAt ?? ''),
+  }))
+}
+
+function dispatchStatusForApi(status: string) {
+  switch (String(status || '').trim()) {
+    case '1': return 'dispatched'
+    case '2': return 'dispatched'
+    case '3': return 'not_in_stock'
+    case '4': return 'successful'
+    default: return status
+  }
 }
 
 function customDiscountBadge(progress: CustomDiscountProgress) {
@@ -826,7 +864,7 @@ export default function OrdersPage() {
     queryKey: ['cancelled-orders', session?.role, session?.id, page, serverSearch],
     queryFn: async () => {
       if (!session) throw new Error('No session')
-      const res = await fetch(`/api/order-overlays/cancelled?role=${encodeURIComponent(session.role)}&id=${encodeURIComponent(session.id)}&page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(serverSearch)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/order-overlays/cancelled?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(serverSearch)}`, { cache: 'no-store' })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.message || 'Unable to load cancelled orders')
       return json
@@ -988,92 +1026,68 @@ export default function OrdersPage() {
     const reason = cfg.requireReason ? window.prompt('Reason for delete') : ''
     if (cfg.requireReason && !reason?.trim()) { setToast({ msg: 'Please provide a reason.', type: 'err' }); return }
     if (!window.confirm('Are you sure?')) return
-    const fd = new FormData()
-    fd.append('id', id); fd.append('tbl', 'order_tbl'); fd.append('field', 'order_id')
-    if (reason) fd.append('reason', reason)
     try {
-      if (session.role === 'dealer' || session.role === 'admin') {
-        const order = data.find((row) => String(row.order_id) === String(id))
-        const overlayRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-omsons-actor-role': session.role,
-            'x-omsons-actor-id': session.id,
-            'x-omsons-actor-name': session.name,
-            ...(session.roletype ? { 'x-omsons-actor-roletype': session.roletype } : {}),
-          },
-          body: JSON.stringify({
-            action: 'cancel',
-            reason: reason || 'Cancelled from order management.',
-            formattedOrderNumber: `OM/${YEAR}/${id}`,
-            dealerId: order?.order_dealer,
-            assignedStaffId: order?.staffid,
-          }),
-        })
-        const overlayJson = await overlayRes.json().catch(() => null)
-        if (!overlayRes.ok || overlayJson?.success === false) {
-          throw new Error(overlayJson?.message || 'Cancellation could not be recorded.')
-        }
+      if (session.role !== 'dealer' && session.role !== 'admin') {
+        throw new Error('Only Dealers or Admin can cancel orders.')
       }
-      const res = await axios.post(`${BACKEND_URL}/deletewithreason`, fd)
-      setToast({ msg: res.data?.msg || 'Deleted.', type: 'ok' })
+      const order = data.find((row) => String(row.order_id) === String(id))
+      const overlayRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'cancel',
+          reason: reason || 'Cancelled from order management.',
+          formattedOrderNumber: `OM/${YEAR}/${id}`,
+        }),
+      })
+      const overlayJson = await overlayRes.json().catch(() => null)
+      if (!overlayRes.ok || overlayJson?.success === false) {
+        throw new Error(overlayJson?.message || 'Cancellation could not be recorded.')
+      }
+      setToast({ msg: overlayJson?.message || 'Deleted.', type: 'ok' })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['cancelled-orders'] })
-    } catch { setToast({ msg: 'Delete failed.', type: 'err' }) }
+    } catch (error) { setToast({ msg: error instanceof Error ? error.message : 'Delete failed.', type: 'err' }) }
   }, [session, cfg, data, queryClient])
 
   const handleAccept = useCallback(async (id: string, status: 0 | 1) => {
     if (!session) return
-    const fd = new FormData()
-    fd.append('id', id); fd.append('status', String(status))
     try {
-      const overlayRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}?role=${encodeURIComponent(session.role)}&actor_id=${encodeURIComponent(session.id)}`, { cache: 'no-store' })
-      const overlayJson = await overlayRes.json().catch(() => null)
-      if (overlayRes.ok && overlayJson?.data?.isCancelled) {
+      const currentRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const currentJson = await currentRes.json().catch(() => null)
+      if (currentRes.ok && currentJson?.data?.isCancelled) {
         setToast({ msg: 'Cancelled orders cannot be accepted or declined.', type: 'err' })
         queryClient.invalidateQueries({ queryKey: ['orders'] })
         return
       }
-      const res = await axios.post(`${BACKEND_URL}/acceptstatus_requst`, fd)
-      if (res.data?.success === false || res.data?.status === false) {
-        throw new Error(res.data?.msg || 'Acceptance update failed')
+      const order = data.find((row) => String(row.order_id) === String(id))
+      const res = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: status === 1 ? 'mirror_acceptance' : 'decline',
+          acceptOrder: status === 1 ? '1' : '2',
+        }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.message || 'Acceptance update failed')
       }
-      if (status === 1 && session.role === 'admin') {
-        const order = data.find((row) => String(row.order_id) === String(id))
-        const mirrorRes = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-omsons-actor-role': session.role,
-            'x-omsons-actor-id': session.id,
-            'x-omsons-actor-name': session.name,
-          },
-          body: JSON.stringify({
-            action: 'mirror_acceptance',
-            acceptOrder: '1',
-            dealerId: order?.order_dealer,
-            assignedStaffId: order?.staffid,
-          }),
-        })
-        if (!mirrorRes.ok) {
-          setToast({ msg: 'Order accepted, but the acceptance fallback could not be synchronized.', type: 'err' })
-          queryClient.invalidateQueries({ queryKey: ['orders'] })
-          return
-        }
-      }
-      setToast({ msg: res.data?.msg || 'Status updated.', type: 'ok' })
+      setToast({ msg: 'Status updated.', type: 'ok' })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
-    } catch { setToast({ msg: 'Action failed.', type: 'err' }) }
+    } catch (error) { setToast({ msg: error instanceof Error ? error.message : 'Action failed.', type: 'err' }) }
   }, [data, queryClient, session])
 
   const loadDispatchProducts = useCallback(async (orderId: string, preferredProductId?: string) => {
     setDispatchProductsLoading(true)
     setDispatchProductsError('')
     try {
-      const res = await fetch(`${BACKEND_URL}/orderdatalist?id=${encodeURIComponent(orderId)}`, { cache: 'no-store' })
+      const res = await fetch(`/api/order-dispatch?orderId=${encodeURIComponent(orderId)}`, { cache: 'no-store' })
       const json = await res.json()
-      const nextProducts: DispatchOrderProduct[] = Array.isArray(json?.data) ? json.data : []
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Failed to load order products.')
+      const nextProducts: DispatchOrderProduct[] = Array.isArray(json?.data)
+        ? json.data.map((item: Record<string, unknown>) => dispatchProductFromRecord(item))
+        : []
       setDispatchProducts(nextProducts)
       const resolvedProductId = preferredProductId && nextProducts.some((item) => item.orderdata_id === preferredProductId)
         ? preferredProductId
@@ -1098,16 +1112,23 @@ export default function OrdersPage() {
     setDispatchHistoryLoading(true)
     setDispatchHistoryError('')
     try {
-      const res = await fetch(`${BACKEND_URL}/getremark?id=${encodeURIComponent(productId)}`, { cache: 'no-store' })
+      const product = dispatchProducts.find((item) => item.orderdata_id === productId)
+      const orderId = product?.orderdata_orderid || dispatchOrder?.order_id || ''
+      if (!orderId) throw new Error('Missing order id')
+      const res = await fetch(`/api/order-dispatch?orderId=${encodeURIComponent(orderId)}`, { cache: 'no-store' })
       const json = await res.json()
-      setDispatchHistory(Array.isArray(json?.data) ? json.data : [])
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Failed to load dispatch history.')
+      const record = Array.isArray(json?.data)
+        ? json.data.find((item: Record<string, unknown>) => String(item.orderItemId ?? item.orderdata_id ?? item.id ?? '') === productId) ?? null
+        : null
+      setDispatchHistory(dispatchHistoryFromRecord(record))
     } catch {
       setDispatchHistory([])
       setDispatchHistoryError('Failed to load dispatch history. Please try again.')
     } finally {
       setDispatchHistoryLoading(false)
     }
-  }, [])
+  }, [dispatchOrder?.order_id, dispatchProducts])
 
   const openDispatchDetails = useCallback((order: OrderData) => {
     setDispatchOrder(order)
@@ -1187,26 +1208,40 @@ export default function OrdersPage() {
       return
     }
 
-    const fd = new FormData()
-    fd.append('orderid', selectedDispatchProduct.orderdata_id)
-    fd.append('readyquantity', String(enteredReadyQuantity))
-    fd.append('leftquantity', String(availableLeftQuantity))
-    fd.append('remark', trimmedRemark)
-    fd.append('status', dispatchForm.status)
-
     setDispatchSubmitting(true)
     setDispatchFormError('')
     try {
-      const res = await axios.post(`${BACKEND_URL}/addremark`, fd)
-      setToast({ msg: res.data?.msg || 'Dispatch details updated.', type: 'ok' })
+      const res = await fetch('/api/order-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: dispatchOrder.order_id,
+          orderItemId: selectedDispatchProduct.orderdata_id,
+          sku: selectedDispatchProduct.orderdata_cat_no,
+          dispatchQuantity: enteredReadyQuantity,
+          status: dispatchStatusForApi(dispatchForm.status),
+          remark: trimmedRemark,
+          dealerId: dispatchOrder.order_dealer,
+          assignedStaffId: dispatchOrder.staffid,
+          delStatus: dispatchOrder.del_status,
+          orderedQuantity: selectedDispatchProduct.orderdata_item_quantity,
+          legacyReadyQuantity: selectedDispatchProduct.readyquantity,
+          legacyStatus: selectedDispatchProduct.orderdata_status,
+        }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.message || 'Failed to save dispatch update.')
+      }
+      setToast({ msg: 'Dispatch details updated.', type: 'ok' })
       setDispatchForm((previous) => ({ ...previous, readyQuantity: '', remark: '' }))
       await Promise.all([
         loadDispatchProducts(dispatchOrder.order_id, selectedDispatchProduct.orderdata_id),
         loadDispatchHistory(selectedDispatchProduct.orderdata_id),
       ])
       queryClient.invalidateQueries({ queryKey: ['orders'] })
-    } catch {
-      setDispatchFormError('Failed to save dispatch update. Please try again.')
+    } catch (error) {
+      setDispatchFormError(error instanceof Error ? error.message : 'Failed to save dispatch update. Please try again.')
     } finally {
       setDispatchSubmitting(false)
     }

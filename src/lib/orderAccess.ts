@@ -1,13 +1,8 @@
-import {
-  getDealerAssignedStaffIds,
-  resolveOrderDealerId,
-  splitScopeIds,
-} from "@/lib/staffOrderScope.js";
-import { parsePhpJsonResponse } from "@/lib/phpJson";
+﻿import { resolveOrderDealerId, splitScopeIds } from "@/lib/staffOrderScope.js";
+import { requireAuth } from "@/server/auth/session";
+import { fetchStaffAssignedDealerIds, orderActorFromAuth } from "@/lib/orderScopeServer";
 
-const BACKEND_URL = "/api/php-compat";
-
-type OrderAccessReason = "available" | "not_found" | "forbidden" | "upstream_unavailable";
+type OrderAccessReason = "available" | "not_found" | "forbidden";
 
 type OrderActor = {
   role: "admin" | "accountant" | "staff" | "dealer";
@@ -17,7 +12,6 @@ type OrderActor = {
 type OrderAccessOptions = {
   actor: OrderActor;
   assignedDealerIds?: Array<string | number>;
-  dealerId?: unknown;
 };
 
 export type OrderAccess = {
@@ -37,41 +31,9 @@ function normalizeLookupOrderId(value: unknown) {
   return displayIdMatch?.[1] ?? raw;
 }
 
-function rowsFrom(payload: unknown): Record<string, unknown>[] {
-  if (!payload || typeof payload !== "object") return [];
-  const data = (payload as { data?: unknown }).data;
-  return Array.isArray(data)
-    ? data.filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
-    : [];
-}
-
-function fallbackOrderFromDetailPayload(orderId: string, payload: unknown): Record<string, unknown> | null {
-  if (!payload || typeof payload !== "object") return null;
-  const data = (payload as { data?: unknown }).data;
-  const rows = Array.isArray(data)
-    ? data.filter((row): row is Record<string, unknown> => !!row && typeof row === "object")
-    : [];
-  const first = rows[0];
-  if (!first) return null;
-
-  const resolvedOrderId = normalizeLookupOrderId(first.orderdata_orderid ?? first.order_id ?? orderId);
-  if (resolvedOrderId !== orderId) return null;
-
-  return {
-    order_id: resolvedOrderId,
-    order_dealer: first.orderdata_dealerid ?? first.order_dealer ?? first.Dealer_Id,
-    orderdata_dealerid: first.orderdata_dealerid,
-    Dealer_Id: first.Dealer_Id,
-    del_status: first.del_status,
-    order_date: first.orderdata_datetime,
-    orderdata_datetime: first.orderdata_datetime,
-  };
-}
-
 export function messageForReason(reason: OrderAccessReason) {
   switch (reason) {
     case "forbidden": return "This order is outside your assigned order scope.";
-    case "upstream_unavailable": return "Order verification is temporarily unavailable.";
     case "not_found": return "Order not found.";
     default: return "";
   }
@@ -82,8 +44,8 @@ function result(order: Record<string, unknown> | null): OrderAccess {
   return { visible: !!order, order, reason, message: messageForReason(reason) };
 }
 
-function unavailableResult(): OrderAccess {
-  const reason = "upstream_unavailable";
+function forbiddenResult(): OrderAccess {
+  const reason = "forbidden";
   return { visible: false, order: null, reason, message: messageForReason(reason) };
 }
 
@@ -91,47 +53,35 @@ function isAccessOptions(value: unknown): value is OrderAccessOptions {
   return !!value && typeof value === "object" && "actor" in value;
 }
 
-function forbiddenResult(): OrderAccess {
-  const reason = "forbidden";
-  return { visible: false, order: null, reason, message: messageForReason(reason) };
+async function defaultAccessOptions(): Promise<OrderAccessOptions | null> {
+  const authActor = await requireAuth();
+  const actor = orderActorFromAuth(authActor);
+  if (!actor) return null;
+  const assignedDealerIds = actor.role === "staff" ? await fetchStaffAssignedDealerIds(actor.actorId) : [];
+  return { actor, assignedDealerIds };
 }
 
 async function findPostgresAccessOrder(id: string): Promise<Record<string, unknown> | null> {
-  try {
-    const module = await import("@/lib/postgresOrders");
-    const order = await module.findPostgresOrderByLookupId(id);
-    return order ? module.mapPostgresOrderToLegacy(order) : null;
-  } catch {
-    return null;
-  }
+  const module = await import("@/lib/postgresOrders");
+  const order = await module.findPostgresOrderByLookupId(id);
+  return order ? module.mapPostgresOrderToLegacy(order) : null;
 }
+
 function canStaffAccessOrder(order: Record<string, unknown>, options: OrderAccessOptions) {
-  if (order.__source === "postgres") {
-    return splitScopeIds([order.assignedstaff, order.staffid]).includes(safeText(options.actor.actorId));
-  }
+  if (splitScopeIds([order.assignedstaff, order.staffid]).includes(safeText(options.actor.actorId))) return true;
   const dealerId = resolveOrderDealerId(order);
-  if (!dealerId) return false;
-
-  const assignedDealerIds = new Set(splitScopeIds(options.assignedDealerIds));
-  if (assignedDealerIds.has(dealerId)) return true;
-
-  return getDealerAssignedStaffIds(order).includes(safeText(options.actor.actorId));
+  return !!dealerId && new Set(splitScopeIds(options.assignedDealerIds)).has(dealerId);
 }
 
 function applyActorAccess(order: Record<string, unknown> | null, options: OrderAccessOptions | null): OrderAccess {
   if (!order) return result(null);
-  if (!options) return result(order);
+  if (!options) return forbiddenResult();
 
-  if (options.actor.role === "admin" || options.actor.role === "accountant") {
-    return result(order);
-  }
+  if (options.actor.role === "admin" || options.actor.role === "accountant") return result(order);
 
   const dealerId = resolveOrderDealerId(order);
   if (options.actor.role === "dealer") {
-    const allowedDealerIds = splitScopeIds([options.dealerId, options.actor.actorId]);
-    return dealerId && allowedDealerIds.includes(dealerId)
-      ? result(order)
-      : forbiddenResult();
+    return dealerId && dealerId === safeText(options.actor.actorId) ? result(order) : forbiddenResult();
   }
 
   if (options.actor.role === "staff") {
@@ -141,65 +91,17 @@ function applyActorAccess(order: Record<string, unknown> | null, options: OrderA
   return forbiddenResult();
 }
 
-function applyLegacyDealerAccess(order: Record<string, unknown> | null, dealerId: string): OrderAccess {
-  if (!order || !dealerId) return result(order);
-  return resolveOrderDealerId(order) === dealerId ? result(order) : result(null);
-}
-
-async function fetchFallbackOrderFromDetails(id: string): Promise<Record<string, unknown> | null> {
-  const response = await fetch(`${BACKEND_URL}/orderdatalist?id=${encodeURIComponent(id)}`, { cache: "no-store" });
-  if (!response.ok) return null;
-  return fallbackOrderFromDetailPayload(id, await parsePhpJsonResponse(response));
-}
-
-async function fetchFallbackOrderFromHeaders(id: string, endpoint: string, legacyDealerId: string): Promise<Record<string, unknown> | null> {
-  const params = new URLSearchParams({ page: "1", limit: "200", search: "" });
-  if (legacyDealerId) params.set("id", legacyDealerId);
-
-  const response = await fetch(`${BACKEND_URL}/${endpoint}?${params.toString()}`, { cache: "no-store" });
-  if (!response.ok) return null;
-  const rows = rowsFrom(await parsePhpJsonResponse(response));
-  return rows.find((row) => normalizeLookupOrderId(row.order_id ?? row.orderId) === id) ?? null;
-}
-
-async function fetchFallbackOrder(id: string, endpoint: string, legacyDealerId: string): Promise<Record<string, unknown> | null> {
-  return await fetchFallbackOrderFromHeaders(id, endpoint, legacyDealerId).catch(() => null)
-    ?? await fetchFallbackOrderFromDetails(id).catch(() => null);
-}
-
-export async function resolveOrderAccess(orderId: unknown, dealerIdOrOptions?: unknown): Promise<OrderAccess> {
+export async function resolveOrderAccess(orderId: unknown, accessOptions?: unknown): Promise<OrderAccess> {
   const id = normalizeLookupOrderId(orderId);
   if (!id) return result(null);
-  const options = isAccessOptions(dealerIdOrOptions) ? dealerIdOrOptions : null;
-  const legacyDealerId = options ? "" : safeText(dealerIdOrOptions);
+  const options = isAccessOptions(accessOptions) ? accessOptions : await defaultAccessOptions();
   const postgresOrder = await findPostgresAccessOrder(id);
-  if (postgresOrder) return applyActorAccess(postgresOrder, options);
-  const params = new URLSearchParams({ page: "1", limit: "50", search: id });
-  if (!options && legacyDealerId) params.set("id", legacyDealerId);
-  const endpoint = !options && legacyDealerId ? "orderhispegination" : "orderpegination";
-
-  try {
-    const response = await fetch(`${BACKEND_URL}/${endpoint}?${params.toString()}`, { cache: "no-store" });
-    if (!response.ok) {
-      const fallbackOrder = await fetchFallbackOrder(id, endpoint, legacyDealerId);
-      if (!fallbackOrder) return unavailableResult();
-      return options ? applyActorAccess(fallbackOrder, options) : applyLegacyDealerAccess(fallbackOrder, legacyDealerId);
-    }
-    const rows = rowsFrom(await parsePhpJsonResponse(response));
-    const order = rows.find((row) => normalizeLookupOrderId(row.order_id ?? row.orderId) === id) ?? null;
-    if (order) return applyActorAccess(order, options);
-
-    const fallbackOrder = await fetchFallbackOrder(id, endpoint, legacyDealerId);
-    return options ? applyActorAccess(fallbackOrder, options) : applyLegacyDealerAccess(fallbackOrder, legacyDealerId);
-  } catch {
-    const fallbackOrder = await fetchFallbackOrder(id, endpoint, legacyDealerId);
-    if (!fallbackOrder) return unavailableResult();
-    return options ? applyActorAccess(fallbackOrder, options) : applyLegacyDealerAccess(fallbackOrder, legacyDealerId);
-  }
+  return applyActorAccess(postgresOrder, options);
 }
 
-export async function filterExistingOrderIds(orderIds: unknown[], dealerId?: unknown): Promise<Set<string>> {
+export async function filterExistingOrderIds(orderIds: unknown[], accessOptions?: unknown): Promise<Set<string>> {
   const ids = Array.from(new Set(orderIds.map((id) => safeText(id)).filter(Boolean))).slice(0, 200);
-  const results = await Promise.all(ids.map((id) => resolveOrderAccess(id, dealerId)));
-  return new Set(ids.filter((id, index) => results[index].visible));
+  const options = isAccessOptions(accessOptions) ? accessOptions : await defaultAccessOptions();
+  const results = await Promise.all(ids.map((id) => resolveOrderAccess(id, options)));
+  return new Set(ids.filter((_, index) => results[index].visible));
 }

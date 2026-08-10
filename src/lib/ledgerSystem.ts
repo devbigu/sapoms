@@ -1,47 +1,12 @@
-import { Db } from "mongodb";
-import { getDb } from "@/lib/mongodb";
-import { loadOrderHeaders } from "@/lib/orderHeaders";
-import {
-  OrderAmountSource,
-  resolveOrderAmounts,
-  withDisplayOrderAmounts,
-} from "@/lib/orderAmounts";
+import "server-only";
 
-const BACKEND_URL = "/api/php-compat";
-const CACHE_ID = "collective_ledger_snapshot:all-orders-v1";
-const CACHE_TTL_MS = 60 * 1000;
-const FETCH_TIMEOUT_MS = Number(process.env.LEDGER_FETCH_TIMEOUT_MS ?? 30_000);
-const MAX_PAGES = 10;
-const PAGE_SIZE = 100;
+import { OrderAcceptanceStatus, OrderFulfilmentStatus, OrderStatus, WalletTransactionType, type Prisma } from "@prisma/client";
+import { prisma } from "@/server/db/prisma";
+import type { AuthActor } from "@/server/auth/session";
+import { applyWalletChange, fromPaise, roundMoney, toPaise } from "@/lib/postgresWallet";
+import { mapPostgresOrderToLegacy } from "@/lib/postgresOrders";
 
 export type LedgerOrderState = "Cancelled" | "Awaiting" | "SupposedToGo" | "SentAndSettled";
-
-export type ExternalDealer = Record<string, any> & {
-  Dealer_Id?: string;
-  Dealer_Name?: string;
-  Dealer_Email?: string;
-  Dealer_Number?: string;
-  Dealer_Address?: string;
-  Dealer_City?: string;
-  Dealer_Pincode?: string;
-  walletBalance?: number;
-};
-
-export type ExternalOrder = Record<string, any> & {
-  order_id?: string;
-  order_dealer?: string;
-  order_date?: string;
-  order_amount?: string | number;
-  order_discount?: string | number;
-  order_discount_amount?: string | number;
-  order_net_amount?: string | number;
-  grossAmount?: string | number;
-  discountAmount?: string | number;
-  netPayableAmount?: string | number;
-  accept_order?: string | number;
-  del_status?: string | number;
-  mtstatus?: string | number;
-};
 
 export type AccountBookSummary = {
   booked: number;
@@ -54,383 +19,420 @@ export type AccountBookSummary = {
   awaitingCount: number;
 };
 
-type LedgerSnapshot = {
-  updatedAt: string;
-  dealers: ExternalDealer[];
-  orders: ExternalOrder[];
-};
-
-type LedgerCacheDocument = LedgerSnapshot & {
-  _id: typeof CACHE_ID;
-};
-
-type SnapshotResult = LedgerSnapshot & {
-  isLive: boolean;
-};
-
-let memorySnapshot: (SnapshotResult & { cachedAt: number }) | null = null;
-let snapshotRequest: Promise<SnapshotResult> | null = null;
-
-function asArray(value: any): any[] {
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.data)) return value.data;
-  if (Array.isArray(value?.dealers)) return value.dealers;
-  if (Array.isArray(value?.orders)) return value.orders;
-  if (value?.data && typeof value.data === "object") return [value.data];
-  if (value && typeof value === "object") return [value];
-  return [];
-}
-
-function toPaise(value: unknown): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 0;
-  return Math.round(n * 100);
-}
-
-function fromPaise(value: number): number {
-  return Math.round(value) / 100;
-}
-
-function cacheIsFresh() {
-  return memorySnapshot && Date.now() - memorySnapshot.cachedAt < CACHE_TTL_MS;
-}
-
-async function getOptionalDb(): Promise<Db | null> {
-  try {
-    return await getDb();
-  } catch (error) {
-    console.error("[ledger mongo connection]", error);
-    return null;
-  }
-}
-
-function orderOverrideKey(orderId: unknown, dealerId: unknown) {
-  const oid = String(orderId ?? "").trim();
-  const did = String(dealerId ?? "").trim();
-  return oid && did ? `${did}:${oid}` : "";
-}
-
-async function readOrderSummaryOverrides(
-  orders: ExternalOrder[],
-  db?: Db | null
-): Promise<Map<string, OrderAmountSource>> {
-  const ids = Array.from(new Set(
-    orders.map((order) => String(order.order_id ?? "").trim()).filter(Boolean)
-  ));
-  if (ids.length === 0) return new Map();
-
-  const database = db ?? await getOptionalDb();
-  if (!database) return new Map();
-
-  try {
-    const docs = await database
-      .collection("order_summary_overrides")
-      .find({ orderId: { $in: ids } })
-      .toArray();
-
-    const byOrder = new Map<string, OrderAmountSource>();
-    for (const doc of docs) {
-      const key = orderOverrideKey(doc.orderId ?? doc.order_id, doc.dealerId ?? doc.order_dealer);
-      if (key) byOrder.set(key, doc as OrderAmountSource);
-    }
-    return byOrder;
-  } catch (error) {
-    console.error("[ledger order summary overrides]", error);
-    return new Map();
-  }
-}
-
-async function applyOrderSummaryOverrides(snapshot: LedgerSnapshot, db?: Db | null): Promise<LedgerSnapshot> {
-  const overrides = await readOrderSummaryOverrides(snapshot.orders, db);
-  if (snapshot.orders.length === 0) return snapshot;
-
-  return {
-    ...snapshot,
-    orders: snapshot.orders.map((order) => {
-      const key = orderOverrideKey(order.order_id, order.order_dealer);
-      return withDisplayOrderAmounts(order, key ? overrides.get(key) : undefined);
-    }),
-  };
-}
-
-async function fetchJson(url: string, init: RequestInit = {}) {
-  const res = await fetch(url, { ...init, cache: "no-store" });
-  if (!res.ok) throw new Error(`External API failed: ${res.status}`);
-  return res.json();
-}
-
-async function fetchPaginated(endpoint: "dealerpegination" | "orderpegination", signal: AbortSignal) {
-  const rows: any[] = [];
-
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const url = `${BACKEND_URL}/${endpoint}?page=${page}&limit=${PAGE_SIZE}&search=`;
-    const json = await fetchJson(url, { signal });
-    const pageRows = asArray(json?.data ?? json);
-    rows.push(...pageRows);
-
-    const total = Number(json?.total ?? json?.recordsTotal ?? 0);
-    const lastPage = Number(json?.last_page ?? json?.lastPage ?? (total > 0 ? Math.ceil(total / PAGE_SIZE) : 0));
-    if (pageRows.length === 0 || pageRows.length < PAGE_SIZE || (lastPage > 0 && page >= lastPage)) break;
-  }
-
-  return rows;
-}
-
-async function fetchLiveSnapshot(): Promise<LedgerSnapshot> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const [dealers, activeOrders] = await Promise.all([
-      fetchPaginated("dealerpegination", controller.signal),
-      loadOrderHeaders({
-        source: "orderpegination",
-        actor: { role: "admin", actorId: "" },
-      }),
-    ]);
-
-    return {
-      updatedAt: new Date().toISOString(),
-      dealers,
-      orders: activeOrders.rows,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function readCachedSnapshot(db: Db): Promise<LedgerSnapshot | null> {
-  const doc = await db.collection<LedgerCacheDocument>("ledger_system_cache").findOne({ _id: CACHE_ID });
-  if (!doc) return null;
-  return {
-    updatedAt: String(doc.updatedAt || new Date(0).toISOString()),
-    dealers: Array.isArray(doc.dealers) ? doc.dealers : [],
-    orders: Array.isArray(doc.orders) ? doc.orders : [],
-  };
-}
-
-async function writeCachedSnapshot(db: Db, snapshot: LedgerSnapshot) {
-  await db.collection<LedgerCacheDocument>("ledger_system_cache").updateOne(
-    { _id: CACHE_ID },
-    {
-      $set: {
-        updatedAt: snapshot.updatedAt,
-        dealers: snapshot.dealers,
-        orders: snapshot.orders,
-      },
+const orderInclude = {
+  dealer: {
+    select: {
+      id: true,
+      businessName: true,
+      dealerCode: true,
+      phone: true,
+      city: true,
+      address: true,
+      pincode: true,
+      gstin: true,
+      discountPercent: true,
+      creditDays: true,
+      user: { select: { email: true, status: true } },
     },
-    { upsert: true }
-  );
+  },
+  assignedStaff: { select: { id: true, displayName: true } },
+  items: { orderBy: { id: "asc" as const } },
+} satisfies Prisma.OrderInclude;
+
+type LedgerClient = Pick<Prisma.TransactionClient, "dealerProfile" | "dealerStaffAssignment" | "order" | "dealerWallet" | "walletTransaction" | "$executeRaw">;
+type LedgerOrder = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
+type LedgerBillRecord = {
+  id: bigint
+  dealerId: bigint
+  orderId?: bigint | null
+  orderNumber: string
+  billAmountPaise: bigint | number | null
+  gstPercent?: Prisma.Decimal | number | string | null
+  billDate: Date | string
+  pdfName?: string | null
+  pdfUrl?: string | null
+  paidAmountPaise: bigint | number | null
+  lastPaymentDate?: Date | string | null
+  createdAt: Date
+  updatedAt: Date
+}
+type DealerRecord = Prisma.DealerProfileGetPayload<{ include: { user: { select: { email: true; status: true } }; wallet: true } }>;
+
+function parseBigIntId(value: unknown, label = "id") {
+  const text = String(value ?? "").trim();
+  if (!/^\d+$/.test(text)) throw Object.assign(new Error(`Invalid ${label}.`), { status: 400 });
+  return BigInt(text);
 }
 
-export async function getLedgerSnapshot(): Promise<SnapshotResult> {
-  if (cacheIsFresh() && memorySnapshot) return memorySnapshot;
-  if (snapshotRequest) return snapshotRequest;
-
-  snapshotRequest = (async () => {
-    const live = await applyOrderSummaryOverrides(await fetchLiveSnapshot());
-    try {
-      const db = await getOptionalDb();
-      if (db) await writeCachedSnapshot(db, live);
-    } catch (cacheError) {
-      console.error("[ledger cache write]", cacheError);
-    }
-
-    memorySnapshot = { ...live, isLive: true, cachedAt: Date.now() };
-    return memorySnapshot;
-  })();
-
-  try {
-    return await snapshotRequest;
-  } catch (liveError) {
-    console.error("[ledger live snapshot]", liveError);
-
-    if (memorySnapshot) {
-      memorySnapshot = { ...memorySnapshot, isLive: false, cachedAt: Date.now() };
-      return memorySnapshot;
-    }
-
-    const db = await getOptionalDb();
-    if (db) {
-      const cached = await readCachedSnapshot(db);
-      if (cached) {
-        const correctedCached = await applyOrderSummaryOverrides(cached, db);
-        memorySnapshot = { ...correctedCached, isLive: false, cachedAt: Date.now() };
-        return memorySnapshot;
-      }
-    }
-
-    throw liveError;
-  } finally {
-    snapshotRequest = null;
-  }
+function parseDateOnly(value: unknown, label: string) {
+  const text = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw Object.assign(new Error(`Valid ${label} is required.`), { status: 400 });
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) throw Object.assign(new Error(`Valid ${label} is required.`), { status: 400 });
+  return parsed;
 }
 
-export async function fetchExternalDealer(dealerId: string): Promise<ExternalDealer | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
-  try {
-    const json = await fetchJson(`${BACKEND_URL}/getdealer?id=${encodeURIComponent(dealerId)}`, {
-      method: "POST",
-      signal: controller.signal,
-    });
-    const dealers = asArray(json?.data ?? json);
-    return dealers.find((dealer) => String(dealer?.Dealer_Id) === String(dealerId)) ?? dealers[0] ?? null;
-  } finally {
-    clearTimeout(timer);
-  }
+function normalizeDateOnly(value: Date | string | null | undefined) {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString().slice(0, 10);
 }
 
-export function normalizeDealer(dealer: ExternalDealer) {
+function money(value: bigint | number | null | undefined) {
+  return fromPaise(value ?? 0);
+}
+
+function normalizeDealer(dealer: DealerRecord | LedgerOrder["dealer"], wallet?: { balancePaise?: bigint | null } | null) {
   return {
-    Dealer_Id: String(dealer.Dealer_Id ?? ""),
-    Dealer_Name: dealer.Dealer_Name ?? "",
-    Dealer_Email: dealer.Dealer_Email ?? "",
-    Dealer_Number: dealer.Dealer_Number ?? "",
-    Dealer_Address: dealer.Dealer_Address ?? "",
-    Dealer_City: dealer.Dealer_City ?? "",
-    Dealer_Pincode: dealer.Dealer_Pincode ?? "",
-    creditdays: dealer.creditdays ?? dealer.creditDays ?? dealer.credit_period ?? dealer.Credit_Period ?? "",
-    walletBalance: Number(dealer.walletBalance || 0),
+    Dealer_Id: dealer.id.toString(),
+    Dealer_Name: dealer.businessName ?? "",
+    Dealer_Email: "user" in dealer ? dealer.user?.email ?? "" : "",
+    Dealer_Number: dealer.phone ?? "",
+    Dealer_Address: dealer.address ?? "",
+    Dealer_City: dealer.city ?? "",
+    Dealer_Pincode: dealer.pincode ?? "",
+    Dealer_Dealercode: dealer.dealerCode ?? "",
+    creditdays: dealer.creditDays ?? "",
+    walletBalance: money(wallet?.balancePaise ?? 0),
   };
 }
 
-export function mtStatusValue(s: any) {
-  if (!s) return "NoActionTaken";
-  const key = String(s).trim().toLowerCase().replace(/[\s_-]/g, "");
-  if (key === "pending") return "Pending";
-  if (key === "inprocess") return "InProcess";
-  if (key === "completed") return "Completed";
-  return "NoActionTaken";
+function normalizeLedgerBill(bill: LedgerBillRecord) {
+  return {
+    id: bill.id.toString(),
+    dealerId: bill.dealerId.toString(),
+    orderId: bill.orderId?.toString() || "",
+    orderNumber: bill.orderNumber,
+    billAmount: money(bill.billAmountPaise),
+    gstPercent: Number(bill.gstPercent ?? 0),
+    billDate: normalizeDateOnly(bill.billDate) || "",
+    pdfName: bill.pdfName || "Bill PDF pending",
+    pdfUrl: bill.pdfUrl || undefined,
+    paidAmount: money(bill.paidAmountPaise),
+    lastPaymentDate: normalizeDateOnly(bill.lastPaymentDate),
+    createdAt: bill.createdAt.toISOString(),
+    updatedAt: bill.updatedAt.toISOString(),
+  };
 }
 
-export function classifyOrder(order: ExternalOrder): LedgerOrderState {
-  if (String(order.del_status ?? "0") === "1") return "Cancelled";
-  if (String(order.accept_order ?? "0") !== "1") return "Awaiting";
-
-  const numericMtStatus = Number(order.mtstatus ?? 0);
-  const isSettled = mtStatusValue(order.mtstatus) === "Completed" || (Number.isFinite(numericMtStatus) && numericMtStatus >= 2);
-  return isSettled ? "SentAndSettled" : "SupposedToGo";
+function classifyPostgresOrder(order: Pick<LedgerOrder, "status" | "acceptanceStatus" | "fulfilmentStatus">): LedgerOrderState {
+  if (order.status === OrderStatus.CANCELLED || order.acceptanceStatus === OrderAcceptanceStatus.DECLINED) return "Cancelled";
+  if (order.acceptanceStatus !== OrderAcceptanceStatus.ACCEPTED) return "Awaiting";
+  return order.fulfilmentStatus === OrderFulfilmentStatus.COMPLETED || order.status === OrderStatus.COMPLETED
+    ? "SentAndSettled"
+    : "SupposedToGo";
 }
 
-export function isLedgerOrder(order: ExternalOrder) {
-  return classifyOrder(order) !== "Cancelled";
+function orderMode(order: LedgerOrder) {
+  const state = classifyPostgresOrder(order);
+  if (state === "SentAndSettled") return "Sent & Settled";
+  if (state === "SupposedToGo") return "Supposed to Go";
+  if (state === "Awaiting") return "Awaiting Confirm";
+  return "Cancelled";
 }
 
-export function orderNetPaise(order: ExternalOrder) {
-  return toPaise(resolveOrderAmounts(order).netPayable);
-}
-
-export function orderNet(order: ExternalOrder) {
-  return fromPaise(orderNetPaise(order));
-}
-
-export function orderMatchesDealer(order: ExternalOrder, dealerId: string) {
-  return String(order.order_dealer) === String(dealerId);
-}
-
-function hasValue(value: unknown) {
-  return value !== undefined && value !== null && value !== "";
-}
-
-function orderDedupeKey(order: ExternalOrder) {
-  const dealerId = String(order.order_dealer ?? "");
-  const orderId = String(order.order_id ?? "").trim();
-  if (orderId) return `${dealerId}:${orderId}`;
-
-  return [
-    dealerId,
-    order.order_date ?? "",
-    order.order_amount ?? "",
-    order.order_discount ?? "",
-    order.order_discount_amount ?? "",
-    order.order_net_amount ?? "",
-    order.accept_order ?? "",
-    order.mtstatus ?? "",
-  ].map(String).join(":");
-}
-
-export function uniqueLedgerOrders(orders: ExternalOrder[]) {
-  const byOrder = new Map<string, ExternalOrder>();
-
-  for (const order of orders) {
-    const key = orderDedupeKey(order);
-    const existing = byOrder.get(key);
-
-    if (!existing) {
-      byOrder.set(key, order);
-      continue;
-    }
-
-    // The external order API can return one row per item. Keep one ledger row
-    // per order, while filling any blank fields from later duplicate rows.
-    for (const [field, value] of Object.entries(order)) {
-      if (!hasValue(existing[field]) && hasValue(value)) {
-        existing[field] = value;
-      }
-    }
+export function ledgerTransactionDirection(type: WalletTransactionType, metadata: Prisma.JsonValue | null | undefined, orderId?: bigint | null) {
+  if (type === WalletTransactionType.CREDIT || type === WalletTransactionType.REFUND) return "credit";
+  if (type === WalletTransactionType.ORDER_DEBIT && orderId) return "credit";
+  if (type === WalletTransactionType.ADJUSTMENT) {
+    const direction = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? String((metadata as Record<string, unknown>).direction ?? "credit") : "credit";
+    return direction === "debit" ? "debit" : "credit";
   }
-
-  return Array.from(byOrder.values());
+  return "debit";
 }
 
-export function ordersForDealer(orders: ExternalOrder[], dealerId: string) {
-  return uniqueLedgerOrders(
-    orders.filter((order) => orderMatchesDealer(order, dealerId) && isLedgerOrder(order))
-  );
-}
-
-export function summarizeOrders(orders: ExternalOrder[]): AccountBookSummary {
-  const totals = {
-    booked: 0,
-    bookedCount: 0,
-    sentAndSettled: 0,
-    sentAndSettledCount: 0,
-    supposedToGo: 0,
-    supposedToGoCount: 0,
-    awaiting: 0,
-    awaitingCount: 0,
+function orderTransaction(order: LedgerOrder) {
+  const legacy = mapPostgresOrderToLegacy(order);
+  return {
+    id: order.id.toString(),
+    debit: money(order.finalPayableAmountPaise),
+    credit: 0,
+    narration: `Order ${order.orderNumber}`,
+    date: order.orderDate.toISOString(),
+    invoice: order.legacyPhpId || order.orderNumber || order.id.toString(),
+    mode: orderMode(order),
+    type: "debit",
+    order: legacy,
   };
+}
 
-  let bookedPaise = 0;
-  let sentAndSettledPaise = 0;
-  let supposedToGoPaise = 0;
-  let awaitingPaise = 0;
+function walletLedgerTransaction(tx: Prisma.WalletTransactionGetPayload<{ include: { order: true } }>) {
+  const direction = ledgerTransactionDirection(tx.type, tx.metadata, tx.orderId);
+  const amount = money(tx.amountPaise);
+  return {
+    id: tx.id.toString(),
+    debit: direction === "debit" ? amount : 0,
+    credit: direction === "credit" ? amount : 0,
+    narration: tx.note || tx.reference || String(tx.type).toLowerCase().replace(/_/g, " "),
+    date: tx.createdAt.toISOString(),
+    invoice: tx.reference || tx.order?.orderNumber || tx.orderId?.toString() || "",
+    mode: String(tx.type).toLowerCase().replace(/_/g, " "),
+    type: String(tx.type).toLowerCase(),
+  };
+}
+
+function summarizeOrders(orders: LedgerOrder[]): AccountBookSummary {
+  let bookedPaise = BigInt(0);
+  let sentAndSettledPaise = BigInt(0);
+  let supposedToGoPaise = BigInt(0);
+  let awaitingPaise = BigInt(0);
+  const counts = { bookedCount: 0, sentAndSettledCount: 0, supposedToGoCount: 0, awaitingCount: 0 };
 
   for (const order of orders) {
-    const state = classifyOrder(order);
+    const state = classifyPostgresOrder(order);
     if (state === "Cancelled") continue;
-
-    const net = orderNetPaise(order);
-    bookedPaise += net;
-    totals.bookedCount += 1;
-
-    if (state === "Awaiting") {
-      awaitingPaise += net;
-      totals.awaitingCount += 1;
-    } else if (state === "SupposedToGo") {
-      supposedToGoPaise += net;
-      totals.supposedToGoCount += 1;
-    } else {
-      sentAndSettledPaise += net;
-      totals.sentAndSettledCount += 1;
-    }
+    bookedPaise += order.finalPayableAmountPaise;
+    counts.bookedCount += 1;
+    if (state === "Awaiting") { awaitingPaise += order.finalPayableAmountPaise; counts.awaitingCount += 1; }
+    else if (state === "SupposedToGo") { supposedToGoPaise += order.finalPayableAmountPaise; counts.supposedToGoCount += 1; }
+    else { sentAndSettledPaise += order.finalPayableAmountPaise; counts.sentAndSettledCount += 1; }
   }
 
   return {
-    ...totals,
-    booked: fromPaise(bookedPaise),
-    sentAndSettled: fromPaise(sentAndSettledPaise),
-    supposedToGo: fromPaise(supposedToGoPaise),
-    awaiting: fromPaise(awaitingPaise),
+    booked: money(bookedPaise),
+    sentAndSettled: money(sentAndSettledPaise),
+    supposedToGo: money(supposedToGoPaise),
+    awaiting: money(awaitingPaise),
+    ...counts,
   };
 }
 
-export function paymentCreditPaise(tx: any) {
-  return tx?.type === "payment" || tx?.type === "credit" ? toPaise(tx.amount) : 0;
+export function summarizeWalletForLedger(transactions: Array<{ type: WalletTransactionType; amountPaise: bigint; metadata: Prisma.JsonValue | null; orderId?: bigint | null }>) {
+  return transactions.reduce((totals, tx) => {
+    const amount = toPaise(money(tx.amountPaise));
+    if (ledgerTransactionDirection(tx.type, tx.metadata, tx.orderId) === "credit") totals.creditPaise += amount;
+    else totals.debitPaise += amount;
+    return totals;
+  }, { creditPaise: BigInt(0), debitPaise: BigInt(0) });
 }
 
-export function paymentDebitPaise(tx: any) {
-  return tx?.type === "debit" ? toPaise(tx.amount) : 0;
+export function calculateLedgerSummary(
+  orders: Array<{ status: OrderStatus; acceptanceStatus: OrderAcceptanceStatus; fulfilmentStatus: OrderFulfilmentStatus; finalPayableAmountPaise: bigint }>,
+  transactions: Array<{ type: WalletTransactionType; amountPaise: bigint; metadata: Prisma.JsonValue | null; orderId?: bigint | null }>
+) {
+  const accountBook = summarizeOrders(orders as LedgerOrder[]);
+  const wallet = summarizeWalletForLedger(transactions);
+  const totalDebit = roundMoney(accountBook.booked + money(wallet.debitPaise));
+  const totalCredit = money(wallet.creditPaise);
+  return { accountBook, totalDebit, totalCredit, netBalance: roundMoney(totalDebit - totalCredit) };
+}
+
+function summaryFrom(orders: LedgerOrder[], transactions: Array<{ type: WalletTransactionType; amountPaise: bigint; metadata: Prisma.JsonValue | null; orderId?: bigint | null }>) {
+  return calculateLedgerSummary(orders, transactions);
+}
+
+async function canAccessDealer(client: LedgerClient, actor: AuthActor, dealerId: bigint) {
+  if (actor.role === "ADMIN") return true;
+  if (actor.role === "DEALER") return actor.dealerId === dealerId;
+  if (actor.role === "STAFF" && actor.staffId) {
+    const assignment = await client.dealerStaffAssignment.findFirst({
+      where: { dealerId, staffId: actor.staffId, active: true, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
+      select: { id: true },
+    });
+    return Boolean(assignment);
+  }
+  return false;
+}
+
+function dealerWhereForActor(actor: AuthActor): Prisma.DealerProfileWhereInput {
+  const active = { deletedAt: null, user: { status: "ACTIVE" as const } };
+  if (actor.role === "ADMIN") return active;
+  if (actor.role === "DEALER" && actor.dealerId) return { ...active, id: actor.dealerId };
+  if (actor.role === "STAFF" && actor.staffId) return { ...active, staffAssignments: { some: { staffId: actor.staffId, active: true } } };
+  return { id: BigInt(-1) };
+}
+
+async function findDealerOrder(client: Pick<LedgerClient, "order">, dealerId: bigint, lookup: string) {
+  const normalized = String(lookup ?? "").trim();
+  if (!normalized) return null;
+  const numericId = /^\d+$/.test(normalized) ? BigInt(normalized) : null;
+  return client.order.findFirst({
+    where: {
+      dealerId,
+      OR: [
+        ...(numericId ? [{ id: numericId }] : []),
+        { legacyPhpId: normalized },
+        { orderNumber: normalized },
+      ],
+    },
+    select: { id: true, orderNumber: true, legacyPhpId: true },
+  });
+}
+
+export async function getCollectiveLedger(actor: AuthActor) {
+  const dealers = await prisma.dealerProfile.findMany({
+    where: dealerWhereForActor(actor),
+    include: { user: { select: { email: true, status: true } }, wallet: true },
+    orderBy: { businessName: "asc" },
+  });
+  const dealerIds = dealers.map((dealer) => dealer.id);
+  const [orders, transactions] = dealerIds.length === 0 ? [[], []] : await Promise.all([
+    prisma.order.findMany({ where: { dealerId: { in: dealerIds } }, include: orderInclude }),
+    prisma.walletTransaction.findMany({ where: { dealerId: { in: dealerIds } } }),
+  ]);
+
+  return dealers.map((dealer) => {
+    const dealerOrders = orders.filter((order) => order.dealerId === dealer.id);
+    const dealerTransactions = transactions.filter((tx) => tx.dealerId === dealer.id);
+    const summary = summaryFrom(dealerOrders, dealerTransactions);
+    return { ...normalizeDealer(dealer, dealer.wallet), totalDebit: summary.totalDebit, totalCredit: summary.totalCredit, netBalance: summary.netBalance, accountBook: summary.accountBook };
+  });
+}
+
+export async function getDealerLedger(actor: AuthActor, rawDealerId: string) {
+  const dealerId = parseBigIntId(rawDealerId, "dealer id");
+  if (!(await canAccessDealer(prisma, actor, dealerId))) throw Object.assign(new Error("Ledger access denied."), { status: 403 });
+
+  const dealer = await prisma.dealerProfile.findFirst({
+    where: { id: dealerId, deletedAt: null, user: { status: "ACTIVE" } },
+    include: { user: { select: { email: true, status: true } }, wallet: true },
+  });
+  if (!dealer) throw Object.assign(new Error("Dealer not found"), { status: 404 });
+
+  const [orders, transactions, bills] = await Promise.all([
+    prisma.order.findMany({ where: { dealerId }, include: orderInclude, orderBy: { orderDate: "desc" } }),
+    prisma.walletTransaction.findMany({ where: { dealerId }, include: { order: true }, orderBy: { createdAt: "desc" } }),
+    prisma.ledgerBill.findMany({ where: { dealerId }, orderBy: [{ billDate: "desc" }, { id: "desc" }] }),
+  ]);
+  const summary = summaryFrom(orders, transactions);
+  return {
+    dealer: normalizeDealer(dealer, dealer.wallet),
+    summary: { totalDebit: summary.totalDebit, totalCredit: summary.totalCredit, netBalance: summary.netBalance },
+    summaryStats: summary.accountBook,
+    orders: orders.filter((order) => classifyPostgresOrder(order) !== "Cancelled").map(mapPostgresOrderToLegacy),
+    bills: bills.map(normalizeLedgerBill),
+    transactionCount: orders.length + transactions.length,
+  };
+}
+
+export async function getDealerLedgerTransactions(actor: AuthActor, rawDealerId: string, options: { page?: number; limit?: number }) {
+  const dealerId = parseBigIntId(rawDealerId, "dealer id");
+  if (!(await canAccessDealer(prisma, actor, dealerId))) throw Object.assign(new Error("Ledger access denied."), { status: 403 });
+  const pageSize = Math.min(100, Math.max(5, Number(options.limit || 20)));
+  const requestedPage = Math.max(1, Number(options.page || 1));
+  const [orders, walletTransactions] = await Promise.all([
+    prisma.order.findMany({ where: { dealerId }, include: orderInclude }),
+    prisma.walletTransaction.findMany({ where: { dealerId }, include: { order: true } }),
+  ]);
+  const allTransactions = [
+    ...orders.filter((order) => classifyPostgresOrder(order) !== "Cancelled").map(orderTransaction),
+    ...walletTransactions.map(walletLedgerTransaction),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const count = allTransactions.length;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const start = (page - 1) * pageSize;
+  return { data: allTransactions.slice(start, start + pageSize), count, page, pageSize, totalPages, hasNextPage: page < totalPages, hasPreviousPage: page > 1 };
+}
+
+export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, body: Record<string, unknown>) {
+  const dealerId = parseBigIntId(rawDealerId, "dealer id");
+  if (actor.role !== "ADMIN") throw Object.assign(new Error("Only Admin can save ledger bills."), { status: 403 });
+
+  const requestedOrderNumber = String(body.orderNumber || body.orderId || "").trim();
+  if (!requestedOrderNumber) throw Object.assign(new Error("Order number is required."), { status: 400 });
+
+  const billAmount = Number(body.billAmount);
+  if (!Number.isFinite(billAmount) || billAmount <= 0) throw Object.assign(new Error("Valid bill amount is required."), { status: 400 });
+
+  const gstPercent = Number(body.gstPercent ?? 0);
+  if (!Number.isFinite(gstPercent) || gstPercent < 0) throw Object.assign(new Error("Valid GST percent is required."), { status: 400 });
+
+  const billDate = parseDateOnly(body.billDate, "bill date");
+  const billAmountPaise = toPaise(billAmount);
+  const pdfName = String(body.pdfName || "").trim().slice(0, 255) || null;
+  const pdfUrl = String(body.pdfUrl || "").trim().slice(0, 4000) || null;
+
+  return prisma.$transaction(async (tx) => {
+    const dealer = await tx.dealerProfile.findFirst({ where: { id: dealerId, deletedAt: null, user: { status: "ACTIVE" } }, select: { id: true } });
+    if (!dealer) throw Object.assign(new Error("Dealer not found"), { status: 404 });
+
+    const order = await findDealerOrder(tx, dealerId, requestedOrderNumber);
+    const storedOrderNumber = order?.legacyPhpId || requestedOrderNumber;
+    const existing = await tx.ledgerBill.findUnique({ where: { dealerId_orderNumber: { dealerId, orderNumber: storedOrderNumber } } });
+    const paidAmountPaise = existing && existing.paidAmountPaise > billAmountPaise ? billAmountPaise : existing?.paidAmountPaise ?? BigInt(0);
+
+    const saved = existing
+      ? await tx.ledgerBill.update({
+          where: { id: existing.id },
+          data: {
+            orderId: order?.id ?? existing.orderId,
+            orderNumber: storedOrderNumber,
+            billAmountPaise,
+            gstPercent,
+            billDate,
+            pdfName,
+            pdfUrl,
+            paidAmountPaise,
+          },
+        })
+      : await tx.ledgerBill.create({
+          data: {
+            dealerId,
+            orderId: order?.id ?? null,
+            orderNumber: storedOrderNumber,
+            billAmountPaise,
+            gstPercent,
+            billDate,
+            pdfName,
+            pdfUrl,
+          },
+        });
+
+    return { created: !existing, bill: normalizeLedgerBill(saved) };
+  });
+}
+
+export async function recordLedgerPayment(actor: AuthActor, rawDealerId: string, body: Record<string, unknown>, idempotencyHeader?: string | null) {
+  const dealerId = parseBigIntId(rawDealerId, "dealer id");
+  if (actor.role !== "ADMIN") throw Object.assign(new Error("Only Admin can record ledger payments."), { status: 403 });
+  const idempotencyKey = String(idempotencyHeader || body.idempotencyKey || "").trim().slice(0, 240);
+  if (!idempotencyKey) throw Object.assign(new Error("Idempotency key is required."), { status: 400 });
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw Object.assign(new Error("Valid amount is required"), { status: 400 });
+
+  const rawBillId = String(body.billId || "").trim();
+  const billId = rawBillId ? parseBigIntId(rawBillId, "bill id") : null;
+  const paymentDate = body.paymentDate ? parseDateOnly(body.paymentDate, "payment date") : null;
+
+  return prisma.$transaction(async (tx) => {
+    const dealer = await tx.dealerProfile.findFirst({ where: { id: dealerId, deletedAt: null, user: { status: "ACTIVE" } }, select: { id: true } });
+    if (!dealer) throw Object.assign(new Error("Dealer not found"), { status: 404 });
+
+    const bill = billId
+      ? await tx.ledgerBill.findFirst({ where: { id: billId, dealerId } })
+      : null;
+    if (billId && !bill) throw Object.assign(new Error("Ledger bill not found."), { status: 404 });
+
+    const result = await applyWalletChange(tx, dealerId, WalletTransactionType.CREDIT, amount, {
+      idempotencyKey,
+      reference: String(body.referenceId || body.reference || bill?.orderNumber || "").trim().slice(0, 200),
+      note: String(body.narration || `Payment received - ${body.paymentMode || "Cash"}`).trim().slice(0, 1000),
+      metadata: {
+        ledgerPayment: true,
+        billId: bill?.id.toString() || null,
+        orderNumber: bill?.orderNumber || String(body.referenceId || body.reference || "").trim() || null,
+        paymentMode: String(body.paymentMode || "Cash"),
+        paymentDate: body.paymentDate || null,
+      },
+      actor: { userId: actor.userId, role: actor.role, displayName: actor.displayName },
+      allowCreate: true,
+    });
+
+    if (result.duplicate) {
+      return { ...result, bill: bill ? normalizeLedgerBill(bill) : null };
+    }
+
+    const updatedBill = bill
+      ? await tx.ledgerBill.update({
+          where: { id: bill.id },
+          data: {
+            paidAmountPaise: bill.paidAmountPaise + toPaise(amount) > bill.billAmountPaise ? bill.billAmountPaise : bill.paidAmountPaise + toPaise(amount),
+            lastPaymentDate: paymentDate ?? bill.lastPaymentDate ?? new Date(),
+          },
+        })
+      : null;
+
+    return { ...result, bill: updatedBill ? normalizeLedgerBill(updatedBill) : null };
+  });
 }

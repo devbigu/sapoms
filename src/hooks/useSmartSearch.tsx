@@ -4,8 +4,6 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-const BASE_URL = "/api/php-compat";
-
 type Role = "admin" | "dealer" | "staff" | "accountant";
 
 export interface SearchResult {
@@ -22,26 +20,6 @@ interface UserContext {
   id?: string | number;
 }
 
-// Role-based API endpoint config
-const roleApiConfig: Record<Role, { endpoint: string; paramKey: string; idRequired: boolean }[]> = {
-  admin: [
-    { endpoint: "/dealerpegination", paramKey: "search", idRequired: false },
-    { endpoint: "/staffpegination", paramKey: "search", idRequired: false },
-    { endpoint: "/pegination", paramKey: "search", idRequired: false },
-  ],
-  dealer: [
-    { endpoint: "/Orderstspegination", paramKey: "search", idRequired: true },
-  ],
-  staff: [
-    { endpoint: "/orderhispegination", paramKey: "search", idRequired: true },
-    { endpoint: "/pegination", paramKey: "search", idRequired: false },
-  ],
-  accountant: [
-    { endpoint: "/orderpegination", paramKey: "search", idRequired: false },
-  ],
-};
-
-// Role-based route mapping — Gemini uses these to navigate
 const roleRouteMap: Record<Role, Record<string, string>> = {
   admin: {
     dealer: "/dashboard/admin/dealer/DealerList",
@@ -86,81 +64,18 @@ const roleRouteMap: Record<Role, Record<string, string>> = {
   },
 };
 
-async function fetchWithSearch(
-  endpoint: string,
-  search: string,
-  userId?: string | number,
-  role?: Role
-): Promise<any[]> {
-  try {
-    const params = new URLSearchParams({ page: "1", search });
-    if (userId) params.set("id", String(userId));
-    const isOrderEndpoint = /Orderstspegination|orderhispegination|orderpegination/i.test(endpoint);
-    const source = endpoint.replace(/^\//, "");
-    const url = isOrderEndpoint
-      ? `/api/orders-data?source=${encodeURIComponent(source)}&role=${encodeURIComponent(role || "admin")}&limit=25&${params.toString()}`
-      : `${BASE_URL}${endpoint}?${params.toString()}`;
-    const res = await fetch(url, {
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    // Handle various response shapes
-    const rows = (
-      data?.data ||
-      data?.dealers ||
-      data?.staff ||
-      data?.orders ||
-      data?.products ||
-      (Array.isArray(data) ? data : [])
-    );
-    return rows;
-  } catch {
-    return [];
-  }
-}
-
-function mapResultsToSearchItems(
-  raw: any[],
-  category: string,
-  role: Role
-): SearchResult[] {
-  return raw.slice(0, 5).map((item) => {
-    let label = "";
-    let sublabel = "";
-    let route = "/";
-      const id = item.id || item.Dealer_Id || item.staff_id || item.order_id || item.Order_Id || "";
-
-    if (category === "dealers") {
-      label = item.Dealer_Name || item.name || "Dealer";
-      sublabel = item.Dealer_City || item.email || "";
-      route = role === "admin" ? `/dashboard/admin/dealer/${id}` : "/dashboard/dealer";
-    } else if (category === "staff") {
-      label = item.staff_name || item.name || "Staff";
-      sublabel = item.staff_designation || item.staff_location || "";
-      route = role === "admin" ? `/dashboard/admin/staff/${id}` : "/dashboard/staff";
-    } else if (category === "orders") {
-      label = `Order #${item.Order_Id || item.order_id || id}`;
-      sublabel = item.Order_Status || item.status || item.Dealer_Name || "";
-      route = `/orders/${id}`;
-    } else if (category === "products") {
-      label = item.Product_Name || item.name || "Product";
-      sublabel = item.SKU || item.sku || item.category || "";
-      route = item.SKU ? `/Products/${item.SKU}` : "/Pages/products";
-    } else {
-      label = item.name || item.title || String(id);
-      route = "/";
-    }
-
-    return {
-      id,
-      label,
-      sublabel,
-      route,
-      category,
-      badge: category,
-    };
-  });
+function mapDashboardResults(raw: any[], role: Role): SearchResult[] {
+  return raw
+    .slice(0, 12)
+    .map((item) => ({
+      id: item.id ?? "",
+      label: item.title ?? "Result",
+      sublabel: item.subtitle ?? item.metadata ?? "",
+      route: item.href ?? roleRouteMap[role].dashboard,
+      category: `${item.type ?? "results"}${item.type === "staff" ? "" : "s"}`,
+      badge: item.type ?? "result",
+    }))
+    .filter((item) => Boolean(item.id && item.route));
 }
 
 async function callGemini(
@@ -170,17 +85,17 @@ async function callGemini(
 ): Promise<{ intent: string; route?: string; confidence: number }> {
   const routeMap = roleRouteMap[role];
   const prompt = `
-You are a navigation assistant for a dealer management system. 
+You are a navigation assistant for a dealer management system.
 Role: ${role}
 User query: "${query}"
 
 Available routes for this role:
 ${Object.entries(routeMap)
-  .map(([k, v]) => `- "${k}" → ${v}`)
+  .map(([k, v]) => `- "${k}" -> ${v}`)
   .join("\n")}
 
 Live search results found:
-${apiResults.slice(0, 3).map((r) => `- [${r.category}] ${r.label} → ${r.route}`).join("\n") || "none"}
+${apiResults.slice(0, 3).map((r) => `- [${r.category}] ${r.label} -> ${r.route}`).join("\n") || "none"}
 
 Task: Determine the user's navigation intent. Reply ONLY as JSON:
 {
@@ -246,59 +161,15 @@ export function useSmartSearch(userCtx: UserContext) {
       debounceRef.current = setTimeout(async () => {
         setLoading(true);
         try {
-          const { role, id } = userCtx;
-          if (role === "staff" || role === "dealer") {
-            const response = await fetch(`/api/dashboard-search?q=${encodeURIComponent(query)}`, {
-              cache: "no-store",
-              headers: {
-                "x-omsons-actor-role": role,
-                "x-omsons-actor-id": String(id ?? ""),
-              },
-            });
-            const json = response.ok ? await response.json() : { results: [] };
-            const scopedResults: SearchResult[] = (Array.isArray(json.results) ? json.results : [])
-              .map((item: any) => ({
-                id: item.id ?? "",
-                label: item.title ?? "Result",
-                sublabel: item.subtitle ?? item.metadata ?? "",
-                route: item.href ?? (role === "dealer" ? "/dashboard/dealer" : "/dashboard/staff"),
-                category: `${item.type ?? "results"}${item.type === "staff" ? "" : "s"}`,
-                badge: item.type ?? "result",
-              }))
-              .filter((item: SearchResult) => Boolean(item.id && item.route));
-            setResults(scopedResults);
-            const gemini = await callGemini(query, role, scopedResults);
-            setGeminiSuggestion(gemini.route ?? null);
-            return;
-          }
-          const endpoints = roleApiConfig[role] || [];
+          const response = await fetch(`/api/dashboard-search?q=${encodeURIComponent(query)}`, {
+            cache: "no-store",
+          });
+          const json = response.ok ? await response.json() : { results: [] };
+          const mappedResults = mapDashboardResults(Array.isArray(json.results) ? json.results : [], userCtx.role);
+          setResults(mappedResults);
 
-          // Fetch all relevant endpoints in parallel
-          const fetched = await Promise.all(
-            endpoints.map(async (cfg) => {
-              const userId = cfg.idRequired ? id : undefined;
-              const raw = await fetchWithSearch(cfg.endpoint, query, userId, role);
-              // Detect category from endpoint name
-              let category = "results";
-              if (cfg.endpoint.includes("dealer")) category = "dealers";
-              else if (cfg.endpoint.includes("staff")) category = "staff";
-              else if (cfg.endpoint.includes("Order") || cfg.endpoint.includes("order"))
-                category = "orders";
-              else if (cfg.endpoint.includes("pegination")) category = "products";
-              return mapResultsToSearchItems(raw, category, role);
-            })
-          );
-
-          const allResults = fetched.flat().slice(0, 12);
-          setResults(allResults);
-
-          // Ask Gemini for intent + best route
-          const gemini = await callGemini(query, role, allResults);
-          if (gemini.route) {
-            setGeminiSuggestion(gemini.route);
-          } else {
-            setGeminiSuggestion(null);
-          }
+          const gemini = await callGemini(query, userCtx.role, mappedResults);
+          setGeminiSuggestion(gemini.route ?? null);
         } finally {
           setLoading(false);
         }

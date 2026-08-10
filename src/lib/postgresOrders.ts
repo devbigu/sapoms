@@ -16,13 +16,27 @@ const orderInclude = {
       pincode: true,
       gstin: true,
       discountPercent: true,
+      creditDays: true,
     },
   },
   assignedStaff: { select: { id: true, displayName: true } },
   items: { orderBy: { id: "asc" as const } },
 } satisfies Prisma.OrderInclude;
 
+const orderDetailInclude = {
+  ...orderInclude,
+  items: { orderBy: { id: "asc" as const }, include: { dispatches: { orderBy: { createdAt: "asc" as const } }, productNotes: { orderBy: { updatedAt: "desc" as const } } } },
+  notes: { orderBy: { updatedAt: "desc" as const } },
+  productNotes: { orderBy: { updatedAt: "desc" as const } },
+  summaryOverrides: { orderBy: { createdAt: "desc" as const } },
+  overlays: { orderBy: { updatedAt: "desc" as const } },
+  dispatches: { orderBy: { createdAt: "asc" as const } },
+  walletTransactions: { orderBy: { createdAt: "desc" as const } },
+} satisfies Prisma.OrderInclude;
+
 export type PostgresOrderRecord = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
+type PostgresOrderDetailRecord = Prisma.OrderGetPayload<{ include: typeof orderDetailInclude }>;
+type PostgresOrderLike = PostgresOrderRecord | PostgresOrderDetailRecord;
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -59,6 +73,12 @@ function legacyFulfilment(status: string) {
   return "Pending";
 }
 
+function legacyDispatchStatus(status: string) {
+  if (status === "DISPATCHED" || status === "COMPLETED") return "dispatched";
+  if (status === "READY" || status === "PARTIALLY_READY" || status === "IN_PROCESS") return "packing";
+  return "pending";
+}
+
 function orderIdentity(order: PostgresOrderRecord) {
   return order.legacyPhpId || order.id.toString();
 }
@@ -67,7 +87,7 @@ export function postgresOrderDedupeIds(order: PostgresOrderRecord) {
   return [order.id.toString(), order.orderNumber, order.legacyPhpId].map(text).filter(Boolean);
 }
 
-export function mapPostgresOrderItemToLegacy(item: PostgresOrderRecord["items"][number], order: PostgresOrderRecord) {
+export function mapPostgresOrderItemToLegacy(item: PostgresOrderLike["items"][number], order: PostgresOrderLike) {
   const orderId = orderIdentity(order);
   const itemId = item.legacyPhpOrderItemId || item.id.toString();
   return {
@@ -121,7 +141,7 @@ export function mapPostgresOrderItemToLegacy(item: PostgresOrderRecord["items"][
   };
 }
 
-export function mapPostgresOrderToLegacy(order: PostgresOrderRecord) {
+export function mapPostgresOrderToLegacy(order: PostgresOrderLike) {
   const orderId = orderIdentity(order);
   const discountAmount = rupees(order.totalDiscountAmountPaise);
   const finalPayableAmount = rupees(order.finalPayableAmountPaise);
@@ -141,6 +161,7 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderRecord) {
     Dealer_Address: order.dealer.address || "",
     Dealer_Pincode: order.dealer.pincode || "",
     gst: order.dealer.gstin || "",
+    creditdays: order.dealer.creditDays?.toString() || "",
     assignedstaff: order.assignedStaffId?.toString() || "",
     staffid: order.assignedStaffId?.toString() || "",
     staffname: order.assignedStaff?.displayName || "",
@@ -164,6 +185,10 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderRecord) {
     totalDiscountPercent: percent(order.totalDiscountPercent),
     note: order.note || "",
     order_note: order.note || "",
+    shipTo: order.shipTo || "",
+    Dealer_shipto: order.shipTo || "",
+    refNo: order.refNo || "",
+    ref_no: order.refNo || "",
     priority: (order.items ?? []).some((item) => item.isPriority) ? "1" : "0",
     status: order.status,
     order_status: legacyOrderStatus(order.status),
@@ -176,19 +201,69 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderRecord) {
     del_status: legacyDeletion(order.status),
     productorder: (order.items ?? []).map((item) => mapPostgresOrderItemToLegacy(item, order)),
     items: (order.items ?? []).map((item) => mapPostgresOrderItemToLegacy(item, order)),
+    dealer: order.dealer,
+    assignedStaff: order.assignedStaff,
+    orderNotes: "notes" in order ? order.notes : [],
+    orderProductNotes: ("productNotes" in order ? order.productNotes : []).map((note) => ({
+      ...note,
+      id: note.id.toString(),
+      orderId: note.orderId.toString(),
+      orderItemId: note.orderItemId.toString(),
+    })),
+    summaryOverrides: ("summaryOverrides" in order ? order.summaryOverrides : []).map((override) => ({
+      ...override,
+      id: override.id.toString(),
+      orderId: override.orderId.toString(),
+      grossAmount: rupees(override.grossAmountPaise),
+      discountAmount: rupees(override.discountAmountPaise),
+      netPayableAmount: rupees(override.finalPayableAmountPaise),
+    })),
+    overlays: ("overlays" in order ? order.overlays : []).map((overlay) => ({ ...overlay, id: overlay.id.toString(), orderId: overlay.orderId.toString() })),
+    dispatchRecords: ("dispatches" in order ? order.dispatches : []).map((dispatch) => ({
+      id: dispatch.id.toString(),
+      orderId: dispatch.orderId.toString(),
+      orderItemId: dispatch.orderItemId.toString(),
+      quantity: dispatch.quantity,
+      status: legacyDispatchStatus(dispatch.status),
+      remark: dispatch.remark || "",
+      actorId: dispatch.actorUserId?.toString() || "",
+      actorRole: (dispatch.actorRole || "").toString().toLowerCase(),
+      createdAt: dispatch.createdAt.toISOString(),
+    })),
+    walletTransactions: ("walletTransactions" in order ? order.walletTransactions : []).map((transaction) => ({
+      ...transaction,
+      id: transaction.id.toString(),
+      dealerId: transaction.dealerId.toString(),
+      walletId: transaction.walletId.toString(),
+      orderId: transaction.orderId?.toString() || null,
+      amount: rupees(transaction.amountPaise),
+      balanceBefore: rupees(transaction.balanceBeforePaise),
+      balanceAfter: rupees(transaction.balanceAfterPaise),
+    })),
   };
   return row;
 }
 
-function actorWhere(actor: OrdersActor): Prisma.OrderWhereInput {
+function actorWhere(actor: OrdersActor, assignedDealerIds: Array<string | number> = []): Prisma.OrderWhereInput {
   if (actor.role === "dealer") return { dealerId: BigInt(actor.actorId) };
-  if (actor.role === "staff") return { assignedStaffId: BigInt(actor.actorId) };
+  if (actor.role === "staff") {
+    const assignedDealerBigInts = assignedDealerIds
+      .map((id) => String(id ?? "").trim())
+      .filter((id) => /^\d+$/.test(id))
+      .map((id) => BigInt(id));
+    return {
+      OR: [
+        { assignedStaffId: BigInt(actor.actorId) },
+        ...(assignedDealerBigInts.length > 0 ? [{ dealerId: { in: assignedDealerBigInts } }] : []),
+      ],
+    };
+  }
   return {};
 }
 
-export async function listPostgresOrderHeaders(actor: OrdersActor) {
+export async function listPostgresOrderHeaders(actor: OrdersActor, assignedDealerIds: Array<string | number> = []) {
   const orders = await prisma.order.findMany({
-    where: actorWhere(actor),
+    where: actorWhere(actor, assignedDealerIds),
     include: orderInclude,
     orderBy: { orderDate: "desc" },
   });
@@ -207,6 +282,6 @@ export async function findPostgresOrderByLookupId(orderId: unknown) {
         { legacyPhpId: id },
       ],
     },
-    include: orderInclude,
+    include: orderDetailInclude,
   });
 }

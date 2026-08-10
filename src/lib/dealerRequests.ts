@@ -1,7 +1,4 @@
-import type { Db } from "mongodb";
-
 import {
-  buildDealerPhpFormData,
   normalizeDealerFormSnapshot,
   type DealerFormSnapshot,
 } from "@/lib/dealerForm";
@@ -93,10 +90,6 @@ export type DealerCandidate = {
   Dealer_Dealercode?: string;
 };
 
-const DEALER_REQUEST_COLLECTION = "dealer_approval_requests";
-const PHP_BASE_URL = "/api/php-compat-root";
-
-let dealerRequestIndexesPromise: Promise<void> | null = null;
 
 function cleanText(value: unknown, max = 1000) {
   if (typeof value !== "string" && typeof value !== "number") return "";
@@ -158,44 +151,6 @@ export function buildDealerRequestIdentityKey(snapshot: DealerFormSnapshot, subm
 
 function sanitizeRegexText(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-async function parseJsonResponse<T>(response: Response): Promise<T> {
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  if (/^\s*</.test(text)) {
-    throw new Error("Expected JSON but received HTML");
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error("Invalid JSON response");
-  }
-}
-
-function normalizeDealerCandidate(value: unknown): DealerCandidate {
-  const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  return {
-    Dealer_Id: typeof source.Dealer_Id === "string" || typeof source.Dealer_Id === "number" ? source.Dealer_Id : "",
-    Dealer_Name: cleanText(source.Dealer_Name, 200),
-    Dealer_Email: cleanText(source.Dealer_Email, 200),
-    Dealer_Number: cleanText(source.Dealer_Number, 80),
-    Dealer_City: cleanText(source.Dealer_City, 120),
-    Dealer_Username: cleanText(source.Dealer_Username, 120),
-    Dealer_Dealercode: cleanText(source.Dealer_Dealercode, 120),
-  };
-}
-
-function scoreDealerCandidate(candidate: DealerCandidate, snapshot: DealerFormSnapshot) {
-  let score = 0;
-  if (cleanText(candidate.Dealer_Dealercode).toLowerCase() === snapshot.dealerCode.toLowerCase()) score += 4;
-  if (cleanText(candidate.Dealer_Username).toLowerCase() === snapshot.username.toLowerCase()) score += 3;
-  if (cleanText(candidate.Dealer_Email).toLowerCase() === snapshot.email.toLowerCase()) score += 2;
-  if (cleanText(candidate.Dealer_Name).toLowerCase() === snapshot.name.toLowerCase()) score += 1;
-  return score;
 }
 
 function toPublicDealerRequest(record: DealerRequestRecord, options?: { includeSnapshot?: boolean }): PublicDealerRequest {
@@ -364,111 +319,11 @@ export function buildDealerRequestCreateDocument(params: {
   };
 }
 
-export async function ensureDealerRequestIndexes(db: Db) {
-  if (!dealerRequestIndexesPromise) {
-    dealerRequestIndexesPromise = Promise.all([
-      db.collection(DEALER_REQUEST_COLLECTION).createIndex(
-        { openRequestKey: 1 },
-        {
-          unique: true,
-          partialFilterExpression: {
-            openRequestKey: { $type: "string" },
-          },
-        },
-      ),
-      db.collection(DEALER_REQUEST_COLLECTION).createIndex({ status: 1, updatedAt: -1 }),
-      db.collection(DEALER_REQUEST_COLLECTION).createIndex({ submittedById: 1, status: 1, updatedAt: -1 }),
-    ]).then(() => undefined).catch((error) => {
-      dealerRequestIndexesPromise = null;
-      throw error;
-    });
-  }
-
-  await dealerRequestIndexesPromise;
-}
-
-export function getDealerRequestCollection(db: Db) {
-  return db.collection(DEALER_REQUEST_COLLECTION);
-}
-
 export function appendAuditEntry(
   auditTrail: DealerRequestAuditEntry[],
   entry: DealerRequestAuditEntry,
 ) {
   return [...auditTrail, entry];
-}
-
-export async function submitDealerDirect(snapshot: DealerFormSnapshot) {
-  const response = await fetch(`${PHP_BASE_URL}/api/formdata1`, {
-    method: "POST",
-    body: buildDealerPhpFormData(snapshot),
-    cache: "no-store",
-  });
-
-  const text = await response.text();
-  let payload: Record<string, unknown> = {};
-  try {
-    payload = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    payload = { msg: text };
-  }
-
-  if (!response.ok) {
-    throw new Error(cleanText(payload.msg, 300) || `Dealer creation failed (${response.status})`);
-  }
-
-  return {
-    msg: cleanText(payload.msg, 300) || "Dealer created successfully",
-    raw: payload,
-  };
-}
-
-export async function lookupExistingDealer(snapshot: DealerFormSnapshot) {
-  const searchTerms = Array.from(
-    new Set([
-      snapshot.dealerCode,
-      snapshot.username,
-      snapshot.email,
-      snapshot.name,
-    ].map((value) => cleanText(value, 120)).filter(Boolean)),
-  );
-
-  const matches = new Map<string, DealerCandidate>();
-
-  for (const term of searchTerms) {
-    const response = await fetch(
-      `${PHP_BASE_URL}/api/dealerpegination?page=1&limit=50&search=${encodeURIComponent(term)}`,
-      { cache: "no-store" },
-    );
-    const json = await parseJsonResponse<{ data?: unknown[] }>(response);
-    for (const entry of json.data ?? []) {
-      const candidate = normalizeDealerCandidate(entry);
-      const id = cleanText(candidate.Dealer_Id, 120);
-      if (!id) continue;
-      matches.set(id, candidate);
-    }
-  }
-
-  const ranked = [...matches.values()]
-    .map((candidate) => ({ candidate, score: scoreDealerCandidate(candidate, snapshot) }))
-    .filter((entry) => entry.score >= 5)
-    .sort((left, right) => right.score - left.score);
-
-  return ranked[0]?.candidate ?? null;
-}
-
-export async function resolveCreatedDealerId(snapshot: DealerFormSnapshot) {
-  for (const delayMs of [0, 300, 700]) {
-    if (delayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-
-    const candidate = await lookupExistingDealer(snapshot);
-    const dealerId = cleanText(candidate?.Dealer_Id, 120);
-    if (dealerId) return dealerId;
-  }
-
-  return "";
 }
 
 export function toDealerRequestListItem(record: DealerRequestRecord) {

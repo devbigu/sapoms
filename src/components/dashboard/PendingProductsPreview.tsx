@@ -103,11 +103,7 @@ function resolveDashboardActor(expectedRole: Role): DashboardActor | null {
 }
 
 function buildActorHeaders(actor: DashboardActor): HeadersInit {
-  return {
-    "x-omsons-actor-id": actor.id,
-    "x-omsons-actor-role": actor.role,
-    ...(actor.roletype ? { "x-omsons-actor-roletype": actor.roletype } : {}),
-  };
+  return {};
 }
 
 function formatNumber(value: number) {

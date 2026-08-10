@@ -50,6 +50,8 @@ const { calculateStackedDiscount, getDiscountStatusMessage } = discountUtils;
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ProductRow = {
   key: number;
+  productId?: string;
+  variantId?: string;
   productname: string;
   displayName: string;
   variantCode: string;
@@ -283,8 +285,6 @@ const COUPONS: Record<string, number> = {
   "SAVE50": 50,
   "VIP80": 80,
 };
-
-const BACKEND_URL = "/api/php-compat";
 
 type PhpExchangeLog = {
   method: "GET" | "POST";
@@ -565,17 +565,31 @@ function AddOrderPageInner() {
 
   useEffect(() => {
     if (!user) return;
-    Promise.all([
-      fetch(`${BACKEND_URL}/productname`).then(r => r.json()),
-      loadCatalogueProducts(),
-    ]).then(([apiData, localData]) => {
-      setProducts(apiData.data ?? []);
-      setCatalogueIndex(buildCatalogueIndex(localData ?? []));
-      setVariantLookup(buildVariantLookup(localData));
-    }).catch(() => {
-      fetch(`${BACKEND_URL}/productname`)
-        .then(r => r.json()).then(d => setProducts(d.data ?? []));
-    });
+    fetch("/api/products", { cache: "no-store" })
+      .then((r) => { if (!r.ok) throw new Error("PRODUCTS_UNAVAILABLE"); return r.json(); })
+      .then((apiData) => {
+        const catalogueProducts = apiData.data ?? [];
+        const rows = catalogueProducts.flatMap((product: any) =>
+          (product.variants ?? []).map((variant: any) => ({
+            product_id: product.id,
+            variant_id: variant.id,
+            product_name: product.name,
+            product_cat: variant.catalogueNumber || variant.sku,
+            product_price: variant.price,
+            product_quantity: variant.packSize || variant.pack || 1,
+            product_unit: variant.unitName || "",
+            active: product.active && variant.active,
+          }))
+        );
+        setProducts(rows);
+        setCatalogueIndex(buildCatalogueIndex(catalogueProducts));
+        setVariantLookup(buildVariantLookup(catalogueProducts));
+      })
+      .catch(() => {
+        setProducts([]);
+        setCatalogueIndex(buildCatalogueIndex([]));
+        setVariantLookup({});
+      });
   }, [user]);
 
   useEffect(() => {
@@ -599,12 +613,7 @@ function AddOrderPageInner() {
     if (seededRef.current) return;
 
     setReorderLoading(true);
-    fetch(`/api/custom-discount-requests/${encodeURIComponent(reorderIdParam)}`, {
-      headers: {
-        "x-omsons-actor-role": "dealer",
-        "x-omsons-actor-id": String(user.Dealer_Id),
-      },
-    })
+    fetch(`/api/custom-discount-requests/${encodeURIComponent(reorderIdParam)}`)
       .then((r) => {
         if (r.status === 404) throw new Error("NOT_FOUND");
         if (!r.ok) throw new Error("NETWORK");
@@ -711,12 +720,7 @@ function AddOrderPageInner() {
         let request: CustomDiscountRequest | null = null;
 
         if (approvalRequestId) {
-          const res = await fetch(`/api/custom-discount-requests/${encodeURIComponent(approvalRequestId)}`, {
-            headers: {
-              "x-omsons-actor-role": "dealer",
-              "x-omsons-actor-id": String(user.Dealer_Id),
-            },
-          });
+          const res = await fetch(`/api/custom-discount-requests/${encodeURIComponent(approvalRequestId)}`);
           if (res.ok) {
             const json = await res.json();
             if (json.success) request = json.data as CustomDiscountRequest;
@@ -1388,6 +1392,8 @@ function AddOrderPageInner() {
       const next = [...prev];
       next[idx] = {
         ...next[idx],
+        productId: undefined,
+        variantId: undefined,
         productname: "",
         displayName: "",
         variantCode: "",
@@ -1422,6 +1428,8 @@ function AddOrderPageInner() {
       const next = [...prev];
       next[idx] = {
         ...next[idx],
+        productId: product.id,
+        variantId: variant.id,
         catalogueSection: getCatalogueSection(product),
         catalogueProductSku: product.sku,
         catalogueVariantSku: variant.sku,
@@ -1542,7 +1550,7 @@ function AddOrderPageInner() {
   const getLatestOrderIdForDealer = async () => {
     if (!user?.Dealer_Id) return "";
     try {
-      const res = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(user.Dealer_Id)}`);
+      const res = await fetch(`/api/orders-data?page=1&limit=1000&search=`);
       const json = await res.json();
       return String(json?.data?.[0]?.order_id ?? "").trim();
     } catch {
@@ -1557,7 +1565,7 @@ function AddOrderPageInner() {
     setExpectedOrderLoading(true);
     const loadLatestOrderId = async () => {
       try {
-        const res = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(user.Dealer_Id)}`);
+        const res = await fetch(`/api/orders-data?page=1&limit=1000&search=`);
         const json = await res.json();
         return String(json?.data?.[0]?.order_id ?? "").trim();
       } catch {
@@ -1581,10 +1589,7 @@ function AddOrderPageInner() {
   useEffect(() => {
     if (!user?.Dealer_Id) return;
     setWalletLoading(true);
-    fetch(`/api/wallet/${encodeURIComponent(user.Dealer_Id)}?limit=5`, {
-      cache: "no-store",
-      headers: { "x-omsons-actor-role": "dealer", "x-omsons-actor-id": String(user.Dealer_Id) },
-    })
+    fetch(`/api/wallet/${encodeURIComponent(user.Dealer_Id)}?limit=5`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("wallet unavailable")))
       .then((json) => { if (json.success) setWallet(json); })
       .catch(() => setWallet(null))
@@ -1607,6 +1612,8 @@ function AddOrderPageInner() {
       const rowSubtotal = rowSubtotalPaise(r) / 100;
       const rowDiscountAmount = rowSubtotal * (rowDiscountPercent / 100);
       return {
+        productId: r.productId,
+        variantId: r.variantId,
         productname: r.productname,
         productName: r.displayName || r.productname,
         catNo: r.variantCode || r.productname,
@@ -1684,12 +1691,7 @@ function AddOrderPageInner() {
       await ensureDealerIsActive();
       setLoading(true);
       orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
-      const { data } = await axios.post(targetApiUrl, fd, { headers: {
-        "x-omsons-actor-role": "dealer",
-        "x-omsons-actor-id": String(user.Dealer_Id),
-        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
-        "idempotency-key": orderIdempotencyKey.current,
-      } });
+      const { data } = await axios.post(targetApiUrl, fd, { headers: { "idempotency-key": orderIdempotencyKey.current } });
       logPhpExchange("PlaceOrderarray", {
         method: "POST",
         url: targetApiUrl,
@@ -1772,12 +1774,7 @@ function AddOrderPageInner() {
       await ensureDealerIsActive();
       setLoading(true);
       orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
-      const { data } = await axios.post(targetApiUrl, fd, { headers: {
-        "x-omsons-actor-role": "dealer",
-        "x-omsons-actor-id": String(user.Dealer_Id),
-        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
-        "idempotency-key": orderIdempotencyKey.current,
-      } });
+      const { data } = await axios.post(targetApiUrl, fd, { headers: { "idempotency-key": orderIdempotencyKey.current } });
       logPhpExchange("importdata", {
         method: "POST",
         url: targetApiUrl,

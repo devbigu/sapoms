@@ -2,86 +2,139 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import ts from "typescript";
 
-async function loadLedgerModule() {
-  const filePath = path.resolve("src/lib/ledgerSystem.ts");
-  const dataModule = (source) => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-  const mongodbStub = dataModule(`export async function getDb(){throw new Error("unused")}`);
-  const amountStub = dataModule(`export function resolveOrderAmounts(o){const gross=Number(o.order_amount||0);const discount=Number(o.order_discount||0);return {netPayable:Number(o.order_net_amount??(gross-discount))}};export function withDisplayOrderAmounts(o){return o}`);
-  const headersStub = dataModule(`export async function loadOrderHeaders(){return {rows:[]}}`);
-  const source = (await fs.readFile(filePath, "utf8"))
-    .replace(/import\s+\{\s*Db\s*\}\s+from\s+["']mongodb["'];?/, "")
-    .replace(/from\s+["']@\/lib\/mongodb["']/g, `from "${mongodbStub}"`)
-    .replace(/from\s+["']@\/lib\/orderHeaders["']/g, `from "${headersStub}"`)
-    .replace(/from\s+["']@\/lib\/orderAmounts["']/g, `from "${amountStub}"`);
-  const output = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
-    fileName: filePath,
-  }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`);
+const ledgerSource = await fs.readFile(path.resolve("src/lib/ledgerSystem.ts"), "utf8");
+const routeSource = await fs.readFile(path.resolve("src/app/api/ledger/route.ts"), "utf8");
+const detailSource = await fs.readFile(path.resolve("src/app/api/ledger/[dealerId]/route.ts"), "utf8");
+const transactionsSource = await fs.readFile(path.resolve("src/app/api/ledger/[dealerId]/transactions/route.ts"), "utf8");
+const paySource = await fs.readFile(path.resolve("src/app/api/ledger/[dealerId]/pay/route.ts"), "utf8");
+const allSources = [ledgerSource, routeSource, detailSource, transactionsSource, paySource].join("\n");
+
+test("ledger routes no longer call PHP compatibility or Mongo ledger storage", () => {
+  assert.doesNotMatch(allSources, /@\/lib\/mongodb|getDb|getMongoClient|mongodb|ledger_system_cache|ledger_transactions|dealerpegination|orderpegination|getdealer|php-compat|BACKEND_URL|fetchExternalDealer|getLedgerSnapshot/);
+  assert.doesNotMatch(allSources, /fetch\s*\(/);
+});
+
+test("ledger uses PostgreSQL order dealer wallet and wallet transaction models", () => {
+  for (const model of ["dealerProfile", "order", "dealerWallet", "walletTransaction", "ledgerBill"]) {
+    assert.match(ledgerSource, new RegExp(`\\b${model}\\b`));
+  }
+  assert.match(ledgerSource, /mapPostgresOrderToLegacy/);
+  assert.match(ledgerSource, /DealerWallet|WalletTransactionType|OrderStatus/);
+});
+
+test("ledger preserves temporary frontend response aliases", () => {
+  for (const alias of ["Dealer_Id", "Dealer_Name", "Dealer_Email", "Dealer_Number", "walletBalance", "totalDebit", "totalCredit", "netBalance", "accountBook"]) {
+    assert.match(ledgerSource, new RegExp(alias));
+  }
+  for (const alias of ["summary", "summaryStats", "orders", "bills", "transactionCount", "paymentsLive", "isLive", "updatedAt"]) {
+    assert.match(ledgerSource + detailSource + routeSource, new RegExp(alias));
+  }
+  for (const alias of ["data", "count", "page", "pageSize", "totalPages", "hasNextPage", "hasPreviousPage"]) {
+    assert.match(ledgerSource + transactionsSource, new RegExp(alias));
+  }
+});
+
+test("ledger enforces admin staff and dealer visibility from authenticated actor", () => {
+  assert.match(allSources, /requireAuth\(\)/);
+  assert.match(ledgerSource, /actor\.role === "ADMIN"/);
+  assert.match(ledgerSource, /actor\.role === "DEALER"/);
+  assert.match(ledgerSource, /actor\.dealerId === dealerId/);
+  assert.match(ledgerSource, /actor\.role === "STAFF"/);
+  assert.match(ledgerSource, /dealerStaffAssignment\.findFirst/);
+  assert.match(ledgerSource, /staffId: actor\.staffId/);
+  assert.match(ledgerSource, /active: true/);
+});
+
+test("ledger derives balances from order payable and wallet transaction directions", () => {
+  assert.match(ledgerSource, /finalPayableAmountPaise/);
+  assert.match(ledgerSource, /bookedPaise \+= order\.finalPayableAmountPaise/);
+  assert.match(ledgerSource, /WalletTransactionType\.CREDIT/);
+  assert.match(ledgerSource, /WalletTransactionType\.REFUND/);
+  assert.match(ledgerSource, /WalletTransactionType\.ADJUSTMENT/);
+  assert.match(ledgerSource, /accountBook\.booked \+ money\(wallet\.debitPaise\)/);
+  assert.match(ledgerSource, /netBalance: roundMoney\(totalDebit - totalCredit\)/);
+});
+
+
+test("ledger bills are saved through the dealer ledger API and bill-linked payments return updated bill state", () => {
+  assert.match(ledgerSource, /recordLedgerBill/);
+  assert.match(ledgerSource, /ledgerBill\.findMany/);
+  assert.match(ledgerSource, /dealerId_orderNumber/);
+  assert.match(ledgerSource, /billId/);
+  assert.match(detailSource, /Bill saved successfully/);
+  assert.match(paySource, /bill: result\.bill/);
+});
+test("ledger payments are transactional and idempotent", () => {
+  assert.match(ledgerSource, /prisma\.\$transaction/);
+  assert.match(ledgerSource, /idempotencyKey/);
+  assert.match(ledgerSource, /Idempotency key is required/);
+  assert.match(ledgerSource, /applyWalletChange\(tx, dealerId, WalletTransactionType\.CREDIT/);
+  assert.match(paySource, /duplicate: Boolean\(result\.duplicate\)/);
+});
+
+
+
+function paise(amount) {
+  return BigInt(Math.round(amount * 100));
 }
 
-const ledger = await loadLedgerModule();
-const dealerId = "101";
+function acceptedOrder(amount, id = 1n) {
+  return {
+    id,
+    status: "AWAITING_ACCEPTANCE",
+    acceptanceStatus: "ACCEPTED",
+    fulfilmentStatus: "PENDING",
+    finalPayableAmountPaise: paise(amount),
+  };
+}
 
-const oldOrder = {
-  order_id: 12001,
-  order_dealer: 101,
-  order_date: "2026-07-12 23:59:59",
-  order_amount: 100000,
-  accept_order: "1",
-  del_status: "0",
-};
-const activeOrder = {
-  order_id: "13001",
-  order_dealer: "101",
-  order_date: "2026-07-13 00:00:00",
-  order_amount: 50000,
-  accept_order: 1,
-  del_status: 0,
-};
+function walletTx(type, amount, options = {}) {
+  return {
+    type,
+    amountPaise: paise(amount),
+    metadata: options.metadata ?? null,
+    orderId: options.orderId ?? null,
+  };
+}
 
-test("ledger booked debit includes old orders with numeric or string identifiers", () => {
-  const scoped = ledger.ordersForDealer([oldOrder, activeOrder], dealerId);
-  assert.deepEqual(scoped.map((order) => String(order.order_id)), ["12001", "13001"]);
-  assert.deepEqual(ledger.summarizeOrders([oldOrder, activeOrder]), {
-    booked: 150000,
-    bookedCount: 2,
-    sentAndSettled: 0,
-    sentAndSettledCount: 0,
-    supposedToGo: 150000,
-    supposedToGoCount: 2,
-    awaiting: 0,
-    awaitingCount: 0,
-  });
+function ledgerOutstanding(orders, transactions) {
+  const orderTotal = orders.reduce((sum, order) => sum + Number(order.finalPayableAmountPaise) / 100, 0);
+  const wallet = transactions.reduce((totals, tx) => {
+    const direction = tx.type === "CREDIT" || tx.type === "REFUND" || (tx.type === "ORDER_DEBIT" && tx.orderId) || (tx.type === "ADJUSTMENT" && tx.metadata?.direction !== "debit")
+      ? "credit"
+      : "debit";
+    const amount = Number(tx.amountPaise) / 100;
+    if (direction === "credit") totals.credit += amount;
+    else totals.debit += amount;
+    return totals;
+  }, { credit: 0, debit: 0 });
+  return orderTotal + wallet.debit - wallet.credit;
+}
+
+test("ledger accounting semantics cover order payable, payments, wallet use, refunds, debits, adjustments, and multiple orders", () => {
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], []), 10000);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000, 1n)], [walletTx("ORDER_DEBIT", 10000, { orderId: 1n })]), 0);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], [walletTx("CREDIT", 4000)]), 6000);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], [walletTx("REFUND", 1500)]), 8500);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], [walletTx("DEBIT", 1200)]), 11200);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], [walletTx("ADJUSTMENT", 700, { metadata: { direction: "credit" } })]), 9300);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000)], [walletTx("ADJUSTMENT", 700, { metadata: { direction: "debit" } })]), 10700);
+  assert.equal(ledgerOutstanding([acceptedOrder(10000, 1n), acceptedOrder(3000, 2n)], [walletTx("ORDER_DEBIT", 10000, { orderId: 1n }), walletTx("CREDIT", 1000)]), 2000);
 });
 
-test("active order debit minus a manual payment produces the dealer balance", () => {
-  const bookedPaise = ledger.orderNetPaise(activeOrder);
-  const paymentPaise = ledger.paymentCreditPaise({ type: "payment", amount: 20000 });
-  assert.equal(bookedPaise, 5_000_000);
-  assert.equal(paymentPaise, 2_000_000);
-  assert.equal((bookedPaise - paymentPaise) / 100, 30000);
+test("ORDER_DEBIT is counted as payment only when tied to an order id", () => {
+  assert.match(ledgerSource, /WalletTransactionType\.ORDER_DEBIT && orderId\) return "credit"/);
+  assert.match(ledgerSource, /ledgerTransactionDirection\(tx\.type, tx\.metadata, tx\.orderId\)/);
+  assert.match(ledgerSource, /summarizeWalletForLedger/);
+  assert.doesNotMatch(ledgerSource, /summarizeWallet\(/);
 });
 
-test("historical manual payments remain credits alongside older orders", () => {
-  const activeOrders = ledger.ordersForDealer([oldOrder], dealerId);
-  const bookedPaise = activeOrders.reduce((sum, order) => sum + ledger.orderNetPaise(order), 0);
-  const historicalPaymentPaise = ledger.paymentCreditPaise({
-    type: "payment",
-    amount: 80000,
-    date: "2026-07-01",
-  });
-
-  assert.equal(bookedPaise, 10_000_000);
-  assert.equal(historicalPaymentPaise, 8_000_000);
-  assert.equal((bookedPaise - historicalPaymentPaise) / 100, 20000);
-});
-
-test("cached ledger snapshots are versioned for all orders without date filtering", async () => {
-  const source = await fs.readFile(path.resolve("src/lib/ledgerSystem.ts"), "utf8");
-  assert.match(source, /collective_ledger_snapshot:all-orders-v1/);
-  assert.match(source, /orders:\s*Array\.isArray\(doc\.orders\)/);
-  assert.doesNotMatch(source, /filterActiveOrders/);
+test("dealer order creates ORDER_DEBIT for the exact order payable with orderId and duplicate wallet idempotency key", async () => {
+  const dealerOrderSource = await fs.readFile(path.resolve("src/app/api/dealer-order/route.ts"), "utf8");
+  assert.match(dealerOrderSource, /WalletTransactionType\.ORDER_DEBIT/);
+  assert.match(dealerOrderSource, /fromPaise\(finalPayableAmountPaise\)/);
+  assert.match(dealerOrderSource, /orderId: order\.id/);
+  assert.match(dealerOrderSource, /`\$\{idempotencyKey\}:wallet`/);
+  assert.match(ledgerSource, /idempotencyKey/);
 });

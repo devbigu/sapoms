@@ -185,9 +185,11 @@ function resolveDashboardSearchHref(result, role) {
   }
 
   if (result.type === "dealer") {
-    if (role !== "admin") return "";
     const dealerId = pickFirstString(result.dealerId, result.id);
-    return dealerId ? `/dashboard/admin/dealer/${encodeURIComponent(dealerId)}` : "";
+    if (!dealerId) return "";
+    if (role === "admin") return `/dashboard/admin/dealer/${encodeURIComponent(dealerId)}`;
+    if (role === "staff") return `/dashboard/staff/dealer/${encodeURIComponent(dealerId)}`;
+    return "";
   }
 
   if (result.type === "staff") {
@@ -464,7 +466,7 @@ function scoreDealerResult(dealer, query) {
 
 function searchDashboardDealers(dealers, query, options = {}) {
   const role = options.role || "admin";
-  if (role !== "admin") return [];
+  if (role !== "admin" && role !== "staff") return [];
 
   const results = [];
 
@@ -549,7 +551,7 @@ function getStaffRoleLabel(value) {
 
 function searchDashboardStaff(staffRows, query, options = {}) {
   const role = options.role || "admin";
-  if (role !== "admin") return [];
+  if (role !== "admin" && role !== "staff") return [];
 
   const results = [];
 
@@ -655,3 +657,4 @@ module.exports = {
   sortAndLimitResults,
   groupDashboardResults,
 };
+

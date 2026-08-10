@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getDb, isMongoDependencyError } from "@/lib/mongodb";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/server/db/prisma";
+import { requireAuth } from "@/server/auth/session";
 
 export const runtime = "nodejs";
 
@@ -13,24 +14,8 @@ type HotItem = {
   active: boolean;
 };
 
-type HotItemsDoc = {
-  _id: string;
-  items: HotItem[];
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-const DOC_ID = "homepage-hot-items";
-const MONGO_OPERATION_TIMEOUT_MS = 5000;
-
-const DEFAULT_ITEMS: HotItem[] = [
-  { id: "1", SKU: "163", name: "Adapters Reduction", specs: "", image: "", badge: "Bestseller", active: true },
-  { id: "2", SKU: "164", name: "Adapters Cone and Cone", specs: "", image: "", badge: "Fast moving", active: true },
-  { id: "3", SKU: "165", name: "Adapters Socket and Socket", specs: "", image: "", badge: "Trending", active: true },
-  { id: "4", SKU: "144", name: "Flask Erlenmeyer Amber", specs: "", image: "", badge: "Popular", active: true },
-  { id: "5", SKU: "145", name: "Flask Erlenmeyer Narrow", specs: "", image: "", badge: "Top rated", active: true },
-  { id: "6", SKU: "147", name: "Flask Iodine", specs: "", image: "", badge: "Hot pick", active: false },
-];
+type HotItemRow = Awaited<ReturnType<typeof loadHotItemRows>>[number];
+type ResolvedHotItem = { item: HotItem; index: number; productId: bigint; variantId: bigint | null };
 
 function safeText(value: unknown, max = 300) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -53,38 +38,88 @@ function normalizeItem(raw: unknown, index: number): HotItem | null {
   };
 }
 
-function toDoc(items: HotItem[], updatedAt?: string, isDefault = false) {
+function toDoc(items: HotItem[], updatedAt?: string | null, isDefault = false) {
   return { items, updatedAt: updatedAt ?? null, isDefault };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs = MONGO_OPERATION_TIMEOUT_MS) {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error("Mongo operation timed out")), timeoutMs);
-    }),
-  ]);
+function safeErrorResponse(message: string, status = 500) {
+  return NextResponse.json({ success: false, message }, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+async function loadHotItemRows() {
+  return prisma.hotItem.findMany({
+    where: {
+      product: { active: true },
+      OR: [{ variantId: null }, { variant: { active: true } }],
+    },
+    include: { product: true, variant: true },
+    orderBy: [{ position: "asc" }, { id: "asc" }],
+  });
+}
+
+function rowSku(row: HotItemRow) {
+  return row.variant?.sku || row.variant?.catalogueNumber || row.product.productCode || row.skuSnapshot;
+}
+
+function rowName(row: HotItemRow) {
+  return row.product.name || row.nameSnapshot;
+}
+
+function rowSpecs(row: HotItemRow) {
+  const parts = [row.variant?.unitName, row.variant?.packSize ? `${row.variant.packSize} pcs` : ""].filter(Boolean);
+  return parts.join(" · ") || row.specsSnapshot;
+}
+
+function toHotItem(row: HotItemRow): HotItem {
+  return {
+    id: row.id.toString(),
+    SKU: rowSku(row),
+    name: rowName(row),
+    specs: rowSpecs(row),
+    image: row.product.imageUrl || row.imageSnapshot,
+    badge: row.badge || "Hot pick",
+    active: row.isActive,
+  };
+}
+
+async function resolveProduct(input: HotItem) {
+  const sku = input.SKU.trim();
+  const variant = await prisma.productVariant.findFirst({
+    where: {
+      active: true,
+      product: { active: true },
+      OR: [{ sku }, { catalogueNumber: sku }],
+    },
+    include: { product: true },
+  });
+  if (variant) return { productId: variant.productId, variantId: variant.id };
+
+  const product = await prisma.product.findFirst({
+    where: { active: true, OR: [{ productCode: sku }, { name: { equals: input.name.trim(), mode: "insensitive" } }] },
+    select: { id: true },
+  });
+  if (product) return { productId: product.id, variantId: null };
+
+  return null;
 }
 
 export async function GET() {
   try {
-    const db = await withTimeout(getDb());
-    const doc = await withTimeout(db.collection<HotItemsDoc>("homepage_content").findOne({ _id: DOC_ID }));
-    const isDefault = !doc;
-    const items = Array.isArray(doc?.items) ? doc.items.map(normalizeItem).filter(Boolean) : DEFAULT_ITEMS;
-    return NextResponse.json({ success: true, data: toDoc(items as HotItem[], doc?.updatedAt, isDefault) });
+    const rows = await loadHotItemRows();
+    const items = rows.map(toHotItem);
+    const updatedAt = rows[0]?.updatedAt?.toISOString() ?? null;
+    return NextResponse.json({ success: true, data: toDoc(items, updatedAt, false) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("hot-items GET failed", error);
-    return NextResponse.json({
-      success: true,
-      fallback: true,
-      data: toDoc(DEFAULT_ITEMS, undefined, true),
-    });
+    return safeErrorResponse("Unable to load hot items");
   }
 }
 
 export async function PUT(req: NextRequest) {
   try {
+    const actor = await requireAuth();
+    if (actor.role !== "ADMIN") return safeErrorResponse("Forbidden", 403);
+
     const body: unknown = await req.json();
     const bodyCandidate = (body && typeof body === "object" ? body : {}) as { items?: unknown };
     const items = (Array.isArray(bodyCandidate.items) ? bodyCandidate.items : [])
@@ -92,29 +127,52 @@ export async function PUT(req: NextRequest) {
       .map(normalizeItem)
       .filter(Boolean) as HotItem[];
 
-    const now = new Date().toISOString();
-    const db = await withTimeout(getDb());
-    await db.collection<HotItemsDoc>("homepage_content").updateOne(
-      { _id: DOC_ID },
-      {
-        $set: {
-          items,
-          updatedAt: now,
-        },
-        $setOnInsert: {
-          createdAt: now,
-        },
-      },
-      { upsert: true }
-    );
+    const resolvedItems: ResolvedHotItem[] = [];
+    const seen = new Set<string>();
+    for (const [index, item] of items.entries()) {
+      const resolved = await resolveProduct(item);
+      if (!resolved) return safeErrorResponse(`Active PostgreSQL product not found for SKU ${item.SKU}`, 400);
+      const key = `${resolved.productId.toString()}:${resolved.variantId?.toString() ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      resolvedItems.push({ item, index, ...resolved });
+    }
 
-    return NextResponse.json({ success: true, data: toDoc(items, now) });
+    await prisma.$transaction(async (tx) => {
+      await tx.hotItem.deleteMany({});
+      if (resolvedItems.length) {
+        await tx.hotItem.createMany({
+          data: resolvedItems.map(({ item, index, productId, variantId }) => ({
+            productId,
+            variantId,
+            position: index,
+            isActive: item.active,
+            badge: item.badge,
+            skuSnapshot: item.SKU,
+            nameSnapshot: item.name,
+            specsSnapshot: item.specs,
+            imageSnapshot: item.image,
+            createdByUserId: actor.userId,
+          })),
+        });
+      }
+      await tx.authAuditLog.create({
+        data: {
+          sessionId: actor.sessionId,
+          role: actor.role,
+          eventType: "HOT_ITEMS_PUBLISHED",
+          metadata: { count: resolvedItems.length, userId: actor.userId.toString() },
+        },
+      });
+    });
+
+    const rows = await loadHotItemRows();
+    const savedItems = rows.map(toHotItem);
+    const updatedAt = rows[0]?.updatedAt?.toISOString() ?? new Date().toISOString();
+    return NextResponse.json({ success: true, data: toDoc(savedItems, updatedAt) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("hot-items PUT failed", error);
-    const status = isMongoDependencyError(error) ? 503 : 500;
-    const message = status === 503
-      ? "Hot items database is currently unavailable"
-      : "Unable to save hot items";
-    return NextResponse.json({ success: false, message }, { status });
+    if (error instanceof Error && error.message === "Unauthenticated") return safeErrorResponse("Unauthenticated", 401);
+    return safeErrorResponse("Unable to save hot items");
   }
 }

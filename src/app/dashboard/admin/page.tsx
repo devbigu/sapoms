@@ -782,8 +782,8 @@ function AdminDashboardInner() {
             </div>
 
             {/* ── Charts ── */}
-            <PendingProductsPreview role="admin" moreHref="/dashboard/admin/pending-products" />
-
+            {/* <PendingProductsPreview role="admin" moreHref="/dashboard/admin/pending-products" /> */}
+{/* 
             <div className="table-card">
               <div className="table-toolbar">
                 <div>
@@ -899,7 +899,7 @@ function AdminDashboardInner() {
                   </button>
                 </div>
               </div>
-            </div>
+            </div> */}
 
             <div className="charts-row">
 

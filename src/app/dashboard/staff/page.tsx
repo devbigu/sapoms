@@ -31,7 +31,6 @@ import {
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────
-const BACKEND_URL = "/api/php-compat"
 const year = new Date().getFullYear()
 
 const NAV_ITEMS = [
@@ -219,7 +218,7 @@ function ExecutiveDashboard() {
     queries: [
       {
         queryKey:  ["staffOrders", STAFF_ORDER_SCOPE_VERSION, user?.staff_id],
-        queryFn:   () => fetchJson<{ data: OrderItem[] }>(`/api/orders-data?source=staffOrderrPagination&role=staff&page=1&limit=1000&search=&id=${encodeURIComponent(user!.staff_id)}`),
+        queryFn:   () => fetchJson<{ data: OrderItem[] }>(`/api/orders-data?page=1&limit=1000&search=`),
         enabled,
         select:    (d: { data: OrderItem[] }) => (d.data ?? []).map((order) => ({
           ...order,
@@ -227,8 +226,8 @@ function ExecutiveDashboard() {
         })),
       },
       {
-        queryKey:  ["staffDealers", user?.staff_id],
-        queryFn:   () => fetchJson<{ data: StaffDealer[] }>(`${BACKEND_URL}/staffDealers?id=${user!.staff_id}`),
+        queryKey:  ["staffAssignedDealers", user?.staff_id],
+        queryFn:   () => fetchJson<{ data: StaffDealer[] }>(`/api/staff/dealers`),
         enabled,
         select:    (d: { data: StaffDealer[] }) => d.data ?? [],
       },

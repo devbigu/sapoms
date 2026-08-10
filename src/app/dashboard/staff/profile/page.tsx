@@ -2,10 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { Save } from "lucide-react";
-
-const BACKEND_URL = "/api/php-compat";
 
 type StaffSession = {
   staff_id?: string;
@@ -82,10 +79,9 @@ export default function StaffProfilePage() {
     const loadStaff = async () => {
       setIsLoading(true);
       try {
-        const response = await fetch(`${BACKEND_URL}/staffinfo?id=${encodeURIComponent(id)}`);
+        const response = await fetch("/api/staff/profile", { cache: "no-store" });
         const json = await response.json();
-        // Prefer session/localStorage values first so recent client-side updates show immediately
-        const data = session || json.data || {};
+        const data = json.data || session || {};
         setName(data.staff_name || "");
         setDesignation(data.staff_designation || "");
         setLocation(data.staff_location || "");
@@ -112,14 +108,13 @@ export default function StaffProfilePage() {
 
     setIsSaving(true);
     try {
-      const formData = new FormData();
-      formData.append("staff_name", name);
-      formData.append("staff_designation", designation);
-      formData.append("staff_location", location);
-      formData.append("staff_password", password);
-
-      const response = await axios.post(`${BACKEND_URL}/staffUpdate?id=${encodeURIComponent(staffId)}`, formData);
-      const payload = response.data || {};
+      const response = await fetch("/api/staff/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ staff_name: name, staff_designation: designation, staff_location: location, staff_password: password }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.message || "Update failed");
       const previous = readStaffSession() || {};
       const payloadData = payload?.data || {};
       const updated = {

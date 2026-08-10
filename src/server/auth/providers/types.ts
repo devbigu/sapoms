@@ -1,4 +1,4 @@
-export type AuthRole = "ADMIN" | "ACCOUNTANT" | "STAFF" | "DEALER";
+export type AuthRole = "ADMIN" | "NSM" | "ACCOUNTANT" | "RSM" | "STAFF" | "DEALER";
 export type LegacyAuthSource = "PHP" | "MONGODB";
 
 export type LegacyAuthenticatedActor = {
@@ -26,3 +26,4 @@ export const LEGACY_ROLE_MAP = {
 } as const;
 
 export type LegacyRoleType = keyof typeof LEGACY_ROLE_MAP;
+

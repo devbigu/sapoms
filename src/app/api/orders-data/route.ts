@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadOrderHeaders, ORDER_HEADER_SOURCES } from "@/lib/orderHeaders";
 import { buildOrdersPage } from "@/lib/orderPagination";
-import { fetchStaffAssignedDealerIds, parseOrderActor } from "@/lib/orderScopeServer";
+import { fetchStaffAssignedDealerIds, orderActorFromAuth } from "@/lib/orderScopeServer";
 import { STAFF_ORDER_SCOPE_VERSION } from "@/lib/staffOrderScope.js";
-import { getOrderOverlayCollection } from "@/lib/orderOverlays";
+import { requireAuth } from "@/server/auth/session";
+import { serializePrismaValue } from "@/server/db/prisma-serialize";
 
 export const runtime = "nodejs";
 
@@ -14,44 +15,22 @@ function positiveInt(value: string | null, fallback: number, maximum: number) {
 
 export async function GET(req: NextRequest) {
   const requestStartedAt = performance.now();
-  const source = String(req.nextUrl.searchParams.get("source") || "");
-  if (!ORDER_HEADER_SOURCES.has(source)) {
-    return NextResponse.json({ success: false, message: "Unsupported order source" }, { status: 400 });
-  }
-
+  const requestedSource = String(req.nextUrl.searchParams.get("source") || "current");
+  const source = ORDER_HEADER_SOURCES.has(requestedSource) ? requestedSource : "current";
   const requestedPage = positiveInt(req.nextUrl.searchParams.get("page"), 1, 100_000);
   const requestedLimit = positiveInt(req.nextUrl.searchParams.get("limit"), 10, 1000);
-  const actorId = String(req.nextUrl.searchParams.get("id") || "").slice(0, 120);
-  const actor = parseOrderActor({
-    role: String(req.nextUrl.searchParams.get("role") || "").toLowerCase(),
-    actorId,
-  });
-  if (!actor) {
-    return NextResponse.json({ success: false, message: "Missing order scope identity" }, { status: 401 });
-  }
 
   try {
-    const assignedDealerIds = actor.role === "staff"
-      ? await fetchStaffAssignedDealerIds(actor.actorId)
-      : [];
+    const authActor = await requireAuth();
+    const actor = orderActorFromAuth(authActor);
+    if (!actor) {
+      return NextResponse.json({ success: false, message: "Order scope is not available for this session." }, { status: 403 });
+    }
+    const assignedDealerIds = actor.role === "staff" ? await fetchStaffAssignedDealerIds(actor.actorId) : [];
     const loaded = await loadOrderHeaders({ source, actor, assignedDealerIds });
-    const cancelledOrderIds = await getOrderOverlayCollection()
-      .then((collection) => collection
-        .find({ status: "cancelled" }, { projection: { orderId: 1 } })
-        .limit(5000)
-        .toArray())
-      .then((rows) => new Set(rows.map((row) => String(row.orderId ?? "").trim()).filter(Boolean)))
-      .catch(() => new Set<string>());
-    const activeRows = loaded.rows.filter((row) => {
-      const orderId = String(row.order_id ?? row.orderId ?? "").trim();
-      return String(row.del_status ?? "").trim() !== "1" && (row.__source === "postgres" || !orderId || !cancelledOrderIds.has(orderId));
-    });
-    const amountMin = req.nextUrl.searchParams.has("amount_min")
-      ? Number(req.nextUrl.searchParams.get("amount_min"))
-      : null;
-    const amountMax = req.nextUrl.searchParams.has("amount_max")
-      ? Number(req.nextUrl.searchParams.get("amount_max"))
-      : null;
+    const activeRows = loaded.rows.filter((row) => String(row.del_status ?? "").trim() !== "1");
+    const amountMin = req.nextUrl.searchParams.has("amount_min") ? Number(req.nextUrl.searchParams.get("amount_min")) : null;
+    const amountMax = req.nextUrl.searchParams.has("amount_max") ? Number(req.nextUrl.searchParams.get("amount_max")) : null;
     const page = buildOrdersPage({
       rows: activeRows,
       page: requestedPage,
@@ -66,10 +45,10 @@ export async function GET(req: NextRequest) {
         dateTo: req.nextUrl.searchParams.get("date_to") ?? "",
         amountMin: amountMin !== null && Number.isFinite(amountMin) ? amountMin : null,
         amountMax: amountMax !== null && Number.isFinite(amountMax) ? amountMax : null,
-        targetDealerId: req.nextUrl.searchParams.get("target_dealer") ?? "",
+        targetDealerId: req.nextUrl.searchParams.get("dealer") ?? "",
       },
     });
-    const response = NextResponse.json({
+    const response = NextResponse.json(serializePrismaValue({
       success: true,
       status: true,
       data: page.items,
@@ -83,16 +62,17 @@ export async function GET(req: NextRequest) {
       truncated: loaded.truncated,
       totalIsExact: loaded.totalIsExact,
       staffOrderScopeVersion: STAFF_ORDER_SCOPE_VERSION,
-    });
+      diagnostics: process.env.NODE_ENV !== "production" ? loaded.diagnostics : undefined,
+    }));
     if (process.env.NODE_ENV !== "production") {
       const durationMs = Math.round(performance.now() - requestStartedAt);
-      response.headers.set(
-        "Server-Timing",
-        `orders-data;dur=${durationMs};desc="upstream=${loaded.diagnostics.upstreamCalls}, headers=${loaded.diagnostics.upstreamHeaders}"`,
-      );
+      response.headers.set("Server-Timing", `orders-data;dur=${durationMs}`);
     }
     return response;
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthenticated") {
+      return NextResponse.json({ success: false, message: "Authentication required." }, { status: 401 });
+    }
     console.error("[GET /api/orders-data]", error);
     return NextResponse.json({ success: false, message: "Unable to load orders" }, { status: 502 });
   }

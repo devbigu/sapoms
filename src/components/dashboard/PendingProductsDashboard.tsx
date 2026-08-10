@@ -189,11 +189,7 @@ function resolveDashboardActor(expectedRole: Role): DashboardActor | null {
 }
 
 function buildActorHeaders(actor: DashboardActor | null): HeadersInit {
-  return {
-    ...(actor?.id ? { "x-omsons-actor-id": actor.id } : {}),
-    ...(actor?.role ? { "x-omsons-actor-role": actor.role } : {}),
-    ...(actor?.roletype ? { "x-omsons-actor-roletype": actor.roletype } : {}),
-  };
+  return {};
 }
 
 function formatNumber(value: number) {
@@ -261,6 +257,7 @@ function PendingProductsDashboardInner({ role }: { role: Role }) {
   const [detailProductKey, setDetailProductKey] = useState("");
   const [detailPage, setDetailPage] = useState(1);
   const queryClient = useQueryClient();
+  const actorScopeKey = `${actor?.role ?? ""}:${actor?.id ?? ""}`;
 
   useEffect(() => {
     const refreshActor = () => setActor(resolveDashboardActor(role));
@@ -297,7 +294,7 @@ function PendingProductsDashboardInner({ role }: { role: Role }) {
     queryKey: [
       "pending-products",
       role,
-      actor?.id ?? "",
+      actorScopeKey,
       search,
       category,
       dealerId,
@@ -335,7 +332,7 @@ function PendingProductsDashboardInner({ role }: { role: Role }) {
     queryKey: [
       "pending-products-detail",
       role,
-      actor?.id ?? "",
+      actorScopeKey,
       detailProductKey,
       dealerId,
       assignedStaffId,

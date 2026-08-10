@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
-import { actorFromRequestHeaders, assertDealerScope, draftSnapshot, jsonValue, mapDraft, text } from "@/lib/postgresDiscountDrafts";
+import { assertDealerScope, draftSnapshot, jsonValue, mapDraft, text } from "@/lib/postgresDiscountDrafts";
 
 export const runtime = "nodejs";
 
-async function getActor(req: NextRequest) {
-  return await requireAuth().catch(() => actorFromRequestHeaders(req.headers));
-}
-
 function jsonError(error: any, fallback: string) {
-  const status = Number(error?.status) || (error?.message === "Forbidden" ? 403 : 500);
+  const status = Number(error?.status) || (error?.message === "Unauthenticated" ? 401 : error?.message === "Forbidden" ? 403 : 500);
   return NextResponse.json({ success: false, message: status >= 500 ? fallback : error.message }, { status });
 }
 
@@ -22,7 +18,7 @@ async function scopedDraft(id: string, dealerId: bigint) {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
     assertDealerScope(actor, dealerId);
     const draft = await scopedDraft(id, dealerId);
@@ -37,7 +33,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const body = await req.json();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(body.dealer_id || body.dealerId, 80));
     assertDealerScope(actor, dealerId);
@@ -63,7 +59,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const actor = await getActor(req);
+    const actor = await requireAuth();
     const dealerId = actor?.role === "DEALER" && actor.dealerId ? actor.dealerId : BigInt(text(req.nextUrl.searchParams.get("dealer_id"), 80));
     assertDealerScope(actor, dealerId);
     const existing = await scopedDraft(id, dealerId);

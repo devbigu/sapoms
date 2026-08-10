@@ -66,7 +66,7 @@ test("Admin remains global and Staff remains assigned-dealer scoped across all d
   );
 });
 
-test("Dealer callers use explicit identity and cache isolation without a hard-coded fallback", async () => {
+test("Dealer callers use session-scoped native order APIs without a hard-coded fallback", async () => {
   const sources = await Promise.all([
     fs.readFile(path.resolve("src/app/home/page.tsx"), "utf8"),
     fs.readFile(path.resolve("src/app/orders/page.tsx"), "utf8"),
@@ -75,28 +75,36 @@ test("Dealer callers use explicit identity and cache isolation without a hard-co
   ]);
   const combined = sources.join("\n");
   assert.doesNotMatch(combined, /return "225"|\?\? "225"/);
-  assert.match(combined, /role=dealer/);
+  assert.doesNotMatch(combined, /php-compat|orderpegination|orderhispegination|staffOrderrPagination|Orderstspegination|orderpeginationnew/);
+  assert.doesNotMatch(combined, /orders-data[^`\"']*source=|orders-data[^`\"']*role=|orders-data[^`\"']*id=/);
   assert.match(sources[1], /\["orders", actorRole, actorId/);
   assert.match(sources[2], /\["dealerSidebarSummary", "orders", "dealer", dealer\.Dealer_Id/);
   assert.match(sources[3], /actor\?\.role[\s\S]*actor\?\.id/);
 });
 
-test("shared Pending Orders page permits Dealer scope and keys count/list requests by Dealer identity", async () => {
+test("shared Pending Orders page permits Dealer scope and uses session-scoped pending list requests", async () => {
   const source = await fs.readFile(path.resolve("src/app/Pages/Ordermanagement/outstandingorders/page.tsx"), "utf8");
   assert.match(source, /new Set<Role>\(\['admin', 'staff', 'dealer', 'accountant'\]\)/);
   assert.match(source, /viewerRole, viewerId, page, search, statusFilter, acceptFilter/);
-  assert.match(source, /role=\$\{viewerRole\}&id=\$\{encodeURIComponent\(viewerId\)\}/);
+  assert.doesNotMatch(source, /role=\$\{viewerRole\}&id=\$\{encodeURIComponent\(viewerId\)\}/);
+  assert.doesNotMatch(source, /orders-data[^`\"']*source=|orders-data[^`\"']*role=|orders-data[^`\"']*id=/);
   assert.match(source, /const total\s+= typeof response\?\.total/);
 });
 
-test("Dealer dashboard search scopes headers before fetching item details and isolates item cache", async () => {
+test("Dealer dashboard search scopes orders through session identity before item summaries", async () => {
   const source = await fs.readFile(path.resolve("src/app/api/dashboard-search/route.ts"), "utf8");
-  const ownershipFilter = source.indexOf("const scoped = filterOrdersForActor({");
-  const detailBuild = source.indexOf("buildItemSummariesByOrderId(candidateOrders");
-  assert.ok(ownershipFilter >= 0);
-  assert.ok(detailBuild > ownershipFilter);
-  assert.match(source, /role: actor\.role[\s\S]*actorId: actor\.actorId[\s\S]*assignedDealerIds/);
-  assert.match(source, /all-orders-v1:\$\{actor\.role}:\$\{actor\.actorId/);
+  const authRead = source.indexOf("const actor = await requireAuth()");
+  const scopeBuild = source.indexOf("const orderScope = buildOrderScope(actor, assignedDealerIds)");
+  const orderFetch = source.indexOf("const ordersPromise = prisma.order.findMany({");
+  const detailBuild = source.indexOf("buildItemSummariesByOrderId(orders)");
+  assert.ok(authRead >= 0);
+  assert.ok(scopeBuild > authRead);
+  assert.ok(orderFetch > scopeBuild);
+  assert.ok(detailBuild > orderFetch);
+  assert.match(source, /actor\.role === "DEALER"[\s\S]*\{ dealerId: actor\.dealerId \}/);
+  assert.match(source, /where: \{ AND: \[orderScope, buildOrderSearchWhere\(query\)\] \}/);
+  assert.match(source, /include: orderInclude/);
+  assert.match(source, /items: \{ orderBy: \{ id: "asc" as const \} \}/);
 });
 
 test("direct details, invoice, and reorder all retain Dealer ownership gates", async () => {
@@ -111,8 +119,7 @@ test("direct details, invoice, and reorder all retain Dealer ownership gates", a
   assert.match(detailRoute, /actor,[\s\S]*assignedDealerIds/);
   assert.match(detailPage, /buildDispatchHeaders\(currentUser\)/);
   assert.match(invoice, /actor\.actorId === ownerId/);
-  assert.match(reorder, /"x-omsons-actor-role": "dealer"/);
-  assert.match(reorder, /"x-omsons-actor-id": String\(user\.Dealer_Id\)/);
+  assert.doesNotMatch(reorder, /x-omsons-actor-role|x-omsons-actor-id/);
   assert.match(reorderRoute, /actorId !== ownerId/);
   assert.ok(reorder.indexOf("req.dealerId") < reorder.indexOf("req.orderSnapshot.products"));
 });

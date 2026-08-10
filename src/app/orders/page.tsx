@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import moment from "moment";
 import { exportOrdersToSupabase, downloadPDFDirectly } from "@/lib/Exporttopdf";
 import { InvoiceModal } from "@/components/InvoiceModel";
-import { downloadOrderInvoice, uploadOrderInvoiceToSupabase, generateOrderInvoicePDF } from "@/lib/invoicegenerator";
+import { downloadOrderInvoice, uploadOrderInvoiceToSupabase, generateOrderInvoicePDF, listInvoices } from "@/lib/invoicegenerator";
 import { formatAdditionalDiscountBadge, withDisplayOrderAmounts } from "@/lib/orderAmounts";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import type { AppRole } from "@/lib/roleAccess";
@@ -49,15 +49,7 @@ type OrderSummaryOverride = {
 
 const ORDER_PAGE_SIZE_OPTIONS = [10, 20, 30, 40] as const;
 const DEFAULT_PAGE_SIZE = 10;
-const BACKEND = "/api/php-compat";
 
-type PhpExchangeLog = {
-  method: "GET" | "POST";
-  url: string;
-  request?: unknown;
-  response?: unknown;
-  error?: unknown;
-};
 
 function parseResponseText(text: string): unknown {
   if (!text.trim()) return "";
@@ -69,32 +61,7 @@ function parseResponseText(text: string): unknown {
   }
 }
 
-function readFormData(fd: FormData): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
 
-  fd.forEach((value, key) => {
-    result[key] = value instanceof File
-      ? {
-        fileName: value.name,
-        fileSize: value.size,
-        fileType: value.type,
-        lastModified: value.lastModified,
-      }
-      : value;
-  });
-
-  return result;
-}
-
-function logPhpExchange(label: string, details: PhpExchangeLog) {
-  console.groupCollapsed(`[PHP backend] ${label}`);
-  console.info("method", details.method);
-  console.info("url", details.url);
-  if (details.request !== undefined) console.info("sending to PHP", details.request);
-  if (details.response !== undefined) console.info("received from PHP", details.response);
-  if (details.error !== undefined) console.error("PHP request failed", details.error);
-  console.groupEnd();
-}
 
 function formatMoney(amount: number) {
   return `₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -109,34 +76,16 @@ function extractOrderNote(order: Order, overlayNote?: string) {
 }
 
 async function fetchOrders(page: number, pageSize: number, search: string, role: AppRole, actorId: string): Promise<ApiResponse> {
-  const source = role === "dealer"
-    ? "orderhispegination"
-    : role === "staff"
-      ? "staffOrderrPagination"
-      : "orderpegination";
-  const url = `/api/orders-data?source=${source}&role=${encodeURIComponent(role)}&page=${page}&limit=${pageSize}&search=${encodeURIComponent(search)}${actorId ? `&id=${encodeURIComponent(actorId)}` : ""}`;
-  const r = await fetch(url);
+  const url = `/api/orders-data?page=${page}&limit=${pageSize}&search=${encodeURIComponent(search)}`;
+  const r = await fetch(url, { cache: "no-store" });
 
   if (!r.ok) {
     const errorBody = parseResponseText(await r.text());
-    logPhpExchange("orderhispegination", {
-      method: "GET",
-      url,
-      request: { page, pageSize, search, role, actorId },
-      error: { status: r.status, statusText: r.statusText, response: errorBody },
-    });
+    console.error("[orders-data] request failed", { url, page, pageSize, search, role, actorId, errorBody });
     throw new Error("Failed");
   }
 
-  const rawData = await r.json();
-  logPhpExchange("orderhispegination", {
-    method: "GET",
-    url,
-    request: { page, pageSize, search, role, actorId },
-    response: rawData,
-  });
-
-  return rawData;
+  return r.json();
 }
 
 // Status mapping from reference: 0=In process, 1=Packing, 2=Dispatch, 3=Not in stock, 4=Successful
@@ -421,6 +370,9 @@ export default function OrderHistoryPage() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [orderNotes, setOrderNotes] = useState<Record<string, OrderNoteOverlay>>({});
   const [summaryOverrides, setSummaryOverrides] = useState<Record<string, OrderSummaryOverride>>({});
+  const [selectedBillingOrderIds, setSelectedBillingOrderIds] = useState<Set<string>>(new Set());
+  const [bulkBilling, setBulkBilling] = useState(false);
+  const [bulkBillingToast, setBulkBillingToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const actorRole = !auth.loading && auth.session.status === "authenticated"
     ? auth.session.role
@@ -444,6 +396,62 @@ export default function OrderHistoryPage() {
   });
 
   const orders = data?.data ?? [];
+  const selectedOrdersForBilling = orders
+    .map((order) => withDisplayOrderAmounts(order, summaryOverrides[order.order_id]))
+    .filter((order) => selectedBillingOrderIds.has(String(order.order_id ?? "")));
+  const selectedBillingTotal = selectedOrdersForBilling.reduce((sum, order) => sum + Number((order as any).netPayableAmount ?? 0), 0);
+  const selectedDealerIds = Array.from(new Set(selectedOrdersForBilling.map((order) => String((order as any).order_dealer ?? (order as any).Dealer_Id ?? "").trim()).filter(Boolean)));
+
+  const showBulkBillingToast = (type: "success" | "error", text: string) => {
+    setBulkBillingToast({ type, text });
+    window.setTimeout(() => setBulkBillingToast(null), 4000);
+  };
+
+  const isBillingEligible = (order: Order) => String((order as any).accept_order ?? "") === "1" || Number(order.orderdata_status ?? 0) >= 4 || String(order.mtstatus ?? "").toLowerCase().includes("completed");
+
+  const toggleBillingOrder = (order: Order, checked: boolean) => {
+    const oid = String((order as any).order_id ?? (order as any).orderId ?? "").trim();
+    if (!oid || !isBillingEligible(order)) return;
+    const orderDealerId = String((order as any).order_dealer ?? (order as any).Dealer_Id ?? "").trim();
+    if (checked && selectedDealerIds.length === 1 && orderDealerId && selectedDealerIds[0] !== orderDealerId) {
+      showBulkBillingToast("error", "Bulk billing supports one dealer at a time.");
+      return;
+    }
+    setSelectedBillingOrderIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(oid); else next.delete(oid);
+      return next;
+    });
+  };
+
+  const handleBulkBillingUpload = async () => {
+    if (selectedOrdersForBilling.length === 0 || bulkBilling) return;
+    if (selectedDealerIds.length > 1) {
+      showBulkBillingToast("error", "Select orders from one dealer only.");
+      return;
+    }
+    setBulkBilling(true);
+    try {
+      const existing = await listInvoices(selectedDealerIds[0] || dealerId || "", 500);
+      const existingNumbers = new Set(Array.isArray(existing.data) ? existing.data.map((invoice: any) => String(invoice.invoice_number ?? "")) : []);
+      const duplicates = selectedOrdersForBilling.filter((order) => existingNumbers.has(`OM/${year}/${order.order_id}`));
+      if (duplicates.length > 0) {
+        showBulkBillingToast("error", `Already billed: ${duplicates.map((order) => order.order_id).join(", ")}`);
+        return;
+      }
+      for (const order of selectedOrdersForBilling) {
+        const blob = await generateOrderInvoicePDF(order as any, { normalizedRole: actorRole, actorId });
+        const result = await uploadOrderInvoiceToSupabase(blob, order as any, { normalizedRole: actorRole, actorId });
+        if (!result.success) throw new Error(result.error || result.message || `Failed to bill ${order.order_id}`);
+      }
+      setSelectedBillingOrderIds(new Set());
+      showBulkBillingToast("success", `${selectedOrdersForBilling.length} invoice${selectedOrdersForBilling.length === 1 ? "" : "s"} saved.`);
+    } catch (error) {
+      showBulkBillingToast("error", error instanceof Error ? error.message : "Bulk billing failed");
+    } finally {
+      setBulkBilling(false);
+    }
+  };
   const ordersForExport = orders.map(order => withDisplayOrderAmounts(order, summaryOverrides[order.order_id]));
   const totalCount = data?.count ?? 0;
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -483,22 +491,10 @@ export default function OrderHistoryPage() {
 
   const handleDelete = async (reason: string) => {
     if (!deleteOrderId) return;
-    const fd = new FormData();
-    fd.append("id", deleteOrderId);
-    fd.append("reason", reason);
-    fd.append("field", "order_id");
-    fd.append("tbl", "order_tbl");
-    const targetApiUrl = `${BACKEND}/deletewithreason`;
-    const phpPayload = readFormData(fd);
-    const response = await fetch(targetApiUrl, { method: "POST", body: fd });
-    const responseBody = parseResponseText(await response.text());
-
-    logPhpExchange("deletewithreason", {
+    const response = await fetch(`/api/order-overlays/${encodeURIComponent(deleteOrderId)}`, {
       method: "POST",
-      url: targetApiUrl,
-      request: phpPayload,
-      response: responseBody,
-      error: response.ok ? undefined : { status: response.status, statusText: response.statusText },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "cancelled", reason }),
     });
 
     if (!response.ok) throw new Error("Failed to delete order");
@@ -583,6 +579,22 @@ export default function OrderHistoryPage() {
         </div>
 
         <div className="px-8 py-6 max-w-[1440px] mx-auto">
+          {selectedOrdersForBilling.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+              <div className="text-[13px] font-semibold text-blue-900">
+                Selected Orders: {selectedOrdersForBilling.length}
+                <span className="ml-3 font-mono">Selected Total: {formatMoney(selectedBillingTotal)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleBulkBillingUpload}
+                disabled={bulkBilling}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              >
+                {bulkBilling ? "Saving..." : `Save ${selectedOrdersForBilling.length} Invoice${selectedOrdersForBilling.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          )}
           <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
 
             {isError && (
@@ -599,7 +611,7 @@ export default function OrderHistoryPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      {["#", "Order No.", "Date", "Gross", "Discount", "Net Payable", "Units", "Status", "Outstanding", "Actions"].map(h => (
+                      {["Bill", "#", "Order No.", "Date", "Gross", "Discount", "Net Payable", "Units", "Status", "Outstanding", "Actions"].map(h => (
                         <th key={h} className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider text-gray-600 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -609,7 +621,7 @@ export default function OrderHistoryPage() {
                       ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
                       : orders.length === 0
                         ? (
-                          <tr><td colSpan={10}>
+                          <tr><td colSpan={11}>
                             <div className="flex flex-col items-center justify-center py-16 gap-3">
                               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.2" strokeLinecap="round">
                                 <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
@@ -630,6 +642,16 @@ export default function OrderHistoryPage() {
 
                           return (
                             <tr key={oid || idx} className={`hover:bg-blue-50/30 transition-colors ${isDeleted ? "opacity-60" : ""}`}>
+                              <td className="px-4 py-3.5">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedBillingOrderIds.has(String(oid))}
+                                  disabled={isDeleted || !isBillingEligible(order) || bulkBilling}
+                                  onChange={(event) => toggleBillingOrder(order, event.target.checked)}
+                                  aria-label={`Select order ${oid} for billing`}
+                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 disabled:opacity-30"
+                                />
+                              </td>
                               <td className="px-4 py-3.5 text-gray-700 font-medium">
                                 {String((page - 1) * pageSize + idx + 1).padStart(2, "0")}
                               </td>
@@ -755,6 +777,13 @@ export default function OrderHistoryPage() {
         </div>
       </div>
 
+      {bulkBillingToast && (
+        <div className={`fixed bottom-4 left-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-medium shadow-lg border ${
+          bulkBillingToast.type === "success" ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-red-50 text-red-800 border-red-200"
+        }`}>
+          {bulkBillingToast.text}
+        </div>
+      )}
       {deleteOrderId && (
         <DeleteModal orderId={deleteOrderId} onConfirm={handleDelete} onClose={() => setDeleteOrderId(null)} />
       )}

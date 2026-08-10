@@ -195,11 +195,7 @@ export default function DashboardSmartSearch({
       fetch(`/api/dashboard-search?q=${encodeURIComponent(queryInfo.rawQuery)}`, {
         cache: "no-store",
         signal: controller.signal,
-        headers: {
-          "x-omsons-actor-role": role,
-          ...(actorId ? { "x-omsons-actor-id": actorId } : {}),
-          ...(roletype ? { "x-omsons-actor-roletype": roletype } : {}),
-        },
+
       })
         .then(async (response) => {
           const payload = await response.json().catch(() => null);
