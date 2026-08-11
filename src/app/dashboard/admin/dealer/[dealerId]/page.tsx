@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
 type DealerStatus = "active" | "inactive" | "suspended"
 
 function normalizeDealerStatus(value: unknown): DealerStatus {
@@ -101,6 +102,7 @@ export default function EditDealerPage() {
   const [dealerid,       setDealerid]       = useState("")
   const [status,         setStatus]         = useState<DealerStatus>("active")
   const [statusSaving,   setStatusSaving]   = useState(false)
+  const [showPassword,   setShowPassword]   = useState(false)
   const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([])
   const [existingStaffNames, setExistingStaffNames] = useState("")
 
@@ -325,7 +327,30 @@ export default function EditDealerPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <InputField label="Dealer Code" value={dealercode} onChange={setDealercode} placeholder="Unique dealer code" />
                 <InputField label="Username"    value={username}   onChange={setUsername}   placeholder="Login username" />
-                <InputField label="Password"    value={password}   onChange={setPassword}   type="password" placeholder="Password reset is handled separately" required={false} />
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="Password reset is handled separately"
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(value => !value)}
+                      className="absolute inset-y-0 right-2 flex items-center rounded-md px-2 text-gray-400 transition hover:text-indigo-600"
+                      aria-label={showPassword ? "Hide dealer password" : "Show dealer password"}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400">Password reset is handled separately</p>
+                </div>
                 <InputField label="GST No."     value={gst}        onChange={setGst}        placeholder="15-character GST number" />
               </div>
             </div>

@@ -36,7 +36,7 @@ type Dealer = {
   Dealer_Address: string
   Dealer_Pincode: string
   Dealer_Username: string
-  Dealer_Password: string
+  Dealer_Password?: string
   Dealer_Dealercode: string
   Dealer_Notes: string
   Dealer_Image: string
@@ -481,6 +481,8 @@ export default function DealerListPage() {
   }
 
   const canManageDealers = role === "admin" || role === "staff"
+  const canViewDealerPasswords = role === "admin"
+  const tableColumnCount = canViewDealerPasswords ? 8 : 7
   const startIndex = role === "staff" ? 1 : (page - 1) * ITEMS_PER_PAGE + 1
   const endIndex   = role === "staff" ? data.length : Math.min(page * ITEMS_PER_PAGE, total)
 
@@ -598,7 +600,9 @@ export default function DealerListPage() {
                   <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">City</th>
                   <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Email</th>
                   <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Phone</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Password</th>
+                  {canViewDealerPasswords && (
+                    <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Password</th>
+                  )}
                   <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Status</th>
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Actions</th>
                 </tr>
@@ -608,7 +612,7 @@ export default function DealerListPage() {
                 {/* Shimmer */}
                 {isLoading && Array.from({ length: ITEMS_PER_PAGE }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 8 }).map((_, j) => (
+                    {Array.from({ length: tableColumnCount }).map((_, j) => (
                       <td key={j} className="px-4 py-4">
                         <div className={`${SHIMMER} h-4 w-full`} />
                       </td>
@@ -619,7 +623,7 @@ export default function DealerListPage() {
                 {/* Empty */}
                 {!isLoading && data.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-400 text-sm">
+                    <td colSpan={tableColumnCount} className="px-6 py-12 text-center text-gray-400 text-sm">
                       No dealers found
                     </td>
                   </tr>
@@ -656,27 +660,29 @@ export default function DealerListPage() {
                       <td className="px-4 py-4 text-gray-500 text-xs">{dealer.Dealer_Email || "-"}</td>
                       <td className="px-4 py-4 text-gray-600 text-xs">{dealer.Dealer_Number || "-"}</td>
 
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-mono text-xs ${passwordVisible ? "text-gray-700 tracking-normal" : "text-gray-400 tracking-widest"}`}>
-                            {passwordVisible ? dealer.Dealer_Password || "-" : "********"}
-                          </span>
-                          {role === "admin" && dealer.Dealer_Password && (
-                            <button
-                              type="button"
-                              onClick={() => togglePassword(dealer.Dealer_Id)}
-                              className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
-                              aria-label={passwordVisible ? "Hide dealer password" : "Show dealer password"}
-                              title={passwordVisible ? "Hide password" : "Show password"}
-                            >
-                              {passwordVisible
-                                ? <EyeOff className="w-3.5 h-3.5" />
-                                : <Eye className="w-3.5 h-3.5" />
-                              }
-                            </button>
-                          )}
-                        </div>
-                      </td>
+                      {canViewDealerPasswords && (
+                        <td className="px-4 py-4">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-mono text-xs ${passwordVisible ? "text-gray-700 tracking-normal" : "text-gray-400 tracking-widest"}`}>
+                              {passwordVisible ? dealer.Dealer_Password || "-" : "********"}
+                            </span>
+                            {dealer.Dealer_Password && (
+                              <button
+                                type="button"
+                                onClick={() => togglePassword(dealer.Dealer_Id)}
+                                className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                                aria-label={passwordVisible ? "Hide dealer password" : "Show dealer password"}
+                                title={passwordVisible ? "Hide password" : "Show password"}
+                              >
+                                {passwordVisible
+                                  ? <EyeOff className="w-3.5 h-3.5" />
+                                  : <Eye className="w-3.5 h-3.5" />
+                                }
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
 
                       <td className="px-4 py-4">
                         <span className={`${badge.bg} ${badge.text} text-xs font-medium px-2.5 py-1 rounded-full`}>
@@ -732,7 +738,7 @@ export default function DealerListPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
             <span className="text-xs text-gray-400">
-              {data.length > 0 ? `Showing ${startIndex}–${endIndex} of ${total}` : "No results"}
+              {data.length > 0 ? `Showing ${startIndex}-${endIndex} of ${total}` : "No results"}
             </span>
             <div className="flex items-center gap-1">
               <button

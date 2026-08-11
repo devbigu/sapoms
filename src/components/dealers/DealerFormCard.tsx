@@ -107,6 +107,7 @@ export default function DealerFormCard({
   const [inlineError, setInlineError] = useState("");
   const [formData, setFormData] = useState<DealerFormValues>(() => toFormValues(initialSnapshot));
   const [selectedStaff, setSelectedStaff] = useState<string[]>(() => initialSnapshot?.assignedStaffIds ?? []);
+  const [staffDropdownOpen, setStaffDropdownOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -124,7 +125,11 @@ export default function DealerFormCard({
         if (!active) return;
 
         if (Array.isArray(json?.data)) {
-          setStaffList(json.data);
+          setStaffList(json.data.filter((staff: StaffMember & { role?: string; status?: string }) => {
+            const role = String(staff.role ?? "").toUpperCase();
+            const status = String(staff.status ?? "").toUpperCase();
+            return role === "STAFF" && (!status || status === "ACTIVE");
+          }));
           return;
         }
 
@@ -158,9 +163,32 @@ export default function DealerFormCard({
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleStaffChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+  const selectedStaffDetails = useMemo(() => {
+    const staffById = new Map(staffList.map((staff) => [String(staff.staff_id), staff]));
+    return selectedStaff
+      .map((staffId) => staffById.get(String(staffId)) ?? {
+        staff_id: String(staffId),
+        staff_name: initialSnapshot?.staffNames
+          ?.split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .join(", ") || `Staff #${staffId}`,
+        staff_roletype: "",
+      })
+      .filter((staff) => Boolean(staff.staff_id));
+  }, [initialSnapshot?.staffNames, selectedStaff, staffList]);
+
+  const handleStaffToggle = (staffId: string) => {
     setInlineError("");
-    setSelectedStaff(Array.from(event.target.selectedOptions, (option) => option.value));
+    setSelectedStaff((prev) => {
+      if (prev.includes(staffId)) return prev.filter((id) => id !== staffId);
+      return [...prev, staffId];
+    });
+  };
+
+  const removeSelectedStaff = (staffId: string) => {
+    setInlineError("");
+    setSelectedStaff((prev) => prev.filter((id) => id !== staffId));
   };
 
   const resetForm = () => {
@@ -265,21 +293,77 @@ export default function DealerFormCard({
           </Section>
 
           <Section title="Staff assignment">
-            <Field label="Assign staff" required hint="Hold Ctrl / Cmd to select multiple">
-              <select
-                multiple
-                required
-                disabled={staffLoading}
-                value={selectedStaff}
-                onChange={handleStaffChange}
-                className="h-28 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-50"
-              >
-                {staffList.map((staff) => (
-                  <option key={staff.staff_id} value={staff.staff_id}>
-                    {staff.staff_name} {String(staff.staff_roletype) === "1" ? "(Exe)" : "(Fie-Exe)"}
-                  </option>
-                ))}
-              </select>
+            <Field label="Assign staff" required>
+              <div className="relative">
+                <button
+                  type="button"
+                  disabled={staffLoading}
+                  onClick={() => setStaffDropdownOpen((open) => !open)}
+                  className="flex min-h-11 w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-800 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <span>
+                    {staffLoading
+                      ? "Loading staff..."
+                      : selectedStaff.length
+                        ? `${selectedStaff.length} staff selected`
+                        : "Select assigned staff"}
+                  </span>
+                  <span className="text-xs text-gray-400">{staffDropdownOpen ? "Close" : "Open"}</span>
+                </button>
+                {staffDropdownOpen ? (
+                  <div className="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-2 shadow-lg">
+                    {staffList.length ? staffList.map((staff) => {
+                      const staffId = String(staff.staff_id);
+                      const checked = selectedStaff.includes(staffId);
+                      return (
+                        <label
+                          key={staffId}
+                          className="flex cursor-pointer items-start gap-3 px-3 py-2 text-sm text-gray-800 hover:bg-gray-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleStaffToggle(staffId)}
+                            className="mt-0.5 !h-4 !w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="min-w-0 flex-1 leading-5">
+                            <span className="block truncate font-medium">{staff.staff_name || `Staff #${staffId}`}</span>
+                            <span className="block text-xs text-gray-500">
+                              {String(staff.staff_roletype) === "1" ? "Executive" : "Field Executive"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    }) : (
+                      <div className="px-3 py-2 text-sm text-gray-500">No active staff found.</div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-3 min-h-8 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                {selectedStaffDetails.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedStaffDetails.map((staff) => (
+                      <span
+                        key={staff.staff_id}
+                        className="inline-flex items-center gap-2 rounded-md border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700"
+                      >
+                        {staff.staff_name || `Staff #${staff.staff_id}`}
+                        <button
+                          type="button"
+                          onClick={() => removeSelectedStaff(String(staff.staff_id))}
+                          className="text-indigo-400 hover:text-indigo-700"
+                          aria-label={`Remove ${staff.staff_name || `Staff #${staff.staff_id}`}`}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">No staff selected.</p>
+                )}
+              </div>
             </Field>
           </Section>
 

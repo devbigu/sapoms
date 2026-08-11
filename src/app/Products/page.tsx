@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { SIDEBAR_CATEGORIES, compactCategoryList, matchesCategory } from '@/lib/categories';
+import { SIDEBAR_CATEGORIES, compactCategoryList } from '@/lib/categories';
 import {
   getCatalogueProductDescriptor,
   groupProductsBySection,
@@ -47,7 +47,55 @@ type Product = {
 // ─────────────────────────────────────────────────────────────
 
 function matchesSidebarCat(product: Product, label: string): boolean {
-  return matchesCategory(compactCategoryList([product.category, ...(product.categories ?? [])]), label);
+  return matchesSelectedCategory(product, label);
+}
+
+function normalizeFilterText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getProductCategoryValues(product: Product): string[] {
+  const rawCategories = compactCategoryList([product.category, ...(product.categories ?? [])]);
+  const values = new Set<string>();
+
+  for (const category of rawCategories) {
+    values.add(category);
+    for (const part of category.split(">").map((item) => item.trim()).filter(Boolean)) {
+      values.add(part);
+    }
+  }
+
+  return Array.from(values);
+}
+
+function getUrlCategory(searchParams: ReturnType<typeof useSearchParams>): string {
+  return (searchParams.get("cat") || searchParams.get("category") || "").trim();
+}
+
+function categoryValueMatchesFilter(categoryValue: string, filter: string): boolean {
+  const normalizedValue = normalizeFilterText(categoryValue);
+  const normalizedFilter = normalizeFilterText(filter);
+  if (!normalizedValue || !normalizedFilter) return false;
+
+  return (
+    normalizedValue === normalizedFilter ||
+    normalizedValue.includes(normalizedFilter) ||
+    normalizedFilter.includes(normalizedValue)
+  );
+}
+
+function matchesSelectedCategory(product: Product, label: string): boolean {
+  const categoryValues = getProductCategoryValues(product);
+  if (categoryValues.some((category) => categoryValueMatchesFilter(category, label))) return true;
+
+  return (SIDEBAR_CATEGORIES[label] ?? []).some((alias) =>
+    categoryValues.some((category) => categoryValueMatchesFilter(category, alias)),
+  );
 }
 
 function countForSidebarCat(products: Product[], label: string): number {
@@ -240,7 +288,7 @@ function CategoryRow({ label, count, checked, onChange }: { label: string; count
 function ProductsContent() {
   const searchParams = useSearchParams();
   const q = searchParams.get("q") ?? "";
-  const category = searchParams.get("cat") ?? "";
+  const category = getUrlCategory(searchParams);
 
   const [allData, setAllData]             = useState<Product[]>([]);
   const [loading, setLoading]             = useState(true);
@@ -248,7 +296,7 @@ function ProductsContent() {
   const [sortBy, setSortBy]               = useState("default");
   const [searchQuery, setSearchQuery]     = useState(q);
   const [selectedCats, setSelectedCats]   = useState<string[]>(() => {
-    return category && SIDEBAR_CATEGORIES[category] ? [category] : [];
+    return category ? [category] : [];
   });
   const [inStockOnly, setInStockOnly]     = useState(false);
   const [catExpanded, setCatExpanded]     = useState(true);
@@ -257,7 +305,7 @@ function ProductsContent() {
     const timeoutId = window.setTimeout(() => {
       setSearchQuery(q);
       setCurrentPage(1);
-      setSelectedCats(category && SIDEBAR_CATEGORIES[category] ? [category] : []);
+      setSelectedCats(category ? [category] : []);
     }, 0);
     return () => window.clearTimeout(timeoutId);
   }, [q, category]);
@@ -273,7 +321,7 @@ function ProductsContent() {
     if (searchQuery.trim()) {
       d = d.filter(p => matchesCatalogueQuery(p, searchQuery));
     }
-    if (selectedCats.length > 0) d = d.filter(p => selectedCats.some(cat => matchesSidebarCat(p, cat)));
+    if (selectedCats.length > 0) d = d.filter(p => selectedCats.some(cat => matchesSelectedCategory(p, cat)));
     if (inStockOnly) d = d.filter(p => p.variants?.some(v => v.inStock) ?? false);
     if (sortBy === "price_asc")  d.sort((a, b) => (getLowestPrice(a).regular ?? Infinity) - (getLowestPrice(b).regular ?? Infinity));
     if (sortBy === "price_desc") d.sort((a, b) => (getLowestPrice(b).regular ?? 0) - (getLowestPrice(a).regular ?? 0));
