@@ -64,7 +64,7 @@ const createSchema = z.preprocess((value) => aliases((value && typeof value === 
   email: z.preprocess((value) => String(value ?? "").trim().toLowerCase(), z.string().email()),
   password: z.string().min(10).max(200),
   phone: text(30),
-  dealerCode: requiredText(50),
+  dealerCode: text(50),
   address: text(500),
   city: text(100),
   state: text(100),

@@ -406,7 +406,7 @@ export default function StaffListPage() {
                               <MoreVertical className="w-4 h-4" />
                             </button>
                             {openMenu === staff.staff_id && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1">
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
                                 <Link href={getStaffEditRoute(staff.staff_id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Edit</Link>
                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(staff.staff_id); setOpenMenu(null) }} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">Delete</button>
                               </div>

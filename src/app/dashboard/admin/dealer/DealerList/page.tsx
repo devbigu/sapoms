@@ -702,7 +702,7 @@ export default function DealerListPage() {
                               <MoreVertical className="w-4 h-4" />
                             </button>
                             {openMenu === dealer.Dealer_Id && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={dealer.Dealer_Id} className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1">
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={dealer.Dealer_Id} className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
                                 <Link href={getDealerViewRoute(dealer.Dealer_Id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">View</Link>
                                 {role === 'staff' && <Link href={getStaffDealerRoute(dealer.Dealer_Id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">View (staff)</Link>}
                                 {canManageDealers && (

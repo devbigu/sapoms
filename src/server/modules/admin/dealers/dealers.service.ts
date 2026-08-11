@@ -1,5 +1,6 @@
 import { AdminRouteError } from "@/server/admin/admin-errors";
 import { adminDealerRepository } from "./dealers.repository";
+import { generatePostgresDealerCode } from "@/server/modules/dealers/dealer-code.service";
 import { mapAdminDealer, mapAdminDealerStaffAssignment } from "./dealers.mapper";
 import type { AdminDealerListInput, AuthActor, CreateAdminDealerInput, UpdateAdminDealerInput, UpdateDealerStatusInput } from "./dealers.types";
 
@@ -14,8 +15,17 @@ export async function getAdminDealer(dealerId: bigint) {
   return mapAdminDealer(record);
 }
 
+async function resolveAdminDealerCode(dealerCode?: string) {
+  const generated = await generatePostgresDealerCode(dealerCode?.trim());
+  if (!generated) {
+    throw new AdminRouteError("CONFLICT", "All 4-digit dealer codes are already in use", { code: "DEALER_CODE_EXHAUSTED" });
+  }
+  return generated;
+}
+
 export async function createAdminDealer(input: CreateAdminDealerInput, actor: AuthActor, tx?: Parameters<typeof adminDealerRepository.create>[2]) {
-  return mapAdminDealer(await adminDealerRepository.create(input, actor, tx));
+  const dealerCode = await resolveAdminDealerCode(input.dealerCode);
+  return mapAdminDealer(await adminDealerRepository.create({ ...input, dealerCode }, actor, tx));
 }
 
 export async function updateAdminDealer(dealerId: bigint, input: UpdateAdminDealerInput, actor: AuthActor) {

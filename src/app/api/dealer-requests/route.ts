@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { ensurePostgresDealerRequestIndexes, getPostgresDealerRequestCollection, isPostgresDealerRequestDependencyError } from "@/lib/postgresDealerRequests";
 import { findDealerCodeReservationConflict } from "@/server/modules/dealers/dealer-code.service";
+import { generatePostgresDealerCode } from "@/server/modules/dealers/dealer-code.service";
 import {
   buildDealerRequestAccessQuery,
   buildDealerRequestCreateDocument,
@@ -109,7 +110,12 @@ export async function POST(request: NextRequest) {
       return buildResponseError("Only staff can submit dealer approval requests", 403);
     }
 
-    const snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? body);
+    let snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? body);
+    const dealerCode = await generatePostgresDealerCode(snapshot.dealerCode);
+    if (!dealerCode) {
+      return buildResponseError("All 4-digit dealer codes are already in use", 409);
+    }
+    snapshot = { ...snapshot, dealerCode };
     const validationError = validateDealerFormSnapshot(snapshot);
     if (validationError) {
       return buildResponseError(validationError, 400);

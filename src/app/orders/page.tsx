@@ -178,7 +178,7 @@ function InvoiceRowButton({ order, role, actorId }: { order: Order; role: AppRol
       {showMenu && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-          <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-gray-200 z-40 overflow-hidden">
+          <div className="absolute right-0 mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden">
             <button
               onClick={handleDownload}
               className="w-full text-left px-4 py-3 text-[12px] text-gray-700 hover:bg-blue-50 flex items-center gap-3 border-b border-gray-100 transition-colors"
@@ -273,7 +273,7 @@ function ExportButton({ orders, dealerName, dealerId, isLoading = false }: Expor
           )}
         </button>
         {showMenu && (
-          <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-40 overflow-hidden">
+          <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
             <button onClick={() => handleExport(false)} disabled={isExporting} className="w-full text-left px-4 py-3 text-[13px] text-gray-700 hover:bg-blue-50 disabled:opacity-50 border-b border-gray-100 transition-colors flex items-center gap-3">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               <div><p className="font-medium">Download to Device</p><p className="text-[11px] text-gray-500 mt-0.5">Save PDF locally</p></div>

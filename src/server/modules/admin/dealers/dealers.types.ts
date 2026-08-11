@@ -43,7 +43,7 @@ export type CreateAdminDealerInput = {
   email: string;
   password: string;
   phone?: string;
-  dealerCode: string;
+  dealerCode?: string;
   address?: string;
   city?: string;
   state?: string;
