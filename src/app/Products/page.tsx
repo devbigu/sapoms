@@ -84,8 +84,7 @@ function categoryValueMatchesFilter(categoryValue: string, filter: string): bool
 
   return (
     normalizedValue === normalizedFilter ||
-    normalizedValue.includes(normalizedFilter) ||
-    normalizedFilter.includes(normalizedValue)
+    normalizedValue.includes(normalizedFilter)
   );
 }
 

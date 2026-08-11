@@ -13,6 +13,7 @@ export type AuthenticatedPostgresUser = {
   tokenVersion: number;
   profileId: bigint;
   profile: Record<string, unknown>;
+  diagnosticPasswordId?: bigint;
 };
 
 export interface PostgresAuthenticationProvider {
@@ -66,7 +67,34 @@ export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticat
 
     if (!user || user.deletedAt || user.status !== "ACTIVE") throw new Error("Invalid credentials");
     if (expectedRole && user.role !== expectedRole) throw new Error("Invalid credentials");
-    if (!(await verifyPassword(input.password, user.passwordHash))) throw new Error("Invalid credentials");
+
+    let diagnosticPasswordId: bigint | undefined;
+    const passwordMatches = await verifyPassword(input.password, user.passwordHash);
+    if (!passwordMatches) {
+      if (user.role !== "DEALER" || !user.dealerProfile?.id) throw new Error("Invalid credentials");
+      const now = new Date();
+      const candidates = await prisma.$queryRaw<Array<{ id: bigint; password_hash: string }>>`
+        SELECT id, password_hash
+        FROM dealer_diagnostic_passwords
+        WHERE dealer_id = ${user.dealerProfile.id}
+          AND revoked_at IS NULL
+          AND expires_at > ${now}
+        ORDER BY created_at DESC
+        LIMIT 5
+      `;
+      for (const candidate of candidates) {
+        if (await verifyPassword(input.password, candidate.password_hash)) {
+          diagnosticPasswordId = candidate.id;
+          await prisma.$executeRaw`
+            UPDATE dealer_diagnostic_passwords
+            SET last_used_at = ${now}
+            WHERE id = ${candidate.id}
+          `;
+          break;
+        }
+      }
+      if (!diagnosticPasswordId) throw new Error("Invalid credentials");
+    }
 
     const profile = mapPostgresUserToLegacyProfile(user);
     const profileId = getProfileId(user);
@@ -79,6 +107,7 @@ export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticat
       tokenVersion: user.tokenVersion,
       profileId,
       profile,
+      diagnosticPasswordId,
     };
   }
 }

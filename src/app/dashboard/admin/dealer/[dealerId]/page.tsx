@@ -22,6 +22,15 @@ type StaffOption = {
   staff_roletype: string
 }
 
+type DiagnosticPassword = {
+  id: string
+  expiresAt: string
+  revokedAt: string | null
+  lastUsedAt: string | null
+  createdAt: string
+  createdBy: string
+}
+
 const ADMIN_DEALERS_URL = "/api/admin/dealers"
 const ADMIN_STAFF_URL = "/api/admin/staff"
 const DEALER_LIST_ROUTE = "/dashboard/admin/dealer/DealerList"
@@ -91,7 +100,7 @@ export default function EditDealerPage() {
   const [address,        setAddress]        = useState("")
   const [pincode,        setPincode]        = useState("")
   const [username,       setUsername]       = useState("")
-  const [password,       setPassword]       = useState("")
+  const [diagnosticPassword, setDiagnosticPassword] = useState("")
   const [dealercode,     setDealercode]     = useState("")
   const [gst,            setGst]            = useState("")
   const [discount,       setDiscount]       = useState("")
@@ -102,7 +111,11 @@ export default function EditDealerPage() {
   const [dealerid,       setDealerid]       = useState("")
   const [status,         setStatus]         = useState<DealerStatus>("active")
   const [statusSaving,   setStatusSaving]   = useState(false)
-  const [showPassword,   setShowPassword]   = useState(false)
+  const [showDiagnosticPassword, setShowDiagnosticPassword] = useState(false)
+  const [diagnosticExpiryHours, setDiagnosticExpiryHours] = useState("24")
+  const [diagnosticSaving, setDiagnosticSaving] = useState(false)
+  const [diagnosticRevoking, setDiagnosticRevoking] = useState(false)
+  const [activeDiagnosticPassword, setActiveDiagnosticPassword] = useState<DiagnosticPassword | null>(null)
   const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([])
   const [existingStaffNames, setExistingStaffNames] = useState("")
 
@@ -133,7 +146,6 @@ export default function EditDealerPage() {
           setAddress(d.Dealer_Address   || "")
           setUsername(d.Dealer_Username || "")
           setDiscount(d.discount        || "")
-          setPassword(d.Dealer_Password || "")
           setDealercode(d.Dealer_Dealercode || "")
           setGst(d.gst                  || "")
           setCreditdays(d.creditdays    || "")
@@ -154,6 +166,16 @@ export default function EditDealerPage() {
       }
     }
 
+    const loadDiagnosticPassword = async () => {
+      try {
+        const res = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(dealerId)}/diagnostic-password`, { credentials: "include" })
+        const json = await parseJsonResponse<any>(res)
+        if (active) setActiveDiagnosticPassword(json.data || null)
+      } catch {
+        if (active) setActiveDiagnosticPassword(null)
+      }
+    }
+
     const loadStaff = async () => {
       try {
         const res = await fetch(`${ADMIN_STAFF_URL}?page=1&limit=100`, { credentials: "include" })
@@ -165,6 +187,7 @@ export default function EditDealerPage() {
     }
 
     loadDealer()
+    loadDiagnosticPassword()
     loadStaff()
     return () => { active = false }
   }, [dealerId])
@@ -179,6 +202,62 @@ export default function EditDealerPage() {
       .map(id => staffOptions.find(s => s.staff_id === id)?.staff_name ?? "")
       .filter(Boolean)
       .join(",") || existingStaffNames
+
+  const handleDiagnosticPasswordSave = async () => {
+    const resolvedDealerId = dealerid || dealerId
+    if (!resolvedDealerId) {
+      setToastMsg({ text: "Missing dealer id", type: "error" })
+      return
+    }
+    if (diagnosticPassword.length < 5) {
+      setToastMsg({ text: "Diagnostic password must be at least 5 characters", type: "error" })
+      return
+    }
+
+    setDiagnosticSaving(true)
+    try {
+      const response = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}/diagnostic-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password: diagnosticPassword, expiryHours: diagnosticExpiryHours }),
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.success) throw new Error(payload.message ?? "Failed to save diagnostic password")
+      setActiveDiagnosticPassword(payload.data || null)
+      setToastMsg({ text: "Diagnostic password saved", type: "success" })
+    } catch (error) {
+      setToastMsg({ text: error instanceof Error ? error.message : "Failed to save diagnostic password", type: "error" })
+    } finally {
+      setDiagnosticSaving(false)
+    }
+  }
+
+  const handleDiagnosticPasswordRevoke = async () => {
+    const resolvedDealerId = dealerid || dealerId
+    if (!resolvedDealerId) return
+    setDiagnosticRevoking(true)
+    try {
+      const response = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}/diagnostic-password`, {
+        method: "DELETE",
+        credentials: "include",
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.success) throw new Error(payload.message ?? "Failed to revoke diagnostic password")
+      setActiveDiagnosticPassword(null)
+      setToastMsg({ text: "Diagnostic password revoked", type: "success" })
+    } catch (error) {
+      setToastMsg({ text: error instanceof Error ? error.message : "Failed to revoke diagnostic password", type: "error" })
+    } finally {
+      setDiagnosticRevoking(false)
+    }
+  }
+
+  const copyDiagnosticPassword = async () => {
+    if (!diagnosticPassword) return
+    await navigator.clipboard?.writeText(diagnosticPassword)
+    setToastMsg({ text: "Diagnostic password copied", type: "success" })
+  }
 
   const handleStatusSave = async () => {
     const resolvedDealerId = dealerid || dealerId
@@ -329,27 +408,54 @@ export default function EditDealerPage() {
                 <InputField label="Username"    value={username}   onChange={setUsername}   placeholder="Login username" />
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                    Password
+                    Diagnostic Password
                   </label>
                   <div className="relative">
                     <input
-                      type={showPassword ? "text" : "password"}
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder="Password reset is handled separately"
+                      type={showDiagnosticPassword ? "text" : "password"}
+                      value={diagnosticPassword}
+                      onChange={e => setDiagnosticPassword(e.target.value)}
+                      placeholder="Temporary testing password"
                       className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(value => !value)}
+                      onClick={() => setShowDiagnosticPassword(value => !value)}
                       className="absolute inset-y-0 right-2 flex items-center rounded-md px-2 text-gray-400 transition hover:text-indigo-600"
-                      aria-label={showPassword ? "Hide dealer password" : "Show dealer password"}
-                      title={showPassword ? "Hide password" : "Show password"}
+                      aria-label={showDiagnosticPassword ? "Hide diagnostic password" : "Show diagnostic password"}
+                      title={showDiagnosticPassword ? "Hide password" : "Show password"}
                     >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {showDiagnosticPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  <p className="text-[11px] text-gray-400">Password reset is handled separately</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="2160"
+                      value={diagnosticExpiryHours}
+                      onChange={e => setDiagnosticExpiryHours(e.target.value)}
+                      aria-label="Diagnostic password expiry in hours"
+                      className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button type="button" onClick={copyDiagnosticPassword} disabled={!diagnosticPassword} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50">
+                      Copy
+                    </button>
+                    <button type="button" onClick={handleDiagnosticPasswordSave} disabled={diagnosticSaving || diagnosticPassword.length < 5} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+                      {diagnosticSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                  {activeDiagnosticPassword ? (
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+                      Active until {new Date(activeDiagnosticPassword.expiresAt).toLocaleString()}.
+                      {activeDiagnosticPassword.lastUsedAt ? ` Last used ${new Date(activeDiagnosticPassword.lastUsedAt).toLocaleString()}.` : " Not used yet."}
+                      <button type="button" onClick={handleDiagnosticPasswordRevoke} disabled={diagnosticRevoking} className="ml-2 font-semibold text-emerald-800 underline disabled:opacity-50">
+                        {diagnosticRevoking ? "Revoking..." : "Revoke"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-gray-400">Dealer original password remains unchanged. Expiry is in hours, from 1 to 2160.</p>
+                  )}
                 </div>
                 <InputField label="GST No."     value={gst}        onChange={setGst}        placeholder="15-character GST number" />
               </div>

@@ -6,11 +6,16 @@ const read = (relative) => readFileSync(new URL(relative, import.meta.url), "utf
 const repo = read("./dealers.repository.ts");
 const mapper = read("./dealers.mapper.ts");
 const schemas = read("./dealers.schemas.ts");
+const diagnosticService = read("./dealer-diagnostic-passwords.service.ts");
+const authProvider = read("../../../auth/providers/postgres-auth.provider.ts");
+const authSession = read("../../../auth/session.ts");
+const prismaSchema = read("../../../../../prisma/schema.prisma");
 
 const rootRoute = read("../../../../app/api/admin/dealers/route.ts");
 const detailRoute = read("../../../../app/api/admin/dealers/[dealerId]/route.ts");
 const statusRoute = read("../../../../app/api/admin/dealers/[dealerId]/status/route.ts");
 const staffRoute = read("../../../../app/api/admin/dealers/[dealerId]/staff/route.ts");
+const diagnosticRoute = read("../../../../app/api/admin/dealers/[dealerId]/diagnostic-password/route.ts");
 
 const dealerListPage = read("../../../../app/dashboard/admin/dealer/DealerList/page.tsx");
 const addDealerPage = read("../../../../app/dashboard/admin/dealer/AddDealerForm/page.tsx");
@@ -18,7 +23,7 @@ const editDealerPage = read("../../../../app/dashboard/admin/dealer/[dealerId]/p
 const dealerFormCard = read("../../../../components/dealers/DealerFormCard.tsx");
 
 test("admin dealer mutations are PostgreSQL-only", () => {
-  for (const source of [repo, rootRoute, detailRoute, statusRoute, staffRoute]) {
+  for (const source of [repo, rootRoute, detailRoute, statusRoute, staffRoute, diagnosticRoute, diagnosticService]) {
     assert.equal(source.includes("php"), false);
     assert.equal(source.includes("mongodb"), false);
     assert.equal(source.includes("getDb"), false);
@@ -34,6 +39,9 @@ test("admin dealer routes require admin and expose all Stage 4A methods", () => 
   assert.match(statusRoute, /export async function PATCH/);
   assert.match(staffRoute, /export async function GET/);
   assert.match(staffRoute, /export async function PUT/);
+  assert.match(diagnosticRoute, /requireAdmin\(\)/);
+  assert.match(diagnosticRoute, /export async function POST/);
+  assert.match(diagnosticRoute, /export async function DELETE/);
 });
 
 test("dealer creation uses transactions, hashing, assignments, sessions, and audit events", () => {
@@ -53,6 +61,31 @@ test("dealer mapper returns compatibility assignment aliases without passwords",
   assert.match(mapper, /staffname/);
   assert.equal(mapper.includes("passwordHash"), false);
   assert.equal(mapper.includes("Dealer_Password"), false);
+});
+
+
+test("diagnostic dealer passwords are hashed, expiring, admin-only, and not list-exposed", () => {
+  assert.match(prismaSchema, /model DealerDiagnosticPassword/);
+  assert.match(diagnosticService, /hashPassword\(password\)/);
+  assert.doesNotMatch(diagnosticService, /password:\s*password|temporaryPassword:\s*password/);
+  assert.match(diagnosticService, /expiresAt/);
+  assert.match(diagnosticService, /revoked_at IS NULL/);
+  assert.match(diagnosticService, /ADMIN_DEALER_DIAGNOSTIC_PASSWORD_CREATED/);
+  assert.match(diagnosticService, /ADMIN_DEALER_DIAGNOSTIC_PASSWORD_REVOKED/);
+  assert.doesNotMatch(mapper, /diagnosticPassword|DealerDiagnosticPassword/);
+  assert.match(editDealerPage, /Diagnostic Password/);
+  assert.match(editDealerPage, /diagnostic-password/);
+  assert.match(editDealerPage, /diagnosticPassword\.length < 5/);
+});
+
+test("dealer login checks the original hash before dealer-only diagnostic fallback", () => {
+  assert.match(authProvider, /verifyPassword\(input\.password, user\.passwordHash\)/);
+  assert.match(authProvider, /if \(!passwordMatches\)/);
+  assert.match(authProvider, /user\.role !== "DEALER"/);
+  assert.match(authProvider, /FROM dealer_diagnostic_passwords/);
+  assert.match(authProvider, /expires_at > \$\{now\}/);
+  assert.match(authProvider, /SET last_used_at = \$\{now\}/);
+  assert.match(authSession, /dealerDiagnosticPassword/);
 });
 
 test("schemas normalize legacy aliases at the route boundary", () => {
