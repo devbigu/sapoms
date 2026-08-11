@@ -289,7 +289,7 @@ export default function Cart() {
               <p className="text-xs text-[#565959] mb-3">{totalUnits} units across {totalPacks} packs</p>
             )}
             <button
-              onClick={() => router.push("/dashboard/dealer/AddOrderForm")}
+              onClick={() => router.push("/dashboard/dealer/AddOrderForm?from=cart")}
               className="w-full bg-gradient-to-b from-[#6A5ACD] to-[#6A5ACD] border border-[#f0f0f0] rounded-full py-2 text-sm text-white hover:from-[#594cad] hover:to-[#6A5ACD] transition-colors mt-2"
             >
               Proceed to Buy

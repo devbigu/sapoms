@@ -72,7 +72,7 @@ export default function CartPage() {
 
   const handlePurchase = () => {
     if (cart.length === 0) return;
-    router.push("/dashboard/dealer/AddOrderForm");
+    router.push("/dashboard/dealer/AddOrderForm?from=cart");
   };
 
   const totalPacks    = cart.reduce((acc, item) => acc + item.quantity, 0);

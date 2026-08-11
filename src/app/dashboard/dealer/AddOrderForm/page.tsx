@@ -10,9 +10,9 @@ import { toast, ToastContainer } from "react-toastify";
 import moment from "moment";
 import Select, { components, type FilterOptionOption, type StylesConfig } from "react-select";
 import { useCartStore } from "@/Store/store";
+import { fetchDealerStatus } from "@/lib/dealerStatus";
 import discountUtils from "@/lib/discount";
 import { createIdempotencyKey } from "@/lib/idempotency";
-import { clearAuthStorage, resolveStoredAuth } from "@/lib/roleAccess";
 import {
   buildCatalogueIndex,
   findCatalogueEntry,
@@ -45,14 +45,11 @@ import cataloguePricing from "@/lib/cataloguePricing";
 import {
   buildOrderRemarks as buildLineRemarks,
 } from "@/lib/orderProductNotes.mjs";
-
 const { calculateStackedDiscount, getDiscountStatusMessage } = discountUtils;
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Types ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─── Types ────────────────────────────────────────────────────────────────────
 type ProductRow = {
   key: number;
-  productId?: string;
-  variantId?: string;
   productname: string;
   displayName: string;
   variantCode: string;
@@ -113,13 +110,14 @@ type CustomDiscountRequest = {
   reviewedAt?: string | null;
 };
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Product meta from nested_products.json ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─── Product meta from nested_products.json ───────────────────────────────────
 type ProductMeta = { image: string | null; productName: string; packSize: number };
 
 type CatalogueNumberOption = {
   value: string;
   label: string;
   searchSku: string;
+  searchText: string;
   productName: string;
   descriptor: string;
   specSummary: string;
@@ -161,9 +159,9 @@ function parsePackSizes(html: string): Record<string, number> {
   return result;
 }
 
-/** Format paise ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¹ string */
+/** Format paise → ₹ string */
 function fmt(paise: number): string {
-  return `ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function toPaise(amount: number): number {
@@ -174,6 +172,28 @@ function toPaise(amount: number): number {
 function payloadAmount(amount: number): string {
   if (!Number.isFinite(amount) || amount <= 0) return "0";
   return String(Math.round((amount + Number.EPSILON) * 100) / 100);
+}
+
+const ORDER_DETAILS_FALLBACK_STORAGE_KEY = "omsons.orderDetailsFallback.v1";
+
+function saveLocalOrderDetailsFallback(orderId: string, fallback: Record<string, unknown>) {
+  if (typeof window === "undefined" || !orderId) return;
+  try {
+    const raw = localStorage.getItem(ORDER_DETAILS_FALLBACK_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const records = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+    localStorage.setItem(ORDER_DETAILS_FALLBACK_STORAGE_KEY, JSON.stringify({
+      ...records,
+      [orderId]: {
+        ...fallback,
+        orderId,
+        order_id: orderId,
+        savedAt: new Date().toISOString(),
+      },
+    }));
+  } catch {}
 }
 
 function roundRupees(amount: number): number {
@@ -192,6 +212,36 @@ function cartPriceToRupees(rawPrice: unknown, apiPrice: unknown = 0): number {
   if (!cartPrice) return fallbackPrice;
   // Cart prices are stored as paise per individual unit.
   return roundRupees(cartPrice / 100);
+}
+
+async function fetchWithSessionRefresh(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, { credentials: "include", ...init });
+  if (response.status !== 401) return response;
+
+  const refresh = await fetch("/api/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!refresh.ok) return response;
+
+  return fetch(input, { credentials: "include", ...init });
+}
+
+function mergeCatalogueSources(primaryProducts: CatalogueProduct[], fallbackProducts: CatalogueProduct[]) {
+  const merged = new Map<string, CatalogueProduct>();
+
+  for (const product of fallbackProducts) {
+    const key = String(product.sku || product.id || "").trim();
+    if (key) merged.set(key, product);
+  }
+
+  for (const product of primaryProducts) {
+    const key = String(product.sku || product.id || "").trim();
+    if (key) merged.set(key, product);
+  }
+
+  return Array.from(merged.values());
 }
 
 function rowSubtotalPaise(row: ProductRow): number {
@@ -280,12 +330,13 @@ function buildExpectedOrderNumber(lastOrderId: string | undefined | null): strin
   return `OM/${year}/${String(nextNumber).padStart(padding, "0")}`;
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Coupons ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─── Coupons ──────────────────────────────────────────────────────────────────
 const COUPONS: Record<string, number> = {
   "test60": 60,
   "SAVE50": 50,
   "VIP80": 80,
 };
+
 
 type PhpExchangeLog = {
   method: "GET" | "POST";
@@ -368,7 +419,7 @@ function logPhpExchange(label: string, details: PhpExchangeLog) {
   console.groupEnd();
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Empty row factory ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─── Empty row factory ────────────────────────────────────────────────────────
 const emptyRow = (): ProductRow => ({
   key: Date.now() + Math.random(),
   productname: "",
@@ -381,9 +432,9 @@ const emptyRow = (): ProductRow => ({
   productNote: "",
 });
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-// Inner component ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â uses useSearchParams so must live inside <Suspense>
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─────────────────────────────────────────────────────────────────────────────
+// Inner component — uses useSearchParams so must live inside <Suspense>
+// ─────────────────────────────────────────────────────────────────────────────
 function AddOrderPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -413,7 +464,7 @@ function AddOrderPageInner() {
   const [expectedOrderLoading, setExpectedOrderLoading] = useState(false);
   const seededRef = useRef(false);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Draft state ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Draft state ───────────────────────────────────────────────────────────
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("Untitled Draft");
   const [showNameModal, setShowNameModal] = useState(false);
@@ -421,13 +472,13 @@ function AddOrderPageInner() {
   const [draftBanner, setDraftBanner] = useState<string | null>(null);
   const [draftApprovalState, setDraftApprovalState] = useState<DraftApprovalState | null>(null);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Coupon state ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Coupon state ──────────────────────────────────────────────────────────
   const [couponInput, setCouponInput] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; pct: number } | null>(null);
   const [couponError, setCouponError] = useState("");
   const [couponSuccess, setCouponSuccess] = useState("");
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Order note + custom discount approval ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Order note + custom discount approval ────────────────────────────────
   const [orderNote, setOrderNote] = useState("");
   const [showCustomDiscountEditor, setShowCustomDiscountEditor] = useState(false);
   const [customDiscountInput, setCustomDiscountInput] = useState("");
@@ -443,7 +494,14 @@ function AddOrderPageInner() {
   const [arr1, setArr] = useState<ProductRow[]>([emptyRow()]);
 
   const ensureDealerIsActive = async () => {
-    // Dealer activity is enforced by /api/dealer-order from the authenticated session.
+    if (!user?.Dealer_Id) {
+      throw new Error("Dealer account is missing.");
+    }
+
+    const dealerStatus = await fetchDealerStatus(String(user.Dealer_Id));
+    if (dealerStatus === "inactive") {
+      throw new Error("This dealer account is inactive. Please contact the administrator.");
+    }
   };
 
   const syncDraftUrl = (draftId?: string | null) => {
@@ -556,30 +614,55 @@ function AddOrderPageInner() {
   };
 
   useEffect(() => {
-    const session = resolveStoredAuth(localStorage);
-    if (session.status !== "authenticated" || session.role !== "dealer") {
-      clearAuthStorage(localStorage);
-      router.push("/login");
-      return;
-    }
-
-    const dealer = session.user;
-    setUser(dealer);
-
-    const dealerAddress = String(dealer.Dealer_Address ?? "").trim();
-    setShipto(
-      dealerAddress
-        ? dealerAddress[0].toUpperCase() + dealerAddress.slice(1).toLowerCase()
-        : "",
-    );
+    const stored = localStorage.getItem("UserData");
+    const loggedIn = localStorage.getItem("status");
+    if (!stored || JSON.parse(loggedIn ?? "false") !== true) { router.push("/login"); return; }
+    const u = JSON.parse(stored);
+    setUser(u);
+    setShipto(u.Dealer_Address[0].toUpperCase() + u.Dealer_Address.slice(1).toLowerCase());
   }, [router]);
+
+  // useEffect(() => {
+  //   if (!user) return;
+  //   Promise.all([
+  //     fetch(`${BACKEND_URL}/productname`).then(r => r.json()),
+  //     loadCatalogueProducts(),
+  //   ]).then(([apiData, localData]) => {
+  //     setProducts(apiData.data ?? []);
+  //     setCatalogueIndex(buildCatalogueIndex(localData ?? []));
+  //     setVariantLookup(buildVariantLookup(localData));
+  //   }).catch(() => {
+  //     fetch(`${BACKEND_URL}/productname`)
+  //       .then(r => r.json()).then(d => setProducts(d.data ?? []));
+  //   });
+  // }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    fetch("/api/products", { cache: "no-store" })
-      .then((r) => { if (!r.ok) throw new Error("PRODUCTS_UNAVAILABLE"); return r.json(); })
-      .then((apiData) => {
-        const catalogueProducts = apiData.data ?? [];
+    let cancelled = false;
+
+    const loadProducts = async () => {
+      try {
+        const [apiResult, localProducts] = await Promise.all([
+          fetchWithSessionRefresh("/api/products", { cache: "no-store" })
+            .then(async (response) => {
+              if (!response.ok) throw new Error("PRODUCTS_UNAVAILABLE");
+              const apiData = await response.json();
+              return Array.isArray(apiData.data) ? apiData.data as CatalogueProduct[] : [];
+            })
+            .catch((error) => {
+              console.error("[AddOrderForm] failed to load PostgreSQL products", error);
+              return [] as CatalogueProduct[];
+            }),
+          loadCatalogueProducts().catch((error) => {
+            console.error("[AddOrderForm] failed to load local catalogue products", error);
+            return [] as CatalogueProduct[];
+          }),
+        ]);
+
+        if (cancelled) return;
+
+        const catalogueProducts = mergeCatalogueSources(apiResult, localProducts);
         const rows = catalogueProducts.flatMap((product: any) =>
           (product.variants ?? []).map((variant: any) => ({
             product_id: product.id,
@@ -589,18 +672,27 @@ function AddOrderPageInner() {
             product_price: variant.price,
             product_quantity: variant.packSize || variant.pack || 1,
             product_unit: variant.unitName || "",
-            active: product.active && variant.active,
+            active: product.active !== false && variant.active !== false,
           }))
         );
+
         setProducts(rows);
         setCatalogueIndex(buildCatalogueIndex(catalogueProducts));
         setVariantLookup(buildVariantLookup(catalogueProducts));
-      })
-      .catch(() => {
+      } catch (error) {
+        if (cancelled) return;
+        console.error("[AddOrderForm] failed to prepare products", error);
         setProducts([]);
-        setCatalogueIndex(buildCatalogueIndex([]));
+        setCatalogueIndex(null);
         setVariantLookup({});
-      });
+      }
+    };
+
+    void loadProducts();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -613,7 +705,7 @@ function AddOrderPageInner() {
       .catch(() => { });
   }, [user?.Dealer_Id]);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Load draft from ?draft=<id> (via React Query cache) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Load draft from ?draft=<id> (via React Query cache) ────────────────────
   const { data: cachedDraft, isError: draftError } = useDraft(
     user?.Dealer_Id,
     draftIdParam
@@ -624,7 +716,12 @@ function AddOrderPageInner() {
     if (seededRef.current) return;
 
     setReorderLoading(true);
-    fetch(`/api/custom-discount-requests/${encodeURIComponent(reorderIdParam)}`)
+    fetch(`/api/custom-discount-requests/${encodeURIComponent(reorderIdParam)}`, {
+      headers: {
+        "x-omsons-actor-role": "dealer",
+        "x-omsons-actor-id": String(user.Dealer_Id),
+      },
+    })
       .then((r) => {
         if (r.status === 404) throw new Error("NOT_FOUND");
         if (!r.ok) throw new Error("NETWORK");
@@ -731,7 +828,12 @@ function AddOrderPageInner() {
         let request: CustomDiscountRequest | null = null;
 
         if (approvalRequestId) {
-          const res = await fetch(`/api/custom-discount-requests/${encodeURIComponent(approvalRequestId)}`);
+          const res = await fetch(`/api/custom-discount-requests/${encodeURIComponent(approvalRequestId)}`, {
+            headers: {
+              "x-omsons-actor-role": "dealer",
+              "x-omsons-actor-id": String(user.Dealer_Id),
+            },
+          });
           if (res.ok) {
             const json = await res.json();
             if (json.success) request = json.data as CustomDiscountRequest;
@@ -772,15 +874,14 @@ function AddOrderPageInner() {
     };
   }, [user?.Dealer_Id, activeDraftId, draftIdParam, draftApprovalState?.approvalRequestId]);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Seed rows from DraftCart (when navigated from Cart page) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Seed rows from DraftCart (when navigated from Cart page) ─────────────
   useEffect(() => {
     if (!fromCart || !user || products.length === 0) return;
     if (reorderIdParam) return;
     if (seededRef.current) return;
-    seededRef.current = true;
 
-    fetch(`/api/draft-cart?dealer_id=${encodeURIComponent(user.Dealer_Id)}`)
-      .then(r => r.json())
+    fetchWithSessionRefresh(`/api/draft-cart?dealer_id=${encodeURIComponent(user.Dealer_Id)}`, { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("DRAFT_CART_UNAVAILABLE"); return r.json(); })
       .then(json => {
         if (json.success && Array.isArray(json.data?.items) && json.data.items.length > 0) {
           const rows: ProductRow[] = json.data.items.map((item: any, i: number) => {
@@ -813,22 +914,30 @@ function AddOrderPageInner() {
               catalogueVariantSku: catalogueVariant?.sku ?? "",
             };
           });
+          seededRef.current = true;
           setArr(rows);
           setDraftBanner(`${rows.length} item${rows.length !== 1 ? "s" : ""} imported from your cart`);
+        } else if (cartItems.length > 0) {
+          seededRef.current = false;
         } else {
+          seededRef.current = true;
           setArr([emptyRow()]);
         }
       })
-      .catch(() => toast.error("Could not load cart draft."));
+      .catch(() => {
+        if (cartItems.length > 0) return;
+        seededRef.current = true;
+        toast.error("Could not load cart draft.");
+      });
   }, [fromCart, user, products, catalogueIndex, reorderIdParam]);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Seed rows from cart ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Seed rows from cart ───────────────────────────────────────────────────
   useEffect(() => {
     if (seededRef.current) return;
     if (products.length === 0) return;
     if (draftIdParam) return;
     if (reorderIdParam) return;
-    if (fromCart) return;           // DraftCart takes priority when ?from=cart
+    // Allow the in-memory cart to seed rows for ?from=cart; DraftCart can still overwrite it when present.
     seededRef.current = true;
 
     if (cartItems.length === 0) { setArr([emptyRow()]); return; }
@@ -874,7 +983,7 @@ function AddOrderPageInner() {
     setArr(cartRows);
   }, [products, cartItems, variantLookup, catalogueIndex, draftIdParam, reorderIdParam, fromCart]);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Discount ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Discount ──────────────────────────────────────────────────────────────
   const subtotalPaise = arr1.reduce((acc, row) => acc + rowSubtotalPaise(row), 0);
   const subtotal = subtotalPaise / 100;
   const dealerDiscount = safePositiveNumber(user?.discount);
@@ -884,7 +993,7 @@ function AddOrderPageInner() {
     [customDiscountRequests],
   );
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Custom / reorder discount resolution ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Custom / reorder discount resolution ─────────────────────────────
   const currentOrderSignature = buildOrderSignature(arr1, subtotal);
   const productRows = arr1.filter((r) => r.productname);
   const draftLinkedRequest = activeDraftId
@@ -976,8 +1085,8 @@ function AddOrderPageInner() {
   const isApprovedDraftRequest = !reorderRequest && activeApprovalRequest?.normalizedStatus === "approved";
   const isRejectedDraftRequest = !reorderRequest && activeApprovalRequest?.normalizedStatus === "rejected";
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Sequential discount calculation ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-  // Base discount payload ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â uses the new sequential slab logic.
+  // ── Sequential discount calculation ──────────────────────────────────
+  // Base discount payload — uses the new sequential slab logic.
   // Slab is determined from amountBeforeSlab, NOT from gross subtotal.
   const baseDiscountPayload = calculateStackedDiscount(subtotal, {
     allocatedDiscountPercent: dealerDiscount,
@@ -1070,7 +1179,7 @@ function AddOrderPageInner() {
   const requestedCustomDiscountAmount = customDiscountBaseSubtotal * (requestedCustomDiscountPercent / 100);
   const requestedCustomFinalPayable = Math.max(0, customDiscountBaseSubtotal - requestedCustomDiscountAmount);
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Coupon handlers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Coupon handlers ───────────────────────────────────────────────────────
   const handleApplyCoupon = () => {
     if (orderLockedByPendingApproval) {
       toast("This approval request is pending, so the submitted order is locked.");
@@ -1082,7 +1191,7 @@ function AddOrderPageInner() {
     const pct = COUPONS[trimmed];
     if (pct === undefined) { setCouponError("Invalid coupon code."); return; }
     setAppliedCoupon({ code: trimmed, pct });
-    setCouponSuccess(`"${trimmed}" applied ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${pct}% coupon discount added`);
+    setCouponSuccess(`"${trimmed}" applied — ${pct}% coupon discount added`);
     setCouponInput("");
   };
 
@@ -1294,7 +1403,7 @@ function AddOrderPageInner() {
     }
   };
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Catalogue hierarchy helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Catalogue hierarchy helpers ───────────────────────────────────────────
   const optionList = useMemo<CatalogueNumberOption[]>(() => {
     if (!catalogueIndex) return [];
 
@@ -1310,6 +1419,10 @@ function AddOrderPageInner() {
           value: variant.sku,
           label: variant.sku,
           searchSku: variant.sku.toLowerCase(),
+          searchText: [variant.sku, variant.name, product.name, descriptor, specSummary, product.category, ...(product.categories ?? [])]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase(),
           productName: product.name,
           descriptor,
           specSummary,
@@ -1321,7 +1434,7 @@ function AddOrderPageInner() {
   const catalogueFilter = (option: FilterOptionOption<CatalogueNumberOption>, inputValue: string) => {
     const needle = inputValue.trim().toLowerCase();
     if (!needle) return true;
-    return option.data.searchSku.includes(needle);
+    return option.data.searchText.includes(needle);
   };
 
   const catalogueSelectStyles: StylesConfig<CatalogueNumberOption, false> = {
@@ -1403,8 +1516,6 @@ function AddOrderPageInner() {
       const next = [...prev];
       next[idx] = {
         ...next[idx],
-        productId: undefined,
-        variantId: undefined,
         productname: "",
         displayName: "",
         variantCode: "",
@@ -1439,8 +1550,6 @@ function AddOrderPageInner() {
       const next = [...prev];
       next[idx] = {
         ...next[idx],
-        productId: product.id,
-        variantId: variant.id,
         catalogueSection: getCatalogueSection(product),
         catalogueProductSku: product.sku,
         catalogueVariantSku: variant.sku,
@@ -1528,7 +1637,7 @@ function AddOrderPageInner() {
     setArr((prev) => prev.filter((r) => r.key !== key));
   };
 
-  // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Save Draft ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+  // ── Save Draft ────────────────────────────────────────────────────────────
   const commitSaveDraft = async (nameToUse: string) => {
     if (!user) return;
     setShowNameModal(false);
@@ -1536,7 +1645,7 @@ function AddOrderPageInner() {
     try {
       const previousDraftId = activeDraftId;
       await persistCurrentDraft(nameToUse, buildCurrentApprovalState());
-      toast.success(previousDraftId ? "Draft updated ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“" : "Draft saved ÃƒÂ¢Ã…â€œÃ¢â‚¬Å“");
+      toast.success(previousDraftId ? "Draft updated ✓" : "Draft saved ✓");
     } catch {
       toast.error("Could not save draft.");
     } finally {
@@ -1561,7 +1670,7 @@ function AddOrderPageInner() {
   const getLatestOrderIdForDealer = async () => {
     if (!user?.Dealer_Id) return "";
     try {
-      const res = await fetch(`/api/orders-data?page=1&limit=1000&search=`);
+      const res = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(user.Dealer_Id)}`);
       const json = await res.json();
       return String(json?.data?.[0]?.order_id ?? "").trim();
     } catch {
@@ -1576,7 +1685,7 @@ function AddOrderPageInner() {
     setExpectedOrderLoading(true);
     const loadLatestOrderId = async () => {
       try {
-        const res = await fetch(`/api/orders-data?page=1&limit=1000&search=`);
+        const res = await fetch(`/api/orders-data?source=orderhispegination&role=dealer&page=1&limit=1000&search=&id=${encodeURIComponent(user.Dealer_Id)}`);
         const json = await res.json();
         return String(json?.data?.[0]?.order_id ?? "").trim();
       } catch {
@@ -1600,15 +1709,195 @@ function AddOrderPageInner() {
   useEffect(() => {
     if (!user?.Dealer_Id) return;
     setWalletLoading(true);
-    fetch(`/api/wallet/${encodeURIComponent(user.Dealer_Id)}?limit=5`, { cache: "no-store" })
+    fetch(`/api/wallet/${encodeURIComponent(user.Dealer_Id)}?limit=5`, {
+      cache: "no-store",
+      headers: { "x-omsons-actor-role": "dealer", "x-omsons-actor-id": String(user.Dealer_Id) },
+    })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("wallet unavailable")))
       .then((json) => { if (json.success) setWallet(json); })
       .catch(() => setWallet(null))
       .finally(() => setWalletLoading(false));
   }, [user?.Dealer_Id]);
 
-  // New PostgreSQL orders store notes, item notes, and summary totals in /api/dealer-order.
+  const saveOrderNoteForHistory = async (orderId: string) => {
+    const note = orderNote.trim();
+    if (!orderId || !note || !user?.Dealer_Id) return;
+    await fetch("/api/order-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId,
+        dealerId: user.Dealer_Id,
+        dealerName: user.Dealer_Name,
+        note,
+      }),
+    }).catch(() => { });
+  };
 
+  const saveOrderSummaryOverride = async (orderId: string, items: Array<Record<string, unknown>>) => {
+    if (!orderId || !user?.Dealer_Id) return;
+
+    const approvedDiscountPercent = hasApprovedCustomDiscount
+      ? Number(payloadAmount(Math.max(0, approvedCustomDiscountPercent ?? 0)))
+      : 0;
+    const readableReason = discountPayload.additionalDiscountType === "custom"
+      ? `Approved custom discount applied: Rs. ${discountPayload.customDiscountAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : discountPayload.additionalDiscountType === "slab" && discountPayload.slabDiscountAmount > 0
+        ? `slab discount applied: ${discountPayload.slabDiscountPercent}% (Rs. ${discountPayload.slabDiscountAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`
+        : "frontend_discount_override";
+    const shouldSaveOverride =
+      discountPayload.discountAmount > 0 &&
+      (
+        discountPayload.additionalDiscountType !== null ||
+        discountPayload.couponDiscountPercent > 0 ||
+        approvedDiscountPercent > 0 ||
+        hasApprovedCustomDiscount ||
+        discountPayload.discountPercent > discountPayload.allocatedDiscountPercent
+      );
+
+    if (!shouldSaveOverride) return;
+
+    await fetch("/api/order-summary-overrides", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId,
+        order_id: orderId,
+        dealerId: user.Dealer_Id,
+        order_dealer: user.Dealer_Id,
+        dealerName: user.Dealer_Name,
+        grossAmount: payloadAmount(discountPayload.subtotal),
+        order_amount: payloadAmount(discountPayload.subtotal),
+        discountAmount: payloadAmount(discountPayload.discountAmount),
+        discount_amount: payloadAmount(discountPayload.discountAmount),
+        netPayableAmount: payloadAmount(discountPayload.finalPayableAmount),
+        order_discount: payloadAmount(discountPayload.finalPayableAmount),
+        discountPercent: discountPayload.discountPercent,
+        allocatedDiscountPercent: discountPayload.allocatedDiscountPercent,
+        baseDiscountPercent: discountPayload.baseDiscountPercent,
+        baseDiscountAmount: payloadAmount(discountPayload.baseDiscountAmount),
+        postBaseAmount: payloadAmount(discountPayload.postBaseAmount),
+        additionalDiscountType: discountPayload.additionalDiscountType,
+        additionalDiscountAmount: payloadAmount(discountPayload.additionalDiscountAmount),
+        customDiscountAmount: payloadAmount(discountPayload.customDiscountAmount),
+        slabDiscountPercent: discountPayload.slabDiscountPercent,
+        slabDiscountAmount: payloadAmount(discountPayload.slabDiscountAmount),
+        couponDiscountPercent: discountPayload.couponDiscountPercent,
+        approvedDiscountPercent,
+        items,
+        reason: readableReason,
+      }),
+    }).catch((err) => {
+      console.error("[order-summary-overrides] save failed:", err);
+    });
+  };
+
+  // ── Submit Order ──────────────────────────────────────────────────────────
+const verifySubmittedProductNotes = async (orderId: string) => {
+  if (!orderId || !user?.Dealer_Id) return;
+
+  const rowsWithNotes = arr1
+    .filter(
+      (row) =>
+        row.productname &&
+        String(row.productNote ?? "").trim()
+    )
+    .map((row) => ({
+      productname: String(row.productname ?? "").trim(),
+      variantCode: String(row.variantCode ?? "").trim(),
+      productNote: String(row.productNote ?? "").trim(),
+    }));
+
+  if (rowsWithNotes.length === 0) return;
+
+  try {
+    const response = await fetchWithSessionRefresh(
+      `/api/order-product-notes?orderId=${encodeURIComponent(orderId)}`,
+      {
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Product note verification failed with ${response.status}`
+      );
+    }
+
+    const json = await response.json();
+
+    const savedNotes = Array.isArray(json?.data)
+      ? json.data
+      : Array.isArray(json?.data?.items)
+        ? json.data.items
+        : [];
+
+    const normalize = (value: unknown) =>
+      String(value ?? "").trim().toLowerCase();
+
+    const failedRows = rowsWithNotes.filter((submitted) => {
+      const submittedSku = normalize(
+        submitted.variantCode || submitted.productname
+      );
+
+      const submittedNote = normalize(
+        submitted.productNote
+      );
+
+      return !savedNotes.some((saved: any) => {
+        const savedSku = normalize(
+          saved.normalizedSku ??
+          saved.sku ??
+          saved.variantCode ??
+          saved.productname ??
+          saved.productName
+        );
+
+        const savedNote = normalize(
+          saved.note ??
+          saved.productNote ??
+          saved.product_note
+        );
+
+        return (
+          savedSku === submittedSku &&
+          savedNote === submittedNote
+        );
+      });
+    });
+
+    if (failedRows.length > 0) {
+      console.warn(
+        "[order-product-notes] some notes could not be verified",
+        {
+          orderId,
+          submitted: rowsWithNotes.length,
+          failed: failedRows.length,
+        }
+      );
+
+      toast.warn(
+        "Order placed, but some product notes could not be verified.",
+        { autoClose: 5000 }
+      );
+    }
+  } catch (error) {
+    console.warn(
+      "[order-product-notes] verification failed",
+      {
+        orderId,
+        error,
+      }
+    );
+
+    // Order itself has already been placed.
+    // Verification failure must not convert it into an order failure.
+    toast.warn(
+      "Order placed, but product note verification is still pending.",
+      { autoClose: 5000 }
+    );
+  }
+};
   const handleSubmitProductArray = async () => {
     if (isWaitingForApproval) {
       toast("This order is waiting for discount approval.");
@@ -1623,8 +1912,6 @@ function AddOrderPageInner() {
       const rowSubtotal = rowSubtotalPaise(r) / 100;
       const rowDiscountAmount = rowSubtotal * (rowDiscountPercent / 100);
       return {
-        productId: r.productId,
-        variantId: r.variantId,
         productname: r.productname,
         productName: r.displayName || r.productname,
         catNo: r.variantCode || r.productname,
@@ -1694,7 +1981,7 @@ function AddOrderPageInner() {
     }
     if (refno) fd.append("refno", refno);
     if (appliedCoupon) fd.append("coupon_code", appliedCoupon.code);
-
+    
     const targetApiUrl = `/api/dealer-order`;
     const phpPayload = readFormData(fd);
 
@@ -1702,7 +1989,12 @@ function AddOrderPageInner() {
       await ensureDealerIsActive();
       setLoading(true);
       orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
-      const { data } = await axios.post(targetApiUrl, fd, { headers: { "idempotency-key": orderIdempotencyKey.current } });
+      const { data } = await axios.post(targetApiUrl, fd, { headers: {
+        "x-omsons-actor-role": "dealer",
+        "x-omsons-actor-id": String(user.Dealer_Id),
+        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
+        "idempotency-key": orderIdempotencyKey.current,
+      } });
       logPhpExchange("PlaceOrderarray", {
         method: "POST",
         url: targetApiUrl,
@@ -1710,8 +2002,62 @@ function AddOrderPageInner() {
         response: data,
       });
       const placedOrderId = extractOrderIdFromResponse(data) || await getLatestOrderIdForDealer();
+      const rowsUsedForOrder = arr1.filter((row) => row.productname);
+      saveLocalOrderDetailsFallback(placedOrderId, {
+        dealerId: user.Dealer_Id,
+        dealerName: user.Dealer_Name,
+        order_dealer: user.Dealer_Id,
+        Dealer_Name: user.Dealer_Name,
+        Dealer_Id: user.Dealer_Id,
+        Dealer_Email: user.Dealer_Email,
+        Dealer_Number: user.Dealer_Number,
+        Dealer_Address: user.Dealer_Address,
+        Dealer_shipto: user.Dealer_shipto,
+        Dealer_City: user.Dealer_City,
+        Dealer_Pincode: user.Dealer_Pincode,
+        Dealer_Dealercode: user.Dealer_Dealercode,
+        Dealer_Notes: user.Dealer_Notes,
+        gst: user.gst,
+        creditdays: user.creditdays,
+        discount: user.discount,
+        staffname: user.staffname,
+        note: orderNote.trim() || "",
+        order_note: orderNote.trim() || "",
+        grossAmount: payloadAmount(discountPayload.subtotal),
+        order_amount: payloadAmount(discountPayload.subtotal),
+        discountAmount: payloadAmount(discountPayload.discountAmount),
+        order_discount_amount: payloadAmount(discountPayload.discountAmount),
+        netPayableAmount: payloadAmount(discountPayload.finalPayableAmount),
+        order_net_amount: payloadAmount(discountPayload.finalPayableAmount),
+        discountPercent: discountPayload.discountPercent,
+        allocatedDiscountPercent: discountPayload.allocatedDiscountPercent,
+        baseDiscountPercent: discountPayload.baseDiscountPercent,
+        baseDiscountAmount: payloadAmount(discountPayload.baseDiscountAmount),
+        postBaseAmount: payloadAmount(discountPayload.postBaseAmount),
+        additionalDiscountType: discountPayload.additionalDiscountType,
+        additionalDiscountAmount: payloadAmount(discountPayload.additionalDiscountAmount),
+        customDiscountAmount: payloadAmount(discountPayload.customDiscountAmount),
+        slabDiscountPercent: discountPayload.slabDiscountPercent,
+        slabDiscountAmount: payloadAmount(discountPayload.slabDiscountAmount),
+        couponDiscountPercent: discountPayload.couponDiscountPercent,
+        accept_order: "0",
+        del_status: "0",
+        staffid: user.assignedstaff,
+        assignedstaff: user.assignedstaff,
+        items: payload.map((item, index) => ({
+          ...item,
+          productId: item.catNo,
+          productName: item.productName,
+          productNote: rowsUsedForOrder[index]?.productNote ?? "",
+          discountAmount: item.discount,
+          finalPrice: item.afterDiscountPrice,
+        })),
+      });
       await Promise.allSettled([
+        saveOrderNoteForHistory(placedOrderId),
+        saveOrderSummaryOverride(placedOrderId, payload),
         linkCustomDiscountRequestsToOrder(customDiscountSources, placedOrderId),
+        verifySubmittedProductNotes(placedOrderId),
       ]);
       if (placedOrderId) setExpectedOrderNumber(buildExpectedOrderNumber(placedOrderId));
       if (reorderRequest) {
@@ -1785,7 +2131,12 @@ function AddOrderPageInner() {
       await ensureDealerIsActive();
       setLoading(true);
       orderIdempotencyKey.current ||= createIdempotencyKey("dealer-order");
-      const { data } = await axios.post(targetApiUrl, fd, { headers: { "idempotency-key": orderIdempotencyKey.current } });
+      const { data } = await axios.post(targetApiUrl, fd, { headers: {
+        "x-omsons-actor-role": "dealer",
+        "x-omsons-actor-id": String(user.Dealer_Id),
+        "x-omsons-actor-name": String(user.Dealer_Name ?? ""),
+        "idempotency-key": orderIdempotencyKey.current,
+      } });
       logPhpExchange("importdata", {
         method: "POST",
         url: targetApiUrl,
@@ -1814,7 +2165,7 @@ function AddOrderPageInner() {
   };
 
   if (!user) return (
-    <div className="flex items-center justify-center h-[60vh] text-gray-400 text-sm">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</div>
+    <div className="flex items-center justify-center h-[60vh] text-gray-400 text-sm">Loading…</div>
   );
 
   const docDate = moment().format("MMMM Do YYYY");
@@ -1823,7 +2174,7 @@ function AddOrderPageInner() {
     <>
       <ToastContainer position="top-right" autoClose={5000} />
 
-      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Draft Name Modal ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+      {/* ── Draft Name Modal ──────────────────────────────────────────────── */}
       {showNameModal && (
         <div className="fixed inset-0 z-[1000] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
@@ -1860,13 +2211,13 @@ function AddOrderPageInner() {
         </div>
       )}
 
-      {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Busy overlay ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+      {/* ── Busy overlay ──────────────────────────────────────────────────── */}
       {(loading || draftSaving || reorderLoading) && (
         <div className="fixed inset-0 z-[999] bg-black/35 backdrop-blur-sm flex items-center justify-center">
           <div className="bg-white rounded-2xl px-10 py-7 flex flex-col items-center gap-3 shadow-2xl">
             <div className="w-9 h-9 border-[3px] border-gray-200 border-t-indigo-500 rounded-full animate-spin" />
             <span className="text-sm font-medium text-gray-600">
-              {reorderLoading ? "Loading reorder data..." : draftSaving ? "Saving draftÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" : "ProcessingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦"}
+              {reorderLoading ? "Loading reorder data..." : draftSaving ? "Saving draft…" : "Processing…"}
             </span>
           </div>
         </div>
@@ -1960,9 +2311,9 @@ function AddOrderPageInner() {
             <div>
               <p className="text-[10.5px] font-bold uppercase tracking-wider text-gray-500">Dealer Wallet Balance</p>
               <p className={`mt-1 font-mono text-2xl font-bold ${wallet?.status === "active" ? (wallet.availableBalance > 0 ? "text-emerald-700" : "text-red-700") : "text-gray-700"}`}>
-                {walletLoading ? "LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" : fmt(toPaise(wallet?.availableBalance ?? 0))}
+                {walletLoading ? "Loading…" : fmt(toPaise(wallet?.availableBalance ?? 0))}
               </p>
-              <p className="mt-1 text-xs text-gray-500">Running balanceÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Âeach successful order deducts its final Net Payable.</p>
+              <p className="mt-1 text-xs text-gray-500">Running balance—each successful order deducts its final Net Payable.</p>
             </div>
             <span className={`rounded-full px-3 py-1.5 text-xs font-bold ${wallet?.status === "active" ? (wallet.availableBalance > 0 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700") : "bg-gray-100 text-gray-600"}`}>
               {walletLoading ? "Loading" : wallet?.status === "active" ? (wallet.availableBalance > 0 ? "Active" : "Exhausted") : "Inactive"}
@@ -1987,7 +2338,7 @@ function AddOrderPageInner() {
                 </span>
               )}
             </div>
-            <p className="text-sm text-gray-500 mt-1">{docDate} Ãƒâ€šÃ‚Â· {user.Dealer_Name}</p>
+            <p className="text-sm text-gray-500 mt-1">{docDate} · {user.Dealer_Name}</p>
           </div>
           <button onClick={() => router.push("/drafts")}
             className="inline-flex items-center gap-1.5 text-[12.5px] text-gray-400 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50 px-3 py-2 rounded-xl transition-all cursor-pointer bg-white">
@@ -2002,13 +2353,18 @@ function AddOrderPageInner() {
         {/* Dealer info card */}
         <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-5">
           <h2 className="text-lg font-bold text-gray-900 tracking-tight">{user.Dealer_Name}</h2>
-          <p className="text-xs text-gray-400 mb-5">Dealer code: {user.Dealer_Dealercode ?? "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}</p>
+          <p className="text-xs text-gray-400 mb-5">Dealer code: {user.Dealer_Dealercode ?? "—"}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider">Bill To</label>
               <div className="text-[13.5px] text-gray-800 font-medium bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 min-h-[72px] whitespace-pre-wrap">
-                {shipto || "-"}
-              </div>
+{(() => {
+  const address = String(user?.Dealer_Address ?? "").trim();
+
+  return address
+    ? address[0].toUpperCase() + address.slice(1).toLowerCase()
+    : "—";
+})()}              </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider">GST Number</label>
@@ -2052,7 +2408,7 @@ function AddOrderPageInner() {
                   disabled={orderLockedByPendingApproval}
                   className="text-[11px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-lg px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  ÃƒÂ¢Ã…â€œÃ‚ÂÃƒÂ¯Ã‚Â¸Ã‚Â Edit
+                  ✏️ Edit
                 </button>
               </div>
               <div className={`text-[13.5px] font-semibold rounded-xl px-3 py-2.5 border flex items-center justify-between ${hasAnyDiscount ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-slate-600 bg-slate-50 border-slate-200"
@@ -2068,7 +2424,7 @@ function AddOrderPageInner() {
           </div>
         </div>
 
-        {/* Discount Stack ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Sequential Breakdown */}
+        {/* Discount Stack — Sequential Breakdown */}
         <div className={`border rounded-2xl p-5 mb-5 ${hasAnyDiscount ? "bg-emerald-50/70 border-emerald-200" : "bg-white border-gray-200"
           }`}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2096,7 +2452,7 @@ function AddOrderPageInner() {
                 disabled={orderLockedByPendingApproval}
                 className="col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-[12px] font-bold text-indigo-700 hover:bg-indigo-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:col-span-1"
               >
-                <span>ÃƒÂ¢Ã…â€œÃ‚ÂÃƒÂ¯Ã‚Â¸Ã‚Â</span>
+                <span>✏️</span>
                 Custom Discount
               </button>
             </div>
@@ -2117,7 +2473,7 @@ function AddOrderPageInner() {
                 {discountPayload.baseDiscountPercent}%
               </p>
               <p className="mt-0.5 text-[10px] text-gray-400 font-mono">
-                {discountPayload.baseDiscountAmount > 0 ? `ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(toPaise(discountPayload.baseDiscountAmount))}` : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                {discountPayload.baseDiscountAmount > 0 ? `−${fmt(toPaise(discountPayload.baseDiscountAmount))}` : "—"}
               </p>
               <div className="mt-1 space-y-0.5 text-[9px] text-gray-400">
                 {discountPayload.allocatedDiscountPercent > 0 && <p>Allocated: {discountPayload.allocatedDiscountPercent}%</p>}
@@ -2148,7 +2504,7 @@ function AddOrderPageInner() {
                   : `${discountPayload.slabDiscountPercent}%`}
               </p>
               <p className="mt-0.5 text-[10px] text-gray-400 font-mono">
-                {discountPayload.additionalDiscountAmount > 0 ? `ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(toPaise(discountPayload.additionalDiscountAmount))}` : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                {discountPayload.additionalDiscountAmount > 0 ? `−${fmt(toPaise(discountPayload.additionalDiscountAmount))}` : "—"}
               </p>
               <p className="mt-0.5 text-[10px] text-gray-400">
                 {discountPayload.additionalDiscountType === "custom"
@@ -2164,7 +2520,7 @@ function AddOrderPageInner() {
                 {discountPayload.discountPercent}%
               </p>
               <p className="mt-0.5 text-[10px] text-emerald-600 font-mono">
-                {discountPayload.discountAmount > 0 ? `ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(discountAmountPaise)}` : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                {discountPayload.discountAmount > 0 ? `−${fmt(discountAmountPaise)}` : "—"}
               </p>
             </div>
 
@@ -2326,7 +2682,7 @@ function AddOrderPageInner() {
             <span className="text-[13px] font-semibold text-gray-800">Discount Code</span>
             {appliedCoupon && (
               <span className="ml-auto text-[11px] font-bold px-2.5 py-0.5 bg-violet-100 text-violet-700 rounded-full border border-violet-200">
-                {appliedCoupon.code} Ãƒâ€šÃ‚Â· +{appliedCoupon.pct}%
+                {appliedCoupon.code} · +{appliedCoupon.pct}%
               </span>
             )}
           </div>
@@ -2381,7 +2737,7 @@ function AddOrderPageInner() {
           ))}
         </div>
 
-        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MANUAL TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+        {/* ── MANUAL TAB ───────────────────────────────────────────────────── */}
         {tab === "manual" && (
           <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
 
@@ -2390,7 +2746,7 @@ function AddOrderPageInner() {
                 <h3 className="text-[15px] font-semibold text-gray-900">Product List</h3>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {arr1.filter(r => r.productname).length} product{arr1.filter(r => r.productname).length !== 1 ? "s" : ""} selected
-                  {activeDraftId && <span className="ml-2 text-indigo-500 font-medium">Ãƒâ€šÃ‚Â· {draftName}</span>}
+                  {activeDraftId && <span className="ml-2 text-indigo-500 font-medium">· {draftName}</span>}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2481,7 +2837,7 @@ function AddOrderPageInner() {
                                 {rowSelection.section && (
                                   <p className="text-[10px] text-gray-400 truncate leading-tight mt-0.5">
                                     {rowSelection.section}
-                                    {selectedProduct?.name ? ` Ãƒâ€šÃ‚Â· ${selectedProduct.name}` : ""}
+                                    {selectedProduct?.name ? ` · ${selectedProduct.name}` : ""}
                                   </p>
                                 )}
                                 {row.isPriority && (
@@ -2619,13 +2975,13 @@ function AddOrderPageInner() {
                               {row.variantCode}
                             </span>
                           ) : (
-                            <span className="text-gray-300 text-[11px]">ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â</span>
+                            <span className="text-gray-300 text-[11px]">—</span>
                           )}
                         </td>
                         <td className="px-3 py-3">
                           <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden w-fit">
                             <button onClick={() => updateQuantity(idx, row.producQuanity - 1)} disabled={orderLockedByPendingApproval}
-                              className="w-8 h-[34px] flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-base transition-colors border-none cursor-pointer">ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢</button>
+                              className="w-8 h-[34px] flex items-center justify-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-base transition-colors border-none cursor-pointer">−</button>
                             <input type="number" value={row.producQuanity} onChange={(e) => updateQuantity(idx, parseInt(e.target.value) || 1)} min={1} disabled={orderLockedByPendingApproval}
                               className="w-12 h-[34px] text-center text-[13px] font-semibold text-gray-900 font-mono border-x border-gray-200 outline-none bg-white" />
                             <button onClick={() => updateQuantity(idx, row.producQuanity + 1)} disabled={orderLockedByPendingApproval}
@@ -2636,7 +2992,7 @@ function AddOrderPageInner() {
                         <td className="px-3 py-3">
                           {row.packSize > 1 ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded text-[11px] font-semibold font-mono">
-                              {row.producQuanity} ÃƒÆ’Ã¢â‚¬â€ {row.packSize}
+                              {row.producQuanity} × {row.packSize}
                             </span>
                           ) : (
                             <span className="inline-flex items-center px-2 py-0.5 bg-gray-50 border border-gray-200 text-gray-500 rounded text-[11px] font-mono">
@@ -2652,7 +3008,7 @@ function AddOrderPageInner() {
                         </td>
                         <td className="px-3 py-3">
                           <span className="font-mono text-[13px] font-semibold text-slate-700">
-                            {row.price > 0 ? fmt(toPaise(row.price)) : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                            {row.price > 0 ? fmt(toPaise(row.price)) : "—"}
                           </span>
                           {row.price > 0 && (
                             <p className="text-[10px] text-gray-400 mt-0.5">per pc.</p>
@@ -2660,11 +3016,11 @@ function AddOrderPageInner() {
                         </td>
                         <td className="px-3 py-3">
                           <span className="font-mono text-[13px] text-gray-600 font-semibold">
-                            {listPrice > 0 ? fmt(listPrice) : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                            {listPrice > 0 ? fmt(listPrice) : "—"}
                           </span>
                           {listPrice > 0 && (
                             <p className="text-[10px] text-gray-400 mt-0.5">
-                              {row.producQuanity} pack{row.producQuanity !== 1 ? "s" : ""} ÃƒÆ’Ã¢â‚¬â€ ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¹{baseListPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {row.producQuanity} pack{row.producQuanity !== 1 ? "s" : ""} × ₹{baseListPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                           )}
                         </td>
@@ -2708,7 +3064,7 @@ function AddOrderPageInner() {
                             </div>
                             {discAmt > 0 && (
                               <span className="block font-mono text-[11px] font-semibold text-emerald-600">
-                                ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢{fmt(discAmt)}
+                                −{fmt(discAmt)}
                               </span>
                             )}
                             {isEditingThisRow && (
@@ -2721,7 +3077,7 @@ function AddOrderPageInner() {
                                       [productKey]: Math.max(globalPercent, (prev[productKey] ?? globalPercent) - 0.5),
                                     }))} disabled={orderLockedByPendingApproval}
                                     className="w-7 h-[26px] flex items-center justify-center bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold transition-colors border-none cursor-pointer"
-                                  >ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢</button>
+                                  >−</button>
                                   <span className="w-10 h-[26px] flex items-center justify-center text-[11px] font-mono font-bold text-indigo-700 border-x border-indigo-200 bg-white">
                                     {currentProductInput}
                                   </span>
@@ -2740,7 +3096,7 @@ function AddOrderPageInner() {
                                   disabled={orderLockedByPendingApproval || currentProductInput <= globalPercent || perProductSubmitting === productKey}
                                   className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors border-none cursor-pointer"
                                 >
-                                  {perProductSubmitting === productKey ? "SendingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦" : "Request ÃƒÂ¢Ã¢â‚¬â€œÃ‚Â¸"}
+                                  {perProductSubmitting === productKey ? "Sending…" : "Request ▸"}
                                 </button>
                               </div>
                             )}
@@ -2757,7 +3113,7 @@ function AddOrderPageInner() {
                             <span className="block font-mono text-[11px] text-gray-400 line-through">{fmt(listPrice)}</span>
                           )}
                           <span className="font-mono text-[13px] font-semibold text-emerald-700">
-                            {rowTotal > 0 ? fmt(rowTotal) : "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"}
+                            {rowTotal > 0 ? fmt(rowTotal) : "—"}
                           </span>
                         </td>
                         <td className="pl-3 pr-6 py-3">
@@ -2803,23 +3159,23 @@ function AddOrderPageInner() {
               </div>
             </div>
 
-            {/* Order summary ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â sequential discount breakdown */}
+            {/* Order summary — sequential discount breakdown */}
             <div className={`px-6 py-5 border-t border-gray-100 ${hasAnyDiscount ? "bg-emerald-50/60" : "bg-gray-50"
               }`}>
               <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                 <div>
                   <p className="text-[13px] font-semibold text-gray-900">Order Summary</p>
                   <p className="text-[11px] text-gray-400 mt-0.5 font-mono">
-                    {arr1.reduce((a, r) => a + safePositiveNumber(r.producQuanity) * (safePositiveNumber(r.packSize) || 1), 0)} pcs. Ãƒâ€šÃ‚Â·{" "}
+                    {arr1.reduce((a, r) => a + safePositiveNumber(r.producQuanity) * (safePositiveNumber(r.packSize) || 1), 0)} pcs. ·{" "}
                     {arr1.filter(r => r.productname).length} product{arr1.filter(r => r.productname).length !== 1 ? "s" : ""}
                   </p>
                   <p className={`text-[12px] font-semibold mt-2 ${hasAnyDiscount ? "text-emerald-700" : "text-gray-500"
                     }`}>
                     Base: {discountPayload.baseDiscountPercent}%
                     {discountPayload.additionalDiscountType === "custom"
-                      ? " Ãƒâ€šÃ‚Â· Approved custom selected"
-                      : hasSlabDiscount ? ` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ slab: ${discountPayload.slabDiscountPercent}%` : ""}
-                    {" Ãƒâ€šÃ‚Â· "}{discountPayload.additionalDiscountType === "custom" ? "Slab discount disabled" : discountStatusMessage}
+                      ? " · Approved custom selected"
+                      : hasSlabDiscount ? ` → slab: ${discountPayload.slabDiscountPercent}%` : ""}
+                    {" · "}{discountPayload.additionalDiscountType === "custom" ? "Slab discount disabled" : discountStatusMessage}
                   </p>
                 </div>
 
@@ -2833,7 +3189,7 @@ function AddOrderPageInner() {
                       <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Base Discount</p>
                       <p className="mt-1 font-mono text-[14px] font-semibold">
                         {discountPayload.baseDiscountPercent}%
-                        {discountPayload.baseDiscountAmount > 0 ? ` Ãƒâ€šÃ‚Â· ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(toPaise(discountPayload.baseDiscountAmount))}` : ""}
+                        {discountPayload.baseDiscountAmount > 0 ? ` · −${fmt(toPaise(discountPayload.baseDiscountAmount))}` : ""}
                       </p>
                     </div>
                     <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-4 py-3">
@@ -2846,14 +3202,14 @@ function AddOrderPageInner() {
                       </p>
                       <p className="mt-1 font-mono text-[14px] font-semibold">
                         {discountPayload.additionalDiscountType === "custom" ? "Approved" : `${discountPayload.slabDiscountPercent}%`}
-                        {discountPayload.additionalDiscountAmount > 0 ? ` Ãƒâ€šÃ‚Â· ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(toPaise(discountPayload.additionalDiscountAmount))}` : ""}
+                        {discountPayload.additionalDiscountAmount > 0 ? ` · −${fmt(toPaise(discountPayload.additionalDiscountAmount))}` : ""}
                       </p>
                     </div>
                     <div className={`rounded-xl border px-4 py-3 ${hasAnyDiscount ? "border-emerald-200 bg-white text-emerald-700" : "border-gray-200 bg-white text-gray-500"}`}>
                       <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Effective Total</p>
                       <p className="mt-1 font-mono text-[15px] font-bold">
                         {discountPayload.discountPercent}%
-                        {hasAnyDiscount ? ` Ãƒâ€šÃ‚Â· ÃƒÂ¢Ã‹â€ Ã¢â‚¬â„¢${fmt(discountAmountPaise)}` : ""}
+                        {hasAnyDiscount ? ` · −${fmt(discountAmountPaise)}` : ""}
                       </p>
                     </div>
                     <div className="rounded-xl border border-gray-900 bg-gray-900 px-4 py-3 text-white">
@@ -2871,7 +3227,7 @@ function AddOrderPageInner() {
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Dealer Wallet</p>
                   <p className="mt-1 text-sm font-semibold text-gray-900">
-                    {walletLoading ? "Loading wallet..." : wallet?.status === "active" ? `Active Ãƒâ€šÃ‚Â· Available ${fmt(toPaise(wallet.availableBalance))}` : "Inactive Ãƒâ€šÃ‚Â· normal ordering applies"}
+                    {walletLoading ? "Loading wallet..." : wallet?.status === "active" ? `Active · Available ${fmt(toPaise(wallet.availableBalance))}` : "Inactive · normal ordering applies"}
                   </p>
                 </div>
                 {wallet?.status === "active" && (
@@ -2943,7 +3299,7 @@ function AddOrderPageInner() {
           </div>
         )}
 
-        {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ EXCEL TAB ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
+        {/* ── EXCEL TAB ────────────────────────────────────────────────────── */}
         {tab === "excel" && (
           <div className="bg-white border border-gray-200 rounded-2xl p-7">
             <h3 className="text-[15px] font-semibold text-gray-900 mb-1">Upload Excel File</h3>
@@ -2954,11 +3310,11 @@ function AddOrderPageInner() {
                 <input required type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={orderLockedByPendingApproval}
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                 {file ? (
-                  <><div className="text-4xl mb-3">ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Å¾</div>
+                  <><div className="text-4xl mb-3">📄</div>
                     <p className="text-[14px] font-semibold text-emerald-700 mb-1">{file.name}</p>
-                    <p className="text-[12px] text-gray-400">{(file.size / 1024).toFixed(1)} KB Ãƒâ€šÃ‚Â· Click to change</p></>
+                    <p className="text-[12px] text-gray-400">{(file.size / 1024).toFixed(1)} KB · Click to change</p></>
                 ) : (
-                  <><div className="text-4xl mb-3">ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Å¡</div>
+                  <><div className="text-4xl mb-3">📂</div>
                     <p className="text-[14px] font-semibold text-gray-700 mb-1">Click to upload Excel file</p>
                     <p className="text-[12px] text-gray-400">.xlsx, .xls, .csv accepted</p></>
                 )}
@@ -2981,15 +3337,15 @@ function AddOrderPageInner() {
   );
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-// Default export ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â wraps inner component in Suspense so useSearchParams()
+// ─────────────────────────────────────────────────────────────────────────────
+// Default export — wraps inner component in Suspense so useSearchParams()
 // does not break static prerendering in Next.js.
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ─────────────────────────────────────────────────────────────────────────────
 export default function AddOrderPage() {
   return (
     <Suspense fallback={
       <div className="flex items-center justify-center h-[60vh] text-gray-400 text-sm">
-        LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦
+        Loading…
       </div>
     }>
       <AddOrderPageInner />

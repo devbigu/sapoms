@@ -837,6 +837,8 @@ function EditOrderDialog({
                   );
                 })}
               </tbody>
+              
+              
             </table>
           </div>
         ) : (
@@ -1353,13 +1355,16 @@ export default function ViewOrderDealerPage() {
       }, resolvedSummary)
     : null;
   const totals = overrideAmounts
-    ? {
-        ...calculatedTotals,
-        gross: overrideAmounts.gross,
-        discount: overrideAmounts.discountAmount,
-        final: overrideAmounts.netPayable,
-      }
-    : calculatedTotals;
+  ? {
+      ...calculatedTotals,
+      gross: overrideAmounts.gross,
+      discount: overrideAmounts.discountAmount,
+      final: Math.max(
+        0,
+        overrideAmounts.gross - overrideAmounts.discountAmount
+      ),
+    }
+  : calculatedTotals;
   const discountBreakdown = resolveOrderDiscountBreakdown({
     ...(displayOrderMeta ?? {}),
     grossAmount: totals.gross,
@@ -1992,14 +1997,20 @@ export default function ViewOrderDealerPage() {
                           </td>
                           <td className="px-4 py-3.5 font-mono text-gray-500 line-through text-[12px]">₹{pricing.gross.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-3.5 font-mono text-amber-700 font-semibold">
-                            <div>−₹{pricing.discount.toLocaleString("en-IN")}</div>
+                            <div>−₹{num(
+                  totals.discount
+                ).toLocaleString("en-IN")}</div>
                             {discountBreakdown.additionalDiscountType && (
                               <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
-                                incl. {discountBreakdown.additionalDiscountType}
+                                incl. {discountBreakdown.additionalDiscountType} 
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3.5 font-mono font-bold text-emerald-700">₹{pricing.final.toLocaleString("en-IN")}</td>
+                          
+                          <td className="px-4 py-3.5 font-mono font-bold text-emerald-700">₹{num(totals.final).toLocaleString(
+                  "en-IN"
+                )}
+</td>
                           <td className="px-4 py-3.5"><StatusPill code={String(o.dispatchStatus ?? o.orderdata_status ?? "0")} /></td>
                           <td className="px-4 py-3.5 text-[11px] text-gray-500 font-mono whitespace-nowrap">{o.orderdata_datetime || "—"}</td>
                           <td className="px-4 py-3.5 w-px">
@@ -2019,6 +2030,7 @@ export default function ViewOrderDealerPage() {
                       );
                     })}
                   </tbody>
+                  
                 </table>
               </div>
             </div>

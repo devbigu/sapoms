@@ -11,7 +11,7 @@ import type { AuthRole } from "./providers/types";
 
 export const ACCESS_COOKIE = "omsons_access";
 export const REFRESH_COOKIE = "omsons_refresh";
-const ACCESS_TTL_SECONDS = 15 * 60;
+const ACCESS_TTL_SECONDS = 15 * 600;
 const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 type UserWithProfiles = Awaited<ReturnType<typeof loadUserWithProfiles>>;
