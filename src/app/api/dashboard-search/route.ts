@@ -56,7 +56,7 @@ function safeText(value: unknown, max = 240) {
 }
 
 function toDashboardRole(actor: AuthActor): DashboardRole {
-  return actor.role.toLowerCase() as DashboardRole;
+  return actor.role === "RSM" ? "staff" : actor.role.toLowerCase() as DashboardRole;
 }
 
 function emptyResponse(query: string): SearchResponse {
@@ -151,7 +151,7 @@ function buildOrderSearchWhere(query: string): Prisma.OrderWhereInput {
 }
 
 async function getAssignedDealerIds(actor: AuthActor) {
-  if (actor.role !== "STAFF" || !actor.staffId) return [] as bigint[];
+  if (!(actor.role === "STAFF" || actor.role === "RSM") || !actor.staffId) return [] as bigint[];
   const rows = await prisma.dealerStaffAssignment.findMany({
     where: { staffId: actor.staffId, active: true, removedAt: null, dealer: { deletedAt: null, user: { status: "ACTIVE", deletedAt: null } } },
     select: { dealerId: true },
@@ -162,7 +162,7 @@ async function getAssignedDealerIds(actor: AuthActor) {
 function buildOrderScope(actor: AuthActor, assignedDealerIds: bigint[]): Prisma.OrderWhereInput | null {
   if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") return {};
   if (actor.role === "DEALER") return actor.dealerId ? { dealerId: actor.dealerId } : null;
-  if (actor.role === "STAFF") {
+  if (actor.role === "STAFF" || actor.role === "RSM") {
     const scopes: Prisma.OrderWhereInput[] = [];
     if (actor.staffId) scopes.push({ assignedStaffId: actor.staffId });
     if (assignedDealerIds.length > 0) scopes.push({ dealerId: { in: assignedDealerIds } });
@@ -252,9 +252,9 @@ export async function GET(req: NextRequest) {
           orderBy: { name: "asc" },
           take: SEARCH_LIMIT,
         });
-    const dealersPromise = actor.role === "ADMIN" || actor.role === "STAFF"
+    const dealersPromise = actor.role === "ADMIN" || actor.role === "STAFF" || actor.role === "RSM"
       ? prisma.dealerProfile.findMany({
-          where: actor.role === "STAFF" && actor.staffId
+          where: (actor.role === "STAFF" || actor.role === "RSM") && actor.staffId
             ? { AND: [buildDealerWhere(query), { staffAssignments: { some: { staffId: actor.staffId, active: true, removedAt: null } } }] }
             : buildDealerWhere(query),
           include: { user: true, staffAssignments: { where: { active: true, removedAt: null }, include: { staff: true } } },

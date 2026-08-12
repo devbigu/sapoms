@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveOrderAccess } from "@/lib/orderAccess";
 import { fetchStaffAssignedDealerIds, orderActorFromAuth } from "@/lib/orderScopeServer";
+import { serializePrismaValue } from "@/server/db/prisma-serialize";
 import { requireAuth } from "@/server/auth/session";
 
 export const runtime = "nodejs";
@@ -40,7 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         : access.message;
       return NextResponse.json({ success: false, reason, message }, { status });
     }
-    return NextResponse.json({ success: true, data: access.order });
+    return NextResponse.json(serializePrismaValue({ success: true, data: access.order }));
   } catch (error) {
     if (error instanceof Error && error.message === "Unauthenticated") {
       return NextResponse.json({ success: false, message: "Authentication required." }, { status: 401 });

@@ -42,6 +42,15 @@ test("array-wrapped modern responses flatten all item groups, not only raw[0]", 
   assert.deepEqual(result.items.map((row) => row.orderdata_cat_no), ["A", "B"]);
 });
 
+test("Postgres item aliases preserve visible order detail fields", () => {
+  const result = details.normalizeOrderDetailResponse({
+    data: { items: [{ catalogueNumber: "420/1", productname: "Brush", description: "Fine brush" }] },
+  }, "16");
+  assert.equal(result.items[0].orderdata_cat_no, "420/1");
+  assert.equal(result.items[0].product_name, "Brush");
+  assert.equal(result.items[0].product_discription, "Fine brush");
+});
+
 test("no overlay preserves the complete PHP list", () => {
   const php = [legacyRow("1", "A"), legacyRow("2", "B")];
   assert.strictEqual(details.resolveEffectiveOrderDetailItems(php, null), php);

@@ -329,8 +329,11 @@ export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, bo
   const dealerId = parseBigIntId(rawDealerId, "dealer id");
   if (actor.role !== "ADMIN") throw Object.assign(new Error("Only Admin can save ledger bills."), { status: 403 });
 
-  const requestedOrderNumber = String(body.orderNumber || body.orderId || "").trim();
-  if (!requestedOrderNumber) throw Object.assign(new Error("Order number is required."), { status: 400 });
+  const requestedOrderNumbers = Array.isArray(body.orderNumbers)
+    ? body.orderNumbers.map((value) => String(value || "").trim()).filter(Boolean)
+    : [String(body.orderNumber || body.orderId || "").trim()].filter(Boolean);
+  const uniqueRequestedOrderNumbers = Array.from(new Set(requestedOrderNumbers));
+  if (uniqueRequestedOrderNumbers.length === 0) throw Object.assign(new Error("At least one order number is required."), { status: 400 });
 
   const billAmount = Number(body.billAmount);
   if (!Number.isFinite(billAmount) || billAmount <= 0) throw Object.assign(new Error("Valid bill amount is required."), { status: 400 });
@@ -340,15 +343,20 @@ export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, bo
 
   const billDate = parseDateOnly(body.billDate, "bill date");
   const billAmountPaise = toPaise(billAmount);
-  const pdfName = String(body.pdfName || "").trim().slice(0, 255) || null;
+  const pdfNames = Array.isArray(body.pdfNames)
+    ? body.pdfNames.map((value) => String(value || "").trim()).filter(Boolean)
+    : [String(body.pdfName || "").trim()].filter(Boolean);
+  const pdfName = pdfNames.join(", ").slice(0, 255) || null;
   const pdfUrl = String(body.pdfUrl || "").trim().slice(0, 4000) || null;
 
   return prisma.$transaction(async (tx) => {
     const dealer = await tx.dealerProfile.findFirst({ where: { id: dealerId, deletedAt: null, user: { status: "ACTIVE" } }, select: { id: true } });
     if (!dealer) throw Object.assign(new Error("Dealer not found"), { status: 404 });
 
-    const order = await findDealerOrder(tx, dealerId, requestedOrderNumber);
-    const storedOrderNumber = order?.legacyPhpId || requestedOrderNumber;
+    const orderLookups = await Promise.all(uniqueRequestedOrderNumbers.map((orderNumber) => findDealerOrder(tx, dealerId, orderNumber)));
+    const storedOrderNumbers = uniqueRequestedOrderNumbers.map((orderNumber, index) => orderLookups[index]?.legacyPhpId || orderNumber);
+    const storedOrderNumber = storedOrderNumbers.join(", ");
+    const linkedOrder = orderLookups.length === 1 ? orderLookups[0] : null;
     const existing = await tx.ledgerBill.findUnique({ where: { dealerId_orderNumber: { dealerId, orderNumber: storedOrderNumber } } });
     const paidAmountPaise = existing && existing.paidAmountPaise > billAmountPaise ? billAmountPaise : existing?.paidAmountPaise ?? BigInt(0);
 
@@ -356,7 +364,7 @@ export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, bo
       ? await tx.ledgerBill.update({
           where: { id: existing.id },
           data: {
-            orderId: order?.id ?? existing.orderId,
+            orderId: linkedOrder?.id ?? existing.orderId,
             orderNumber: storedOrderNumber,
             billAmountPaise,
             gstPercent,
@@ -369,7 +377,7 @@ export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, bo
       : await tx.ledgerBill.create({
           data: {
             dealerId,
-            orderId: order?.id ?? null,
+            orderId: linkedOrder?.id ?? null,
             orderNumber: storedOrderNumber,
             billAmountPaise,
             gstPercent,

@@ -63,6 +63,8 @@ export function clearAuthStorage(storage: AuthStorage) {
 export function normalizeRoleFromProfile(profile: Record<string, unknown>): AppRole | null {
   const value = String(profile.role ?? "").trim().toLowerCase();
   if (value === "admin" || value === "staff" || value === "dealer" || value === "accountant") return value;
+  if (value === "nsm") return "admin";
+  if (value === "rsm") return "staff";
   if (profile.Dealer_Id) return "dealer";
   if (profile.staff_id) return String(profile.staff_roletype ?? "") === "0" ? "admin" : "staff";
   if (profile.accountant_id || profile._id) return "accountant";
@@ -109,7 +111,7 @@ function normalizeRoleFromRoleType(roletype: unknown): AppRole | null {
 function normalizeRoleFromStaffRoleType(staffRoletype: unknown): AppRole | null {
   const value = String(staffRoletype ?? "").trim().toLowerCase();
   if (value === "0" || value === "admin") return "admin";
-  if (value === "1" || value === "2" || value === "staff" || value === "executive" || value === "field executive") {
+  if (value === "1" || value === "2" || value === "staff" || value === "executive" || value === "field executive" || value === "rsm") {
     return "staff";
   }
   return null;

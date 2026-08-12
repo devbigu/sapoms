@@ -57,11 +57,28 @@ type DealerResponse = {
   last_page?: number
 }
 
+type StaffOption = {
+  id: string | number
+  name?: string
+  email?: string
+  staff_name?: string
+  staff_email?: string
+}
+
+type StaffListResponse = {
+  data?: StaffOption[]
+  count?: number
+  total?: number
+  last_page?: number
+}
+
 type AppRole = "admin" | "staff" | "accountant"
 
 const SHIMMER = "animate-pulse bg-gray-200 rounded"
 const ADMIN_DEALERS_URL = "/api/admin/dealers"
+const ADMIN_STAFF_URL = "/api/admin/staff"
 const ITEMS_PER_PAGE = 20
+const STAFF_OPTIONS_LIMIT = 100
 const getDealerEditRoute = (dealerId: string) => `/dashboard/admin/dealer/${encodeURIComponent(dealerId)}`
 const getDealerViewRoute = (dealerId: string) => `${getDealerEditRoute(dealerId)}/view`
 const getStaffDealerRoute = (dealerId: string) => `/dashboard/staff/dealer/${encodeURIComponent(dealerId)}`
@@ -70,8 +87,15 @@ function statusBadge(s: string) {
   return dealerStatusBadge(normalizeDealerStatus(s))
 }
 
-function getDealerResponseTotal(response: DealerResponse | undefined, fallback: number) {
+function getDealerResponseTotal(response: { total?: number; count?: number } | undefined, fallback: number) {
   return Number(response?.total ?? response?.count ?? fallback) || fallback
+}
+
+function getStaffDisplayName(staff: StaffOption): string {
+  const id = String(staff.id).trim()
+  const name = String(staff.name ?? staff.staff_name ?? "").trim() || (id ? `Staff #${id}` : "Staff")
+  const email = String(staff.email ?? staff.staff_email ?? "").trim()
+  return email ? `${name} (${email})` : name
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -87,6 +111,44 @@ async function fetchJson<T>(url: string): Promise<T> {
   }
 }
 
+async function fetchAllStaffOptions(): Promise<StaffOption[]> {
+  const staffUrl = (pageNumber: number) => `${ADMIN_STAFF_URL}?page=${pageNumber}&limit=${STAFF_OPTIONS_LIMIT}&search=`
+  const firstPage = await fetchJson<StaffListResponse>(staffUrl(1))
+  const staffById = new Map<string, StaffOption>()
+  const addStaff = (staff: StaffOption) => {
+    const id = String(staff.id ?? "").trim()
+    if (!id || staffById.has(id)) return
+    staffById.set(id, { ...staff, id })
+  }
+
+  (firstPage.data ?? []).forEach(addStaff)
+
+  const totalStaffCount = getDealerResponseTotal(firstPage, staffById.size)
+  const detectedPageSize = Math.max(1, firstPage.data?.length || STAFF_OPTIONS_LIMIT)
+  const lastPage = Math.max(1, Number(firstPage.last_page) || Math.ceil(totalStaffCount / detectedPageSize))
+
+  if (lastPage > 1) {
+    const remainingPages = await Promise.all(
+      Array.from({ length: lastPage - 1 }, (_, index) => fetchJson<StaffListResponse>(staffUrl(index + 2)))
+    )
+
+    remainingPages.forEach((pageResponse) => {
+      (pageResponse.data ?? []).forEach(addStaff)
+    })
+  }
+
+  let nextPage = lastPage + 1
+  while (staffById.size < totalStaffCount) {
+    const nextResponse = await fetchJson<StaffListResponse>(staffUrl(nextPage))
+    const pageStaff = nextResponse.data ?? []
+    if (pageStaff.length === 0) break
+
+    pageStaff.forEach(addStaff)
+    nextPage += 1
+  }
+
+  return Array.from(staffById.values()).sort((left, right) => getStaffDisplayName(left).localeCompare(getStaffDisplayName(right), undefined, { sensitivity: "base" }))
+}
 function getRole(): AppRole {
   if (typeof window === "undefined") return "admin"
   if (localStorage.getItem("accountant_token")) return "accountant"
@@ -119,6 +181,7 @@ export default function DealerListPage() {
   const [page,          setPage]          = useState(1)
   const [search,        setSearch]        = useState("")
   const [searchInput,   setSearchInput]   = useState("")
+  const [selectedStaffId, setSelectedStaffId] = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toastMsg,      setToastMsg]      = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(() => new Set())
@@ -151,10 +214,25 @@ export default function DealerListPage() {
     return () => document.removeEventListener('click', handleDocClick)
   }, [])
 
+  const { data: staffOptions = [], isLoading: staffOptionsLoading } = useQuery<StaffOption[]>({
+    queryKey: ["adminDealerStaffOptions"],
+    queryFn: fetchAllStaffOptions,
+    enabled: role !== "staff",
+    staleTime: 10 * 60 * 1000,
+  })
+
   const { data: response, isLoading, isError, refetch } = useQuery<DealerResponse>({
-    queryKey: ['dealers', role, staffId, page, search],
+    queryKey: ["dealers", role, staffId, page, search, selectedStaffId],
     queryFn: async () => {
-      return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?page=${page}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`)
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(ITEMS_PER_PAGE),
+        search,
+      })
+
+      if (selectedStaffId) params.set("staffId", selectedStaffId)
+
+      return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?${params.toString()}`)
     },
     enabled: role !== "staff" || Boolean(staffId),
     placeholderData: keepPreviousData,
@@ -198,12 +276,20 @@ export default function DealerListPage() {
   useEffect(() => {
     if (role === "staff") return
     queryClient.prefetchQuery({
-      queryKey: ['dealers', role, staffId, page + 1, search],
+      queryKey: ["dealers", role, staffId, page + 1, search, selectedStaffId],
       queryFn: async () => {
-        return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?page=${page + 1}&limit=${ITEMS_PER_PAGE}&search=${encodeURIComponent(search)}`)
+        const params = new URLSearchParams({
+          page: String(page + 1),
+          limit: String(ITEMS_PER_PAGE),
+          search,
+        })
+
+        if (selectedStaffId) params.set("staffId", selectedStaffId)
+
+        return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?${params.toString()}`)
       },
     })
-  }, [page, queryClient, role, search])
+  }, [page, queryClient, role, search, selectedStaffId, staffId])
 
   // Debounced search
   useEffect(() => {
@@ -546,15 +632,55 @@ export default function DealerListPage() {
             </div>
           </div>
 
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search dealers..."
-              value={searchInput}
-              onChange={e => setSearchInput(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition w-full"
-            />
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search dealers..."
+                  value={searchInput}
+                  onChange={e => setSearchInput(e.target.value)}
+                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition w-full"
+                />
+              </div>
+
+              <label className="flex w-full flex-col gap-1 text-xs font-medium uppercase tracking-wide text-gray-500 sm:w-72">
+                Staff filter
+                <select
+                  value={selectedStaffId}
+                  onChange={(event) => {
+                    setPage(1)
+                    setSelectedStaffId(event.target.value)
+                  }}
+                  disabled={staffOptionsLoading}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:bg-gray-50"
+                >
+                  <option value="">All staff</option>
+                  {staffOptions.map((staff) => {
+                    const staffId = String(staff.id)
+                    return (
+                      <option key={staffId} value={staffId}>
+                        {getStaffDisplayName(staff)}
+                      </option>
+                    )
+                  })}
+                </select>
+              </label>
+
+              {selectedStaffId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPage(1)
+                    setSelectedStaffId("")
+                  }}
+                  className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                >
+                  Clear filter
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -782,3 +908,13 @@ export default function DealerListPage() {
     </div>
   )
 }
+
+
+
+
+
+
+
+
+
+

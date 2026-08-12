@@ -47,7 +47,7 @@ function canonicalRow(
   orderId: string,
   occurrence: number
 ): OrderDetailRow {
-  const sku = text(item.orderdata_cat_no ?? item.catNo ?? item.productId ?? item.sku);
+  const sku = text(item.orderdata_cat_no ?? item.catNo ?? item.catalogueNumber ?? item.catalogue_number ?? item.productId ?? item.sku);
   const lineId = text(item.orderdata_id ?? item.orderItemId ?? item.id)
     || `php:${orderId}:${normalizeOrderDetailSku(sku)}:${occurrence}`;
 
@@ -62,8 +62,8 @@ function canonicalRow(
     orderdata_afterDisPrice: text(item.orderdata_afterDisPrice ?? item.finalPrice ?? item.final_price ?? 0),
     orderdata_status: text(item.orderdata_status ?? item.status ?? "0"),
     orderdata_datetime: text(item.orderdata_datetime ?? item.documentDate ?? meta.order_date),
-    product_name: text(item.product_name ?? item.productName),
-    product_discription: text(item.product_discription ?? item.productDescription),
+    product_name: text(item.product_name ?? item.productName ?? item.productname),
+    product_discription: text(item.product_discription ?? item.productDescription ?? item.description ?? item.product_description),
     product_unit: text(item.product_unit ?? item.unit ?? "Pcs"),
     readyquantity: text(item.readyquantity ?? item.readyQuantity ?? 0),
     remark: item.remark ?? item.remarks,
@@ -89,7 +89,7 @@ export function normalizeOrderDetailResponse(payload: unknown, orderId: string) 
   const { meta, rows } = extractRows(responseData(payload));
   const occurrences = new Map<string, number>();
   const items = rows.map((item) => {
-    const sku = normalizeOrderDetailSku(item.orderdata_cat_no ?? item.catNo ?? item.productId ?? item.sku);
+    const sku = normalizeOrderDetailSku(item.orderdata_cat_no ?? item.catNo ?? item.catalogueNumber ?? item.catalogue_number ?? item.productId ?? item.sku);
     const occurrence = (occurrences.get(sku) ?? 0) + 1;
     occurrences.set(sku, occurrence);
     return canonicalRow(item, meta, orderId, occurrence);

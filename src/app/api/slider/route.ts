@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function toDto(row: { id: bigint; title: string | null; imageUrl: string; position: number; isActive: boolean; createdAt: Date; updatedAt: Date }) {
   return {

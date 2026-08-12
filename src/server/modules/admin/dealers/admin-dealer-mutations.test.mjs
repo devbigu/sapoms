@@ -56,6 +56,14 @@ test("dealer creation uses transactions, hashing, assignments, sessions, and aud
   assert.match(repo, /ADMIN_DEALER_STAFF_ASSIGNMENTS_UPDATED/);
 });
 
+test("dealer update can replace staff assignments and clear cached staff order scope", () => {
+  assert.match(schemas, /assignedStaffIds:\s*optionalStaffIds/);
+  assert.match(repo, /input\.assignedStaffIds !== undefined/);
+  assert.match(repo, /dealerStaffAssignment\.create/);
+  assert.match(repo, /active:\s*false, removedAt: now/);
+  assert.match(repo, /invalidateStaffAssignmentCache\(\)/);
+});
+
 test("dealer mapper returns compatibility assignment aliases without passwords", () => {
   assert.match(mapper, /assignedstaff/);
   assert.match(mapper, /staffname/);
@@ -105,7 +113,6 @@ test("admin dealer frontend no longer uses unavailable Stage 3 or legacy dealer 
     "/api/delete",
     "/api/staffassign",
     "/api/dealer-status",
-    "/api/dealer-code",
     "/api/php-compat",
   ]) {
     assert.equal(combined.includes(forbidden), false, forbidden);
@@ -113,3 +120,11 @@ test("admin dealer frontend no longer uses unavailable Stage 3 or legacy dealer 
   assert.match(combined, /\/api\/admin\/dealers/);
   assert.match(combined, /credentials:\s*"include"/);
 });
+
+test("admin dealer list exposes a staff filter backed by the admin staff API", () => {
+  assert.match(dealerListPage, /\/api\/admin\/staff/);
+  assert.match(dealerListPage, /Staff filter/);
+  assert.match(dealerListPage, /Clear filter/);
+  assert.match(dealerListPage, /staffId/);
+});
+

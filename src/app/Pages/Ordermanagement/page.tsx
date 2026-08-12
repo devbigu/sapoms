@@ -378,7 +378,7 @@ function ActionMenu({
   const close = (fn: () => void) => () => { fn(); setOpen(false) }
 
   return (
-    <div style={{ position: 'relative', display: 'inline-block' }} ref={ref}>
+    <div style={{ position: 'relative', display: 'inline-block', zIndex: open ? 999 : 1 }} ref={ref}>
       <button
         onClick={() => setOpen(v => !v)}
         aria-label="Actions"
@@ -397,7 +397,7 @@ function ActionMenu({
 
       {open && (
         <div style={{
-          position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: 50,
+          position: 'absolute', right: 0, top: 'calc(100% + 8px)', zIndex: 9999,
           minWidth: 176,
           background: '#fff',
           border: '1px solid #e2e8f0',

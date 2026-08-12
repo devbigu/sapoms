@@ -58,6 +58,18 @@ export type OrderOverlayChange =
   | { type: "replaced"; originalLineId: string; effectiveLineId: string; original: OrderOverlayItem; current: OrderOverlayItem; summary: string }
   | { type: "quantity_changed"; originalLineId: string; original: OrderOverlayItem; current: OrderOverlayItem; fromQuantity: number; toQuantity: number; summary: string };
 
+export type OrderChangeRequest = Record<string, unknown> & {
+  id: string;
+  type: "cancel_request" | "edit_request";
+  status: "pending" | "approved" | "rejected" | string;
+  note: string;
+  requestedAt: string;
+  requestedBy?: { id?: string; role?: OrderOverlayActorRole | string; name?: string };
+  revision?: OrderEditRevision;
+  originalItems?: OrderOverlayItem[];
+  proposedItems?: OrderOverlayItem[];
+};
+
 export type OrderEditRevision = {
   revision: number;
   idempotencyKey: string;
@@ -88,6 +100,7 @@ export type OrderOverlayDocument = {
   acceptance?: OrderAcceptanceMirror;
   edits: OrderEditRevision[];
   latestRevision: number;
+  changeRequests?: OrderChangeRequest[];
   originalOrderRef?: Record<string, unknown>;
   source: typeof ORDER_OVERLAY_VERSION;
   createdAt: string;
@@ -253,7 +266,11 @@ export function hasDispatchStarted(items: Array<Record<string, unknown>>, dispat
   if ((dispatchRecords ?? []).some((record) => numberValue(record.dispatchedQuantity) > 0 || Array.isArray(record.updates) && record.updates.length > 0)) {
     return true;
   }
-  return (items ?? []).some((item) => numberValue(item.readyquantity ?? item.readyQuantity) > 0 || !["", "0", "pending", "inprocess", "in process"].includes(text(item.orderdata_status ?? item.status).toLowerCase()));
+  return (items ?? []).some((item) => {
+    if (numberValue(item.readyquantity ?? item.readyQuantity) > 0) return true;
+    const fulfilmentStatus = text(item.fulfilmentStatus ?? item.fulfilment_status ?? item.orderdata_status).toLowerCase();
+    return Boolean(fulfilmentStatus) && !["0", "pending"].includes(fulfilmentStatus);
+  });
 }
 
 export function resolveOrderOverlayEligibility(input: {

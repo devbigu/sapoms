@@ -5,6 +5,8 @@ import { cloudinary } from "@/lib/cloudinary";
 import { requireAdmin, requestIdFrom } from "@/server/admin/admin-route";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const CLOUDINARY_FOLDER = "sapoms/slider";

@@ -273,11 +273,20 @@ export function resolveOrderDiscountBreakdown(
   if (baseDiscountAmount === undefined && explicitPostBaseAmount !== undefined) {
     baseDiscountAmount = clampMoney(grossAmount - explicitPostBaseAmount);
   }
-  if (baseDiscountAmount === undefined && itemDiscountTotal !== undefined) {
-    baseDiscountAmount = clampMoney(itemDiscountTotal);
-  }
   if (baseDiscountAmount === undefined && explicitBaseDiscountPercent !== undefined) {
     baseDiscountAmount = clampMoney(grossAmount * (explicitBaseDiscountPercent / 100));
+  }
+  if (
+    baseDiscountAmount === undefined &&
+    itemDiscountTotal !== undefined &&
+    explicitType === null &&
+    explicitAdditionalDiscountAmount === undefined &&
+    explicitCustomDiscountAmount === undefined &&
+    explicitCustomDiscountPercent === undefined &&
+    explicitSlabDiscountAmount === undefined &&
+    explicitSlabDiscountPercent === undefined
+  ) {
+    baseDiscountAmount = clampMoney(itemDiscountTotal);
   }
 
   let additionalDiscountType: AdditionalDiscountType = explicitType;

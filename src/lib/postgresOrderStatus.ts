@@ -75,8 +75,16 @@ export async function findPostgresStatusOrder(orderId: unknown) {
   });
 }
 
+function isAssignedStaffRole(actor: AuthActor) {
+  return actor.role === "STAFF" || actor.role === "RSM";
+}
+
 async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "read" | "acceptance" | "fulfilment" | "cancel") {
   if (actor.role === "ADMIN") return;
+  if (actor.role === "NSM") {
+    if (permission === "read" || permission === "acceptance" || permission === "fulfilment") return;
+    throw new PostgresOrderStatusError(403, "forbidden", "NSM cannot cancel Dealer orders.");
+  }
   if (actor.role === "DEALER") {
     if (order.dealerId !== actor.dealerId) throw new PostgresOrderStatusError(403, "forbidden", "This order belongs to another Dealer.");
     if (permission !== "read" && permission !== "cancel") {
@@ -84,7 +92,7 @@ async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "r
     }
     return;
   }
-  if (actor.role === "STAFF") {
+  if (isAssignedStaffRole(actor)) {
     const assignedDirectly = order.assignedStaffId === actor.staffId;
     const assignedDealer = !!actor.staffId && await prisma.dealerStaffAssignment.findFirst({
       where: { dealerId: order.dealerId, staffId: actor.staffId, active: true },
@@ -94,7 +102,7 @@ async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "r
       throw new PostgresOrderStatusError(403, "forbidden", "This order is outside your assigned Dealer scope.");
     }
     if (permission === "cancel") {
-      throw new PostgresOrderStatusError(403, "forbidden", "Staff cannot cancel Dealer orders.");
+      throw new PostgresOrderStatusError(403, "forbidden", "Staff and RSM cannot cancel Dealer orders.");
     }
     return;
   }

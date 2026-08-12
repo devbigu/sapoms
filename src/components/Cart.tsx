@@ -4,14 +4,15 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-// ─── Types ────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type ProductMeta = {
   image: string | null;
   productName: string;
   packSize: number;
+  specSummary: string;
 };
 
-// ─── Build a variant-SKU → meta lookup from nested_products.json ─────────────
+// â”€â”€â”€ Build a variant-SKU â†’ meta lookup from nested_products.json â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
   const map: Record<string, ProductMeta> = {};
 
@@ -20,8 +21,9 @@ function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
     const productName = product.name ?? product.Name ?? "";
     const desc = product.Description ?? "";
 
-    // Parse the description table to get per-variant pack sizes
+    // Parse the description table to get per-variant pack sizes and specs
     const packMap = parsePackSizes(desc);
+    const specMap = parseSpecSummaries(desc);
 
     for (const variant of product.variants ?? []) {
       const sku = variant.SKU ?? variant.sku;
@@ -30,13 +32,14 @@ function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
         image: variantImage,
         productName,
         packSize: packMap[sku] ?? 1,
+        specSummary: specMap[sku] ?? "",
       };
     }
   }
   return map;
 }
 
-// Parse PACK OF column from description HTML table: returns { catNo → packSize }
+// Parse PACK OF column from description HTML table: returns { catNo â†’ packSize }
 function parsePackSizes(html: string): Record<string, number> {
   const result: Record<string, number> = {};
   if (!html) return result;
@@ -62,12 +65,52 @@ function parsePackSizes(html: string): Record<string, number> {
   return result;
 }
 
-/** Format paise to ₹ rupees */
-function fmt(paise: number): string {
-  return `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function parseSpecSummaries(html: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!html) return result;
+
+  const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/i);
+  const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
+  if (!theadMatch || !tbodyMatch) return result;
+
+  const headers = [...theadMatch[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
+    .map((m) => m[1].replace(/<[^>]*>/g, "").trim())
+    .filter(Boolean);
+  if (headers.length < 2) return result;
+
+  const specHeaders = headers
+    .slice(1)
+    .filter((header) => !/pack\s*of|pack|qty|quantity/i.test(header));
+  if (specHeaders.length === 0) return result;
+
+  [...tbodyMatch[1].matchAll(/<tr>([\s\S]*?)<\/tr>/gi)].forEach((tr) => {
+    const cells = [...tr[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
+      .map((m) => m[1].replace(/<[^>]*>/g, "").trim());
+    const catNo = cells[0];
+    if (!catNo) return;
+
+    const specParts = specHeaders
+      .map((header, index) => {
+        const value = cells[index + 1];
+        if (!value) return "";
+        return `${header}: ${value}`;
+      })
+      .filter(Boolean);
+
+    if (specParts.length > 0) {
+      result[catNo] = specParts.join(" · ");
+    }
+  });
+
+  return result;
 }
 
-// ─── Main Cart Component ──────────────────────────────────────
+/** Format paise to â‚¹ rupees */
+function fmt(paise: number): string {
+  return `â‚¹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// â”€â”€â”€ Main Cart Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function Cart() {
   const cart      = useCartStore((s) => s.cart);
   const increment = useCartStore((s) => s.incrementQty);
@@ -90,7 +133,7 @@ export default function Cart() {
   // Prices are in paise; quantity = number of packs
   const subtotalPaise = cart.reduce((acc, item) => {
   const ps = lookup[item.id]?.packSize ?? item.packSize ?? 1;
-  return acc + item.price * item.quantity * ps; // ✅ multiplied by packSize
+  return acc + item.price * item.quantity * ps; // âœ… multiplied by packSize
 }, 0);
   const totalPacks    = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalUnits    = cart.reduce((acc, item) => {
@@ -103,7 +146,7 @@ export default function Cart() {
       <div className="max-w-4xl mx-auto px-1 py-1">
         <div className="flex gap-3 items-start flex-col lg:flex-col">
 
-          {/* ── Cart Items ── */}
+          {/* â”€â”€ Cart Items â”€â”€ */}
           <div className="flex-1 w-full bg-white border border-gray-300 rounded px-2 py-2">
             
             {/* Header */}
@@ -134,7 +177,7 @@ export default function Cart() {
                   const lineTotal = unitPrice * item.quantity * packSize;         // paise total
                   const totalUnitCount = item.quantity * packSize;
 
-                  // Split name: "Adapters Reduction - 163/1" → ["Adapters Reduction", "163/1"]
+                  // Split name: "Adapters Reduction - 163/1" â†’ ["Adapters Reduction", "163/1"]
                   const nameParts   = item.name.split(" - ");
                   const productName = nameParts[0] ?? item.name;
                   const variantCode = nameParts.length > 1 ? nameParts[nameParts.length - 1] : item.id;
@@ -173,8 +216,13 @@ export default function Cart() {
 
                         {/* Variant / Cat No */}
                         <div className="flex flex-wrap items-center gap-2 mb-2">
-                          <span className="inline-flex items-center px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded text-[11px] font-mono font-semibold">
-                            Cat. No: {variantCode}
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 rounded text-[11px] font-mono font-semibold">
+                            <span>Cat. No: {variantCode}</span>
+                            {meta?.specSummary && (
+                              <span className="text-amber-600 font-sans font-medium not-italic">
+                                {meta.specSummary}
+                              </span>
+                            )}
                           </span>
                           {packSize > 1 && (
                             <span className="inline-flex items-center px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded text-[11px] font-semibold">
@@ -194,7 +242,7 @@ export default function Cart() {
                             <button
                               onClick={() => decrement(item.id)}
                               className="w-6 h-7 flex items-center justify-center text-white rounded-l bg-yellow-400 hover:bg-yellow-500 transition-colors font-bold text-sm"
-                            >−</button>
+                            >âˆ’</button>
                             <input
                               type="number"
                               value={item.quantity}
@@ -228,10 +276,10 @@ export default function Cart() {
                           </button>
                         </div>
 
-                        {/* Pack × units breakdown */}
+                        {/* Pack Ã— units breakdown */}
                         {packSize > 1 && (
                           <p className="text-[11px] text-[#565959] mt-1.5 font-mono">
-                            {item.quantity} pack{item.quantity !== 1 ? "s" : ""} × {packSize} = {totalUnitCount} units
+                            {item.quantity} pack{item.quantity !== 1 ? "s" : ""} Ã— {packSize} = {totalUnitCount} units
                           </p>
                         )}
                       </div>
@@ -277,7 +325,7 @@ export default function Cart() {
             )}
           </div>
 
-          {/* ── Sidebar / Proceed ── */}
+          {/* â”€â”€ Sidebar / Proceed â”€â”€ */}
           <div className="w-full bg-white border border-gray-300 rounded p-5 sticky top-4
                           transition-all duration-200 ease-in-out
                           hover:shadow-[0_4px_20px_rgba(0,0,0,0.10)] hover:-translate-y-0.5">
@@ -301,3 +349,4 @@ export default function Cart() {
     </div>
   );
 }
+

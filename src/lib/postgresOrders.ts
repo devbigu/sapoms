@@ -107,6 +107,7 @@ export function mapPostgresOrderItemToLegacy(item: PostgresOrderLike["items"][nu
     catalogueNumber: item.catalogueNumberSnapshot,
     category: item.categorySnapshot || "",
     producQuanity: item.totalPieces,
+    orderdata_item_quantity: String(item.quantityPacks),
     quantityPacks: item.quantityPacks,
     packs: item.quantityPacks,
     packSize: item.packSize,

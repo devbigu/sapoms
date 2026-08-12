@@ -37,6 +37,14 @@ test("JWT access claims use PostgreSQL user identity and no legacy source claims
   assert.doesNotMatch(source, /legacyActorId|legacySource|source:/);
 });
 
+test("client session resolver refreshes expired access cookies before login fallback", async () => {
+  const source = await read("src/hooks/useAuthSession.ts");
+  assert.match(source, /fetchWithSessionRefresh\("\/api\/auth\/me"\)/);
+  assert.match(source, /fetch\("\/api\/auth\/refresh"/);
+  assert.match(source, /response\.status !== 401/);
+  assert.match(source, /installAxiosSessionRefresh\(\)/);
+  assert.match(source, /config\._sessionRefreshRetried = true/);
+});
 test("legacy accountant route is retired", async () => {
   const source = await read("src/app/api/auth/accountant/route.ts");
   assert.match(source, /status: 410/);

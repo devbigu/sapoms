@@ -37,7 +37,8 @@ export function parseOrderActor(input: {
 }
 
 export function orderActorFromAuth(actor: AuthActor): OrderActor | null {
-  const role = actor.role.toLowerCase();
+  const rawRole = actor.role.toLowerCase();
+  const role = rawRole === "rsm" ? "staff" : rawRole;
   if (role !== "admin" && role !== "accountant" && role !== "staff" && role !== "dealer") return null;
   const actorId = role === "staff"
     ? actor.staffId?.toString() ?? ""
