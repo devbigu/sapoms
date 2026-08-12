@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 type ProductMeta = {
   image: string | null;
   productName: string;
@@ -12,7 +12,7 @@ type ProductMeta = {
   specSummary: string;
 };
 
-// â”€â”€â”€ Build a variant-SKU â†’ meta lookup from nested_products.json â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Build a variant-SKU meta lookup from nested_products.json
 function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
   const map: Record<string, ProductMeta> = {};
 
@@ -39,7 +39,7 @@ function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
   return map;
 }
 
-// Parse PACK OF column from description HTML table: returns { catNo â†’ packSize }
+// Parse PACK OF column from description HTML table: returns { catNo -> packSize }
 function parsePackSizes(html: string): Record<string, number> {
   const result: Record<string, number> = {};
   if (!html) return result;
@@ -98,19 +98,19 @@ function parseSpecSummaries(html: string): Record<string, string> {
       .filter(Boolean);
 
     if (specParts.length > 0) {
-      result[catNo] = specParts.join(" · ");
+      result[catNo] = specParts.join(" - ");
     }
   });
 
   return result;
 }
 
-/** Format paise to â‚¹ rupees */
+/** Format paise to rupees */
 function fmt(paise: number): string {
-  return `â‚¹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return ` ₹ ${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// â”€â”€â”€ Main Cart Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Main Cart Component
 export default function Cart() {
   const cart      = useCartStore((s) => s.cart);
   const increment = useCartStore((s) => s.incrementQty);
@@ -133,7 +133,7 @@ export default function Cart() {
   // Prices are in paise; quantity = number of packs
   const subtotalPaise = cart.reduce((acc, item) => {
   const ps = lookup[item.id]?.packSize ?? item.packSize ?? 1;
-  return acc + item.price * item.quantity * ps; // âœ… multiplied by packSize
+  return acc + item.price * item.quantity * ps;
 }, 0);
   const totalPacks    = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalUnits    = cart.reduce((acc, item) => {
@@ -146,7 +146,7 @@ export default function Cart() {
       <div className="max-w-4xl mx-auto px-1 py-1">
         <div className="flex gap-3 items-start flex-col lg:flex-col">
 
-          {/* â”€â”€ Cart Items â”€â”€ */}
+          {/* Cart Items */}
           <div className="flex-1 w-full bg-white border border-gray-300 rounded px-2 py-2">
             
             {/* Header */}
@@ -177,7 +177,7 @@ export default function Cart() {
                   const lineTotal = unitPrice * item.quantity * packSize;         // paise total
                   const totalUnitCount = item.quantity * packSize;
 
-                  // Split name: "Adapters Reduction - 163/1" â†’ ["Adapters Reduction", "163/1"]
+                  // Split name into product and variant.
                   const nameParts   = item.name.split(" - ");
                   const productName = nameParts[0] ?? item.name;
                   const variantCode = nameParts.length > 1 ? nameParts[nameParts.length - 1] : item.id;
@@ -242,7 +242,7 @@ export default function Cart() {
                             <button
                               onClick={() => decrement(item.id)}
                               className="w-6 h-7 flex items-center justify-center text-white rounded-l bg-yellow-400 hover:bg-yellow-500 transition-colors font-bold text-sm"
-                            >âˆ’</button>
+                            >-</button>
                             <input
                               type="number"
                               value={item.quantity}
@@ -276,10 +276,10 @@ export default function Cart() {
                           </button>
                         </div>
 
-                        {/* Pack Ã— units breakdown */}
+                        {/* Pack units breakdown */}
                         {packSize > 1 && (
                           <p className="text-[11px] text-[#565959] mt-1.5 font-mono">
-                            {item.quantity} pack{item.quantity !== 1 ? "s" : ""} Ã— {packSize} = {totalUnitCount} units
+                            {item.quantity} pack{item.quantity !== 1 ? "s" : ""} x {packSize} = {totalUnitCount} units
                           </p>
                         )}
                       </div>
@@ -325,7 +325,7 @@ export default function Cart() {
             )}
           </div>
 
-          {/* â”€â”€ Sidebar / Proceed â”€â”€ */}
+          {/* Sidebar / Proceed */}
           <div className="w-full bg-white border border-gray-300 rounded p-5 sticky top-4
                           transition-all duration-200 ease-in-out
                           hover:shadow-[0_4px_20px_rgba(0,0,0,0.10)] hover:-translate-y-0.5">
@@ -349,4 +349,3 @@ export default function Cart() {
     </div>
   );
 }
-
