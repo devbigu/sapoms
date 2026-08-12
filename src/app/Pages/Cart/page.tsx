@@ -7,7 +7,7 @@ import axios from "axios";
 import { useCartStore } from "@/Store/store";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type ProductMeta = { image: string | null; productName: string; packSize: number };
+type ProductMeta = { image: string | null; productName: string; packSize: number; specSummary: string };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function parsePackSizes(html: string): Record<string, number> {
@@ -31,16 +31,60 @@ function parsePackSizes(html: string): Record<string, number> {
   return result;
 }
 
+function parseSpecSummaries(html: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!html) return result;
+
+  const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/i);
+  const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
+  if (!theadMatch || !tbodyMatch) return result;
+
+  const headers = [...theadMatch[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
+    .map(m => m[1].replace(/<[^>]*>/g, "").trim())
+    .filter(Boolean);
+  if (headers.length < 2) return result;
+
+  const specHeaders = headers.slice(1).filter((header) => !/pack\s*of|pack|qty|quantity/i.test(header));
+  if (specHeaders.length === 0) return result;
+
+  [...tbodyMatch[1].matchAll(/<tr>([\s\S]*?)<\/tr>/gi)].forEach(tr => {
+    const cells = [...tr[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
+      .map(m => m[1].replace(/<[^>]*>/g, "").trim());
+    const catNo = cells[0];
+    if (!catNo) return;
+
+    const specParts = specHeaders
+      .map((header, index) => {
+        const value = cells[index + 1];
+        return value ? `${header}: ${value}` : "";
+      })
+      .filter(Boolean);
+
+    if (specParts.length > 0) {
+      result[catNo] = specParts.join(" · ");
+    }
+  });
+
+  return result;
+}
+
 function buildVariantLookup(data: any[]): Record<string, ProductMeta> {
   const map: Record<string, ProductMeta> = {};
   for (const product of data) {
     const image = (product.images ?? product.Images ?? []).find(Boolean) ?? null;
     const productName = product.name ?? product.Name ?? "";
-    const packMap = parsePackSizes(product.Description ?? "");
+    const description = product.Description ?? "";
+    const packMap = parsePackSizes(description);
+    const specMap = parseSpecSummaries(description);
     for (const variant of product.variants ?? []) {
       const sku = variant.SKU ?? variant.sku;
       const variantImage = (variant.images ?? variant.Images ?? []).find(Boolean) ?? image;
-      map[sku] = { image: variantImage, productName, packSize: packMap[sku] ?? 1 };
+      map[sku] = {
+        image: variantImage,
+        productName,
+        packSize: packMap[sku] ?? 1,
+        specSummary: specMap[sku] ?? "",
+      };
     }
   }
   return map;
@@ -209,7 +253,12 @@ export default function CartPage() {
 
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
                       <span style={{ fontSize: 11, fontFamily: "monospace", background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>
-                        {varCode}
+                        Cat. No: {varCode}
+                        {meta?.specSummary && (
+                          <span style={{ marginLeft: 6, color: "#b45309", fontFamily: "Inter, Arial, sans-serif", fontWeight: 500 }}>
+                            {meta.specSummary}
+                          </span>
+                        )}
                       </span>
                       {packSize > 1 && (
                         <span style={{ fontSize: 11, background: "#ede9fe", color: "#7c3aed", border: "1px solid #ddd6fe", borderRadius: 6, padding: "2px 8px", fontWeight: 600 }}>

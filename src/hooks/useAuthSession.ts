@@ -1,14 +1,74 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { clearAuthStorage, normalizeRoleFromProfile, persistAuthenticatedSession, roleTypeForRole, type AuthSession, type StoredUser } from "@/lib/roleAccess";
 
 type ResolvedAuth =
   | { loading: true; session: null }
   | { loading: false; session: AuthSession };
 
+type RetriableAxiosConfig = InternalAxiosRequestConfig & { _sessionRefreshRetried?: boolean };
+
+let refreshPromise: Promise<boolean> | null = null;
+let axiosInterceptorInstalled = false;
+
+async function refreshSession() {
+  if (!refreshPromise) {
+    refreshPromise = fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((response) => response.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+}
+
+async function fetchWithSessionRefresh(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, { credentials: "include", cache: "no-store", ...init });
+  if (response.status !== 401) return response;
+
+  const refreshed = await refreshSession();
+  if (!refreshed) return response;
+
+  return fetch(input, { credentials: "include", cache: "no-store", ...init });
+}
+
+function installAxiosSessionRefresh() {
+  if (axiosInterceptorInstalled) return;
+  axiosInterceptorInstalled = true;
+
+  axios.interceptors.response.use(
+    (response) => response,
+    async (error: AxiosError) => {
+      const config = error.config as RetriableAxiosConfig | undefined;
+      if (!config || error.response?.status !== 401 || config._sessionRefreshRetried) {
+        return Promise.reject(error);
+      }
+
+      const url = String(config.url ?? "");
+      if (url.includes("/api/auth/login") || url.includes("/api/auth/refresh")) {
+        return Promise.reject(error);
+      }
+
+      const refreshed = await refreshSession();
+      if (!refreshed) return Promise.reject(error);
+
+      config._sessionRefreshRetried = true;
+      config.withCredentials = true;
+      return axios(config);
+    },
+  );
+}
+
 async function fetchCurrentSession(): Promise<AuthSession> {
-  const res = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+  const res = await fetchWithSessionRefresh("/api/auth/me");
   if (!res.ok) return { status: "unauthenticated", reason: "missing" };
 
   const json = await res.json();
@@ -33,6 +93,7 @@ export function useAuthSession(): ResolvedAuth {
   const [state, setState] = useState<ResolvedAuth>({ loading: true, session: null });
 
   useEffect(() => {
+    installAxiosSessionRefresh();
     let cancelled = false;
 
     const resolve = async () => {

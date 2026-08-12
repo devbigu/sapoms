@@ -202,8 +202,9 @@ type EffectiveOrderOverlayState = {
   isEdited: boolean;
   latestRevision: number;
   cancellation?: { reason?: string; cancelledAt?: string; cancelledBy?: { id?: string; role?: string; name?: string } } | null;
-  eligibility?: { canDealerChange?: boolean; reason?: string } | null;
+  eligibility?: { canDealerChange?: boolean; reason?: string; accepted?: boolean } | null;
   changeHistory?: Array<{ summary?: string; type?: string }>;
+  changeRequests?: Array<Record<string, unknown> & { id?: string; type?: string; status?: string; note?: string; requestedAt?: string; revision?: { effectiveItems?: OrderData[]; changes?: Array<{ summary?: string; type?: string }> }; originalItems?: OrderData[]; proposedItems?: OrderData[] } >;
   acceptance?: { status?: string; rawStatus?: string; acceptedAt?: string } | null;
 };
 
@@ -299,7 +300,7 @@ function resolveCurrentUser(): DispatchUserSession | null {
       const parsed = JSON.parse(staffRaw);
       if (parsed?.staff_id) {
         return {
-          role: parsed.staff_roletype === "0" ? "admin" : "staff",
+          role: parsed.role === "NSM" || parsed.staff_roletype === "NSM" || parsed.staff_roletype === "0" ? "admin" : "staff",
           id: String(parsed.staff_id),
           name: parsed.staff_name || "",
           roletype: String(parsed.staff_roletype ?? ""),
@@ -319,7 +320,7 @@ function resolveCurrentUser(): DispatchUserSession | null {
       }
       if (parsed?.staff_id) {
         return {
-          role: parsed.staff_roletype === "0" ? "admin" : "staff",
+          role: parsed.role === "NSM" || parsed.staff_roletype === "NSM" || parsed.staff_roletype === "0" ? "admin" : "staff",
           id: String(parsed.staff_id),
           name: parsed.staff_name || "",
           roletype: String(parsed.staff_roletype ?? ""),
@@ -398,32 +399,6 @@ function extractOrderNote(orders: OrderData[], overlayNote: string) {
     if (fromRemark) return fromRemark;
   }
   return "";
-}
-
-// Parse PACK OF / pack size from product description HTML table: returns { catNo → packSize }
-function parsePackSizes(html: string): Record<string, number> {
-  const result: Record<string, number> = {};
-  if (!html) return result;
-
-  const theadMatch = html.match(/<thead>([\s\S]*?)<\/thead>/i);
-  if (!theadMatch) return result;
-  const headers = [...theadMatch[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
-    .map(m => m[1].replace(/<[^>]*>/g, "").trim());
-  const packIdx = headers.findIndex(h => /pack|qty|quantity/i.test(h));
-  if (packIdx === -1) return result;
-
-  const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/i);
-  if (!tbodyMatch) return result;
-
-  [...tbodyMatch[1].matchAll(/<tr>([\s\S]*?)<\/tr>/gi)].forEach(tr => {
-    const cells = [...tr[1].matchAll(/<td>([\s\S]*?)<\/td>/gi)]
-      .map(m => m[1].replace(/<[^>]*>/g, "").trim());
-    const catNo = cells[0];
-    const packStr = cells[packIdx] ?? "1";
-    const n = parseInt(packStr, 10);
-    if (catNo) result[catNo] = isNaN(n) ? 1 : n;
-  });
-  return result;
 }
 
 // ─── Tracking Modal ────────────────────────────────────────────────────────────
@@ -521,8 +496,9 @@ function getRowPricing(o: OrderData, packLookup: Record<string, number>, orderMe
     packs = orderedQuantity;
   }
 
-  const explicitGross = num(o.listPriceTotal ?? o.list_price_total ?? o.listPrice ?? o.list_price);
-  const gross = explicitGross > 0 ? explicitGross : storedGross > 0 ? storedGross : unitPrice * pieces;
+  const explicitGross = num(o.listPriceTotal ?? o.list_price_total);
+  const calculatedGross = unitPrice * pieces;
+  const gross = explicitGross > 0 ? explicitGross : calculatedGross > 0 ? calculatedGross : storedGross;
 
   const perItemPct = num(o.totalDiscountPercent ?? o.total_discount_percentage ?? o.total_discount ?? o.discount);
   const orderPct = num(orderMeta?.totalDiscountPercentage ?? orderMeta?.discountPercent ?? orderMeta?.allocatedDiscountPercent ?? orderMeta?.allocatedDiscount);
@@ -734,12 +710,14 @@ function DealerField({ label, value }: { label: string; value?: string }) {
 
 function CancelOrderDialog({
   orderId,
+  requestMode,
   saving,
   error,
   onClose,
   onConfirm,
 }: {
   orderId: string;
+  requestMode: boolean;
   saving: boolean;
   error: string;
   onClose: () => void;
@@ -749,9 +727,9 @@ function CancelOrderDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
       <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
-        <h2 className="text-base font-bold text-gray-900">Cancel this order?</h2>
+        <h2 className="text-base font-bold text-gray-900">{requestMode ? "Request cancellation?" : "Cancel this order?"}</h2>
         <p className="mt-2 text-sm leading-6 text-gray-600">This action will remove order OM/{new Date().getFullYear()}/{orderId} from the active fulfilment workflow. The original order record will be preserved.</p>
-        <label className="mt-5 block text-[11px] font-bold uppercase tracking-wider text-gray-500">Cancellation reason</label>
+        <label className="mt-5 block text-[11px] font-bold uppercase tracking-wider text-gray-500">{requestMode ? "Cancellation request note" : "Cancellation reason"}</label>
         <textarea
           value={reason}
           onChange={(event) => setReason(event.target.value.slice(0, 1000))}
@@ -762,7 +740,7 @@ function CancelOrderDialog({
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={saving} className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Keep Order</button>
           <button type="button" onClick={() => onConfirm(reason)} disabled={saving} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50">
-            {saving ? "Cancelling..." : "Cancel Order"}
+            {saving ? (requestMode ? "Sending..." : "Cancelling...") : (requestMode ? "Request Cancellation" : "Cancel Order")}
           </button>
         </div>
       </div>
@@ -772,21 +750,26 @@ function CancelOrderDialog({
 
 function EditOrderDialog({
   items,
+  packLookup,
   latestRevision,
+  requestMode,
   saving,
   error,
   onClose,
   onSave,
 }: {
   items: OrderData[];
+  packLookup: Record<string, number>;
   latestRevision: number;
+  requestMode: boolean;
   saving: boolean;
   error: string;
   onClose: () => void;
-  onSave: (payload: { expectedRevision: number; items: Array<Record<string, unknown>> }) => void;
+  onSave: (payload: { expectedRevision: number; items: Array<Record<string, unknown>>; note?: string }) => void;
 }) {
   const [draftItems, setDraftItems] = useState(() => items.map((item) => ({ ...item, originalLineId: item.orderdata_id })));
   const [reviewing, setReviewing] = useState(false);
+  const [requestNote, setRequestNote] = useState("");
   const visibleItems = draftItems.filter((item) => !(item as Record<string, unknown>)._removed);
   const changeSummaries = draftItems.flatMap((item) => {
     const original = items.find((entry) => entry.orderdata_id === item.originalLineId);
@@ -799,7 +782,18 @@ function EditOrderDialog({
   });
 
   const updateItem = (lineId: string, patch: Partial<OrderData>) => {
-    setDraftItems((current) => current.map((item) => item.originalLineId === lineId ? { ...item, ...patch } : item));
+    setDraftItems((current) => current.map((item) => {
+      if (item.originalLineId !== lineId) return item;
+      const next = { ...item, ...patch };
+      if (patch.orderdata_cat_no !== undefined) {
+        const resolvedPack = packLookup[String(patch.orderdata_cat_no).trim()];
+        if (resolvedPack > 0) {
+          next.packSize = resolvedPack;
+          next.pack_size = resolvedPack;
+        }
+      }
+      return next;
+    }));
   };
 
   return (
@@ -807,8 +801,8 @@ function EditOrderDialog({
       <div className="w-full max-w-5xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-bold text-gray-900">Edit Order Items</h2>
-            <p className="mt-1 text-sm text-gray-600">Remove items, replace catalogue details, or correct quantities before acceptance.</p>
+            <h2 className="text-base font-bold text-gray-900">{requestMode ? "Request Edit" : "Edit Order Items"}</h2>
+            <p className="mt-1 text-sm text-gray-600">{requestMode ? "Send the proposed edited order for Admin/NSM approval." : "Remove items, replace catalogue details, or correct quantities before acceptance."}</p>
           </div>
           <button type="button" onClick={onClose} disabled={saving} className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-gray-600">Close</button>
         </div>
@@ -826,7 +820,7 @@ function EditOrderDialog({
                       <td className="p-3 text-gray-900"><input value={String(item.orderdata_cat_no ?? "")} disabled={removed || saving} onChange={(event) => updateItem(item.originalLineId, { orderdata_cat_no: event.target.value })} className="w-36 rounded-lg border border-gray-200 px-2 py-1.5 font-mono text-xs" /></td>
                       <td className="p-3 text-gray-900"><input value={String(item.product_name ?? "")} disabled={removed || saving} onChange={(event) => updateItem(item.originalLineId, { product_name: event.target.value })} className="w-64 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" /></td>
                       <td className="p-3 text-gray-900"><input type="number" min="1" value={String(item.orderdata_item_quantity ?? "")} disabled={removed || saving} onChange={(event) => updateItem(item.originalLineId, { orderdata_item_quantity: event.target.value })} className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" /></td>
-                      <td className="p-3 text-gray-900"><input type="number" min="1" value={String(item.packSize ?? item.pack_size ?? 1)} disabled={removed || saving} onChange={(event) => updateItem(item.originalLineId, { packSize: event.target.value })} className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" /></td>
+                      <td className="p-3 text-gray-900"><input type="number" min="1" value={String(packLookup[String(item.orderdata_cat_no ?? "").trim()] ?? item.packSize ?? item.pack_size ?? 1)} disabled={removed || saving} onChange={(event) => updateItem(item.originalLineId, { packSize: event.target.value, pack_size: event.target.value })} className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs" /></td>
                       <td className="p-3 text-xs text-gray-900">{item.fallbackProductNote || item.remark || "—"}</td>
                       <td className="p-3">
                         <button type="button" disabled={saving} onClick={() => updateItem(item.originalLineId, { _removed: !removed } as Partial<OrderData>)} className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700">
@@ -849,6 +843,12 @@ function EditOrderDialog({
             )}
           </div>
         )}
+        {requestMode && (
+          <label className="mt-4 block text-[11px] font-bold uppercase tracking-wider text-gray-500">
+            Edit request note
+            <textarea value={requestNote} onChange={(event) => setRequestNote(event.target.value.slice(0, 1000))} disabled={saving} className="mt-2 h-24 w-full resize-none rounded-xl border border-gray-200 p-3 text-sm normal-case tracking-normal text-gray-900 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-100" />
+          </label>
+        )}
         {visibleItems.length === 0 && <p className="mt-3 text-sm font-medium text-red-600">An edited order cannot be saved with no items. Use Cancel Order instead.</p>}
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
         <div className="mt-5 flex justify-end gap-2">
@@ -856,8 +856,8 @@ function EditOrderDialog({
           {!reviewing ? (
             <button type="button" onClick={() => setReviewing(true)} disabled={saving || visibleItems.length === 0} className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Review Changes</button>
           ) : (
-            <button type="button" disabled={saving || visibleItems.length === 0 || changeSummaries.length === 0} onClick={() => onSave({ expectedRevision: latestRevision, items: visibleItems })} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-              {saving ? "Saving..." : "Save Edit"}
+            <button type="button" disabled={saving || visibleItems.length === 0 || changeSummaries.length === 0 || (requestMode && !requestNote.trim())} onClick={() => onSave({ expectedRevision: latestRevision, items: visibleItems, note: requestNote })} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              {saving ? (requestMode ? "Sending..." : "Saving...") : (requestMode ? "Request Edit" : "Save Edit")}
             </button>
           )}
         </div>
@@ -1079,9 +1079,11 @@ export default function ViewOrderDealerPage() {
           effectiveItems?: OrderData[];
           effectiveTotals?: { grossAmount?: number; discountAmount?: number; netPayableAmount?: number };
           itemContract?: "complete" | "partial";
-          overlay?: { acceptance?: EffectiveOrderOverlayState["acceptance"] } | null;
+          overlay?: { acceptance?: EffectiveOrderOverlayState["acceptance"]; changeRequests?: EffectiveOrderOverlayState["changeRequests"] } | null;
         } & EffectiveOrderOverlayState;
-        setOverlayItems(Array.isArray(data.effectiveItems) ? data.effectiveItems : null);
+        setOverlayItems(Array.isArray(data.effectiveItems)
+          ? normalizeOrderDetailResponse({ data: { ...data, items: data.effectiveItems } }, id).items as OrderData[]
+          : null);
         if (data.isEdited && data.effectiveTotals) {
           setOverlayTotals({
             grossAmount: data.effectiveTotals.grossAmount,
@@ -1098,6 +1100,7 @@ export default function ViewOrderDealerPage() {
           cancellation: data.cancellation,
           eligibility: data.eligibility,
           changeHistory: data.changeHistory,
+          changeRequests: Array.isArray(data.overlay?.changeRequests) ? data.overlay.changeRequests : [],
           acceptance: data.overlay?.acceptance ?? null,
         });
       })
@@ -1183,16 +1186,19 @@ export default function ViewOrderDealerPage() {
       });
   }, [currentUser, id, isPostgresDetail, orderAccessVerified]);
 
-  // Load product pack sizes (catNo → packSize) from local product data
+  // Load product pack sizes (catNo -> packSize) from local nested product data
   useEffect(() => {
-    fetch('/data/products.json')
+    fetch('/data/nested_omsons_products.json')
       .then(r => r.json())
       .then((data: Array<Record<string, unknown>>) => {
         const map: Record<string, number> = {};
         (data ?? []).forEach(product => {
-          const desc = String(product.Description ?? "");
-          const pmap = parsePackSizes(desc);
-          Object.assign(map, pmap);
+          const variants = Array.isArray(product.variants) ? product.variants as Array<Record<string, unknown>> : [];
+          variants.forEach((variant) => {
+            const catNo = String(variant.sku ?? variant.id ?? "").trim();
+            const pack = Number(variant.pack ?? variant.packSize ?? variant.pack_size);
+            if (catNo && Number.isFinite(pack) && pack > 0) map[catNo] = pack;
+          });
         });
         setPackLookup(map);
       })
@@ -1347,22 +1353,37 @@ export default function ViewOrderDealerPage() {
       final: acc.final + pricing.final,
     };
   }, { qty: 0, pieces: 0, gross: 0, discount: 0, final: 0 });
+  const hasOrderLevelTotals = [
+    displayOrderMeta?.grossAmount,
+    displayOrderMeta?.gross_amount,
+    displayOrderMeta?.order_amount,
+    displayOrderMeta?.discountAmount,
+    displayOrderMeta?.discount_amount,
+    displayOrderMeta?.order_discount_amount,
+    displayOrderMeta?.order_discount,
+    displayOrderMeta?.netPayableAmount,
+    displayOrderMeta?.net_payable_amount,
+    displayOrderMeta?.finalPayableAmount,
+    displayOrderMeta?.order_net_amount,
+  ].some((value) => value !== undefined && value !== null && value !== "");
+  const orderLevelAmounts = hasOrderLevelTotals ? resolveOrderAmounts(displayOrderMeta) : null;
   const overrideAmounts = Object.keys(resolvedSummary).length > 0
-    ? resolveOrderAmounts({
+    ? resolveOrderAmounts(orderLevelAmounts ? {
+        grossAmount: orderLevelAmounts.gross,
+        discountAmount: orderLevelAmounts.discountAmount,
+        netPayableAmount: orderLevelAmounts.netPayable,
+      } : {
         grossAmount: calculatedTotals.gross,
         discountAmount: calculatedTotals.discount,
         netPayableAmount: calculatedTotals.final,
       }, resolvedSummary)
-    : null;
+    : orderLevelAmounts;
   const totals = overrideAmounts
   ? {
       ...calculatedTotals,
       gross: overrideAmounts.gross,
       discount: overrideAmounts.discountAmount,
-      final: Math.max(
-        0,
-        overrideAmounts.gross - overrideAmounts.discountAmount
-      ),
+      final: overrideAmounts.netPayable,
     }
   : calculatedTotals;
   const discountBreakdown = resolveOrderDiscountBreakdown({
@@ -1374,8 +1395,7 @@ export default function ViewOrderDealerPage() {
   const discountSummaryRows = getOrderDiscountSummaryRows(discountBreakdown);
   const additionalDiscountBadge = formatAdditionalDiscountBadge(discountBreakdown);
   const rowPricings = (() => {
-    if (Object.keys(resolvedSummary).length === 0) return baseRowPricings;
-    if (closeTo(calculatedTotals.discount, totals.discount)) return baseRowPricings;
+    if (!overrideAmounts || closeTo(calculatedTotals.discount, totals.discount)) return baseRowPricings;
     return rebalanceRowDiscounts(baseRowPricings, totals.discount);
   })();
 
@@ -1599,21 +1619,24 @@ export default function ViewOrderDealerPage() {
         setCancelError(json?.message || "Unable to cancel this order.");
         return;
       }
-      setOverlayState((current) => ({
+      setOverlayState((current) => json.requested ? ({
+        ...(current ?? { isCancelled: false, isEdited: false, latestRevision: 0 }),
+        changeRequests: Array.isArray(json.data?.overlay?.changeRequests) ? json.data.overlay.changeRequests : current?.changeRequests ?? [],
+      }) : ({
         ...(current ?? { isEdited: false, latestRevision: 0 }),
         isCancelled: true,
         cancellation: json.data?.cancellation,
         eligibility: { canDealerChange: false, reason: "order_already_cancelled" },
       }));
       setCancelDialogOpen(false);
-      setInvoiceToast({ type: "success", text: "Order cancelled. The PHP order was preserved." });
+      setInvoiceToast({ type: "success", text: json.requested ? "Cancellation request sent for approval." : "Order cancelled. The PHP order was preserved." });
       window.setTimeout(() => setInvoiceToast(null), 3000);
     } finally {
       setCancelSaving(false);
     }
   };
 
-  const submitEdit = async (payload: { expectedRevision: number; items: Array<Record<string, unknown>> }) => {
+  const submitEdit = async (payload: { expectedRevision: number; items: Array<Record<string, unknown>>; note?: string }) => {
     if (!currentUser || currentUser.role !== "dealer") {
       setEditError("Only the Dealer who owns this order can edit it.");
       return;
@@ -1632,6 +1655,7 @@ export default function ViewOrderDealerPage() {
           expectedRevision: payload.expectedRevision,
           idempotencyKey: `${id}:${payload.expectedRevision}:${Date.now()}`,
           items: payload.items,
+          note: payload.note,
         }),
       });
       const json = await response.json().catch(() => null);
@@ -1639,9 +1663,19 @@ export default function ViewOrderDealerPage() {
         setEditError(json?.message || "Unable to save this edit.");
         return;
       }
+      if (json.requested) {
+        setOverlayState((current) => ({
+          ...(current ?? { isCancelled: false, isEdited: false, latestRevision: 0 }),
+          changeRequests: Array.isArray(json.data?.overlay?.changeRequests) ? json.data.overlay.changeRequests : current?.changeRequests ?? [],
+        }));
+        setEditDialogOpen(false);
+        setInvoiceToast({ type: "success", text: "Edit request sent for approval." });
+        window.setTimeout(() => setInvoiceToast(null), 3000);
+        return;
+      }
       const latestEdit = Array.isArray(json.data?.edits) ? json.data.edits[json.data.edits.length - 1] : null;
       if (Array.isArray(latestEdit?.effectiveItems)) {
-        setOverlayItems(latestEdit.effectiveItems as OrderData[]);
+        setOverlayItems(normalizeOrderDetailResponse({ data: { items: latestEdit.effectiveItems } }, id).items as OrderData[]);
       }
       if (latestEdit?.totals) {
         setOverlayTotals({
@@ -1665,6 +1699,37 @@ export default function ViewOrderDealerPage() {
     }
   };
 
+
+  const reviewChangeRequest = async (requestId: string, action: "approve_change_request" | "reject_change_request") => {
+    if (!currentUser || currentUser.role !== "admin") return;
+    const response = await fetch(`/api/order-overlays/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildDispatchHeaders(currentUser),
+      },
+      body: JSON.stringify({ action, requestId }),
+    });
+    const json = await response.json().catch(() => null);
+    if (!response.ok || !json?.success) {
+      setInvoiceToast({ type: "error", text: json?.message || "Unable to review request." });
+      window.setTimeout(() => setInvoiceToast(null), 3000);
+      return;
+    }
+    setOverlayState((current) => ({
+      ...(current ?? { isCancelled: false, isEdited: false, latestRevision: 0 }),
+      isCancelled: !!json.data?.isCancelled,
+      isEdited: !!json.data?.isEdited,
+      latestRevision: Number(json.data?.latestRevision ?? current?.latestRevision ?? 0),
+      cancellation: json.data?.cancellation ?? current?.cancellation,
+      changeHistory: json.data?.changeHistory ?? current?.changeHistory,
+      changeRequests: Array.isArray(json.data?.overlay?.changeRequests) ? json.data.overlay.changeRequests : current?.changeRequests ?? [],
+    }));
+    if (Array.isArray(json.data?.effectiveItems)) setOverlayItems(json.data.effectiveItems as OrderData[]);
+    setInvoiceToast({ type: "success", text: action === "approve_change_request" ? "Request approved." : "Request rejected." });
+    window.setTimeout(() => setInvoiceToast(null), 3000);
+  };
+
   // Dealer fields to show — in display order, only truthy ones render
   const dealerFields: { label: string; value?: string }[] = resolvedDealer ? [
     { label: "Dealer Name",    value: resolvedDealer.Dealer_Name      },
@@ -1685,7 +1750,10 @@ export default function ViewOrderDealerPage() {
 
   const visibleDealerFields = dealerFields.filter(f => f.value);
   const orderNote = extractOrderNote(displayOrders, localOrderNote);
-  const dealerCanChangeOrder = currentUser?.role === "dealer" && overlayState?.eligibility?.canDealerChange && !overlayState?.isCancelled;
+  const dealerChangeRequiresApproval = currentUser?.role === "dealer" && !!overlayState?.eligibility?.accepted && !overlayState?.isCancelled;
+  const dealerCanChangeOrder = currentUser?.role === "dealer" && !overlayState?.isCancelled;
+  const canReviewChangeRequests = currentUser?.role === "admin";
+  const pendingChangeRequests = (overlayState?.changeRequests ?? []).filter((request) => request.status === "pending");
 
   return (
     <>
@@ -1762,11 +1830,11 @@ export default function ViewOrderDealerPage() {
               <>
                 <button onClick={() => setEditDialogOpen(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-[13px] font-semibold rounded-xl transition-colors">
-                <PenLine /> Edit Order
+                <PenLine /> {dealerChangeRequiresApproval ? "Request Edit" : "Edit Order"}
                 </button>
                 <button onClick={() => setCancelDialogOpen(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-[13px] font-semibold rounded-xl transition-colors">
-                 <Trash2 /> Cancel Order
+                 <Trash2 /> {dealerChangeRequiresApproval ? "Request Cancellation" : "Cancel Order"}
                 </button>
               </>
             )}
@@ -1843,6 +1911,54 @@ export default function ViewOrderDealerPage() {
               <div className="mt-3 space-y-2">
                 {overlayState.changeHistory.map((change, index) => (
                   <p key={index} className="text-[13px] leading-6 text-gray-700">{change.summary || change.type}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
+
+          {pendingChangeRequests.length > 0 && (
+            <div className="bg-white border border-sky-200 rounded-2xl p-5">
+              <p className="text-[11px] font-bold text-sky-600 uppercase tracking-widest">Pending Order Change Requests</p>
+              <div className="mt-3 space-y-3">
+                {pendingChangeRequests.map((request) => (
+                  <div key={String(request.id)} className="rounded-xl border border-slate-200 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{request.type === "edit_request" ? "Edit request" : "Cancellation request"}</p>
+                        <p className="mt-1 text-[13px] leading-6 text-slate-600">{String(request.note || "No note provided")}</p>
+                      </div>
+                      {canReviewChangeRequests && (
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => reviewChangeRequest(String(request.id), "approve_change_request")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700">Approve</button>
+                          <button type="button" onClick={() => reviewChangeRequest(String(request.id), "reject_change_request")} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50">Reject</button>
+                        </div>
+                      )}
+                    </div>
+                    {request.type === "edit_request" && Array.isArray(request.originalItems) && Array.isArray(request.proposedItems) && (
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        {[{ label: "Original order", rows: request.originalItems }, { label: "Proposed edit", rows: request.proposedItems }].map((group) => (
+                          <div key={group.label} className="rounded-lg border border-slate-200">
+                            <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">{group.label}</p>
+                            <div className="divide-y divide-slate-100">
+                              {group.rows.map((item, index) => (
+                                <div key={index} className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 text-[12px] text-slate-700">
+                                  <span className="font-mono font-semibold text-amber-700">{String(item.orderdata_cat_no ?? "-")}</span>
+                                  <span>Qty {String(item.orderdata_item_quantity ?? item.quantityPacks ?? "-")}</span>
+                                  <span>Pack {String(item.packSize ?? item.pack_size ?? "-")}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {request.type === "edit_request" && Array.isArray(request.revision?.changes) && (
+                      <div className="mt-3 space-y-1 text-[13px] text-slate-700">
+                        {request.revision.changes.map((change, index) => <p key={index}>{change.summary || change.type}</p>)}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -1997,20 +2113,14 @@ export default function ViewOrderDealerPage() {
                           </td>
                           <td className="px-4 py-3.5 font-mono text-gray-500 line-through text-[12px]">₹{pricing.gross.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-3.5 font-mono text-amber-700 font-semibold">
-                            <div>−₹{num(
-                  totals.discount
-                ).toLocaleString("en-IN")}</div>
+                            <div>-&#8377;{pricing.discount.toLocaleString("en-IN")}</div>
                             {discountBreakdown.additionalDiscountType && (
                               <div className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600">
-                                incl. {discountBreakdown.additionalDiscountType} 
+                                incl. {discountBreakdown.additionalDiscountType}
                               </div>
                             )}
                           </td>
-                          
-                          <td className="px-4 py-3.5 font-mono font-bold text-emerald-700">₹{num(totals.final).toLocaleString(
-                  "en-IN"
-                )}
-</td>
+                          <td className="px-4 py-3.5 font-mono font-bold text-emerald-700">&#8377;{pricing.final.toLocaleString("en-IN")}</td>
                           <td className="px-4 py-3.5"><StatusPill code={String(o.dispatchStatus ?? o.orderdata_status ?? "0")} /></td>
                           <td className="px-4 py-3.5 text-[11px] text-gray-500 font-mono whitespace-nowrap">{o.orderdata_datetime || "—"}</td>
                           <td className="px-4 py-3.5 w-px">
@@ -2193,6 +2303,7 @@ export default function ViewOrderDealerPage() {
       {cancelDialogOpen && (
         <CancelOrderDialog
           orderId={id}
+          requestMode={dealerChangeRequiresApproval}
           saving={cancelSaving}
           error={cancelError}
           onClose={() => setCancelDialogOpen(false)}
@@ -2202,7 +2313,9 @@ export default function ViewOrderDealerPage() {
       {editDialogOpen && (
         <EditOrderDialog
           items={displayOrders}
+          packLookup={packLookup}
           latestRevision={overlayState?.latestRevision ?? 0}
+          requestMode={dealerChangeRequiresApproval}
           saving={editSaving}
           error={editError}
           onClose={() => setEditDialogOpen(false)}

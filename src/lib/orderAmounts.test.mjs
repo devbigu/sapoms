@@ -110,6 +110,25 @@ test("slab discount is not double-counted in summary rows", () => {
   assert.equal(rows.find((row) => row.key === "total")?.amount, 327138.48);
 });
 
+test("explicit base discount wins over row item discount total", () => {
+  const breakdown = orderAmounts.resolveOrderDiscountBreakdown({
+    grossAmount: 100000,
+    discountAmount: 55000,
+    netPayableAmount: 45000,
+    baseDiscountPercent: 50,
+    additionalDiscountType: "slab",
+    slabDiscountPercent: 10,
+    slabDiscountAmount: 5000,
+    additionalDiscountAmount: 5000,
+  }, undefined, { itemDiscountTotal: 55000 });
+
+  const rows = orderAmounts.getOrderDiscountSummaryRows(breakdown);
+  assert.equal(breakdown.baseDiscountAmount, 50000);
+  assert.equal(breakdown.additionalDiscountType, "slab");
+  assert.equal(breakdown.slabDiscountAmount, 5000);
+  assert.deepEqual(rows.map((row) => row.key), ["gross", "base", "slab", "total", "net"]);
+});
+
 test("OM/2026/3856 slab fixture preserves total discount and net payable", () => {
   const breakdown = orderAmounts.resolveOrderDiscountBreakdown({
     order_id: "3856",

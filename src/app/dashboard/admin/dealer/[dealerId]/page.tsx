@@ -117,6 +117,7 @@ export default function EditDealerPage() {
   const [diagnosticRevoking, setDiagnosticRevoking] = useState(false)
   const [activeDiagnosticPassword, setActiveDiagnosticPassword] = useState<DiagnosticPassword | null>(null)
   const [assignedStaffIds, setAssignedStaffIds] = useState<string[]>([])
+  const [initialAssignedStaffIds, setInitialAssignedStaffIds] = useState<string[]>([])
   const [existingStaffNames, setExistingStaffNames] = useState("")
 
   // Toast auto-dismiss
@@ -154,7 +155,9 @@ export default function EditDealerPage() {
           setAnnualtarget(d.annualtarget || "")
           setCurrentlimit(d.currentlimit || "")
           setExistingStaffNames(d.staffname || "")
-          setAssignedStaffIds(splitCsv(d.assignedstaff))
+          const initialStaffIds = splitCsv(d.assignedstaff)
+          setAssignedStaffIds(initialStaffIds)
+          setInitialAssignedStaffIds(initialStaffIds)
           setStatus(normalizeDealerStatus(d.status))
         } else {
           setToastMsg({ text: json.msz || "Failed to load dealer", type: 'error' })
@@ -286,7 +289,12 @@ export default function EditDealerPage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!assignedStaffIds.length) {
+    const normalizedStaffIds = Array.from(new Set(assignedStaffIds.map((id) => id.trim()).filter(Boolean))).sort()
+    const initialNormalizedStaffIds = Array.from(new Set(initialAssignedStaffIds.map((id) => id.trim()).filter(Boolean))).sort()
+    const staffChanged = normalizedStaffIds.length !== initialNormalizedStaffIds.length
+      || normalizedStaffIds.some((id, index) => id !== initialNormalizedStaffIds[index])
+
+    if (!normalizedStaffIds.length) {
       setToastMsg({ text: "Please assign at least one staff member", type: 'error' })
       return
     }
@@ -318,16 +326,18 @@ export default function EditDealerPage() {
       const updatePayload = await updateResponse.json()
       if (!updateResponse.ok || !updatePayload.success) throw new Error(updatePayload.message ?? "Failed to update dealer")
 
-      const staffResponse = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}/staff`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ staffIds: assignedStaffIds }),
-      })
-      const staffPayload = await staffResponse.json()
-      if (!staffResponse.ok || !staffPayload.success) throw new Error(staffPayload.message ?? "Failed to update staff assignments")
-
-      setExistingStaffNames(getStaffNames())
+      if (staffChanged) {
+        const staffResponse = await fetch(ADMIN_DEALERS_URL + "/" + encodeURIComponent(resolvedDealerId) + "/staff", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ staffIds: normalizedStaffIds }),
+        })
+        const staffPayload = await staffResponse.json()
+        if (!staffResponse.ok || !staffPayload.success) throw new Error(staffPayload.message ?? "Failed to update staff assignments")
+        setExistingStaffNames(getStaffNames())
+        setInitialAssignedStaffIds(normalizedStaffIds)
+      }
       setToastMsg({ text: "Dealer updated successfully", type: 'success' })
     } catch {
       setToastMsg({ text: "Failed to update dealer", type: 'error' })

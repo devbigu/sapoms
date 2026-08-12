@@ -11,6 +11,7 @@ type StaffData = {
   staff_name: string
   staff_email: string
   staff_roletype: string
+  role?: string
   staff_password: string
   staff_designation: string
   staff_location: string
@@ -28,8 +29,14 @@ const ADMIN_STAFF_URL = "/api/admin/staff"
 const ITEMS_PER_PAGE = 10
 const getStaffEditRoute = (staffId: string) => `/dashboard/admin/staff/${encodeURIComponent(staffId)}`
 
-function roleBadge(role: string) {
-  switch (role) {
+function roleBadge(staff: Pick<StaffData, "role" | "staff_roletype">) {
+  const authRole = String(staff.role ?? "").toUpperCase()
+  const staffRoleType = String(staff.staff_roletype ?? "").toUpperCase()
+
+  if (authRole === "NSM") return { bg: "bg-emerald-50", text: "text-emerald-700", label: "NSM" }
+  if (authRole === "RSM" || staffRoleType === "RSM") return { bg: "bg-sky-50", text: "text-sky-700", label: "RSM" }
+
+  switch (staffRoleType) {
     case "1": return { bg: "bg-indigo-50", text: "text-indigo-700", label: "Executive" }
     case "2": return { bg: "bg-violet-50", text: "text-violet-700", label: "Field Executive" }
     default:  return { bg: "bg-gray-100",  text: "text-gray-500",   label: "Unknown" }
@@ -181,7 +188,7 @@ export default function StaffListPage() {
       (page - 1) * ITEMS_PER_PAGE + i + 1,
       s.staff_name,
       s.staff_email,
-      s.staff_roletype === "1" ? "Executive" : s.staff_roletype === "2" ? "Field Executive" : "",
+      roleBadge(s).label,
       s.staff_password,
     ])
     const csv = [headers, ...rows].map(r => r.join(",")).join("\n")
@@ -343,7 +350,7 @@ export default function StaffListPage() {
 
                 {/* Rows */}
                 {!isLoading && displayedData.map((staff, i) => {
-                  const badge = roleBadge(staff.staff_roletype)
+                  const badge = roleBadge(staff)
                   return (
                     <tr key={staff.staff_id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-4 text-gray-400 text-xs">{startIndex + i}</td>
@@ -373,7 +380,7 @@ export default function StaffListPage() {
                               <span className={`${visible ? 'text-gray-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-100 select-all' : 'text-gray-300'}`}>
                                 {visible ? staff.staff_password || "-" : "********"}
                               </span>
-                              {role === 'admin' && staff.staff_password && (
+                              {/* {(
                                 <button
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); setVisiblePasswords(prev => {
@@ -388,7 +395,7 @@ export default function StaffListPage() {
                                 >
                                   {visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                 </button>
-                              )}
+                              )} */}
                             </div>
                           )
                         })()}
@@ -406,7 +413,7 @@ export default function StaffListPage() {
                               <MoreVertical className="w-4 h-4" />
                             </button>
                             {openMenu === staff.staff_id && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-10 py-1">
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
                                 <Link href={getStaffEditRoute(staff.staff_id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Edit</Link>
                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(staff.staff_id); setOpenMenu(null) }} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">Delete</button>
                               </div>

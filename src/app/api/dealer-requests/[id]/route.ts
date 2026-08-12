@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AdminRouteError } from "@/server/admin/admin-errors";
 import { prisma } from "@/server/db/prisma";
 import { parseCreateAdminDealerInput } from "@/server/modules/admin/dealers/dealers.schemas";
+import { generatePostgresDealerCode } from "@/server/modules/dealers/dealer-code.service";
 import { createAdminDealer } from "@/server/modules/admin/dealers/dealers.service";
 import type { AuthActor } from "@/server/modules/admin/dealers/dealers.types";
 import { normalizeDealerFormSnapshot, validateDealerFormSnapshot } from "@/lib/dealerForm";
@@ -196,7 +197,12 @@ export async function PATCH(
         return buildResponseError("Approving admin user id is required", 400);
       }
 
-      const snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);
+      let snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);
+      const dealerCode = await generatePostgresDealerCode(snapshot.dealerCode);
+      if (!dealerCode) {
+        return buildResponseError("All 4-digit dealer codes are already in use", 409);
+      }
+      snapshot = { ...snapshot, dealerCode };
       const validationError = validateDealerFormSnapshot(snapshot);
       if (validationError) {
         return buildResponseError(validationError, 400);
@@ -333,7 +339,12 @@ export async function PATCH(
       return buildResponseError("Only the submitting staff member can resubmit this request", 403);
     }
 
-    const snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);
+    let snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);
+    const dealerCode = await generatePostgresDealerCode(snapshot.dealerCode);
+    if (!dealerCode) {
+      return buildResponseError("All 4-digit dealer codes are already in use", 409);
+    }
+    snapshot = { ...snapshot, dealerCode };
     const validationError = validateDealerFormSnapshot(snapshot);
     if (validationError) {
       return buildResponseError(validationError, 400);
@@ -348,6 +359,7 @@ export async function PATCH(
         409,
       );
     }
+
 
     const now = new Date().toISOString();
     try {

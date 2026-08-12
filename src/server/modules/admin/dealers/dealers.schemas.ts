@@ -2,7 +2,18 @@ import { z } from "zod";
 import { AdminRouteError } from "@/server/admin/admin-errors";
 import { parseAdminPagination } from "@/server/admin/admin-pagination";
 
-export const parseAdminDealerListInput = parseAdminPagination;
+const staffId = z.preprocess(
+  (value) => (value === undefined || value === null || String(value).trim() === "" ? undefined : String(value).trim()),
+  z.string().regex(/^\d+$/).optional(),
+);
+
+export function parseAdminDealerListInput(searchParams: URLSearchParams) {
+  const base = parseAdminPagination(searchParams);
+  return {
+    ...base,
+    staffId: staffId.parse(searchParams.get("staffId")),
+  };
+}
 
 const text = (max: number) => z.preprocess(
   (value) => (value === undefined || value === null ? undefined : String(value).trim()),
@@ -37,6 +48,14 @@ const staffIds = z.preprocess((value) => {
   return value;
 }, z.array(z.string().regex(/^\d+$/)).transform((values) => Array.from(new Set(values))));
 
+const optionalStaffIds = z.preprocess((value) => {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string") return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (typeof value === "number" || typeof value === "bigint") return [String(value)];
+  return value;
+}, z.array(z.string().regex(/^\d+$/)).transform((values) => Array.from(new Set(values))).optional());
+
 function aliases(body: Record<string, unknown>) {
   return {
     businessName: body.businessName ?? body.Dealer_Name ?? body.name,
@@ -64,7 +83,7 @@ const createSchema = z.preprocess((value) => aliases((value && typeof value === 
   email: z.preprocess((value) => String(value ?? "").trim().toLowerCase(), z.string().email()),
   password: z.string().min(10).max(200),
   phone: text(30),
-  dealerCode: requiredText(50),
+  dealerCode: text(50),
   address: text(500),
   city: text(100),
   state: text(100),
@@ -93,6 +112,7 @@ const updateSchema = z.preprocess((value) => aliases((value && typeof value === 
   creditDays: optionalInteger(3650),
   creditLimitPaise: optionalBigIntString,
   imageUrl: text(1000),
+  assignedStaffIds: optionalStaffIds,
   rsmUserId: optionalBigIntString,
 }).refine((value) => Object.values(value).some((entry) => entry !== undefined), "At least one field is required"));
 
@@ -130,4 +150,5 @@ export function parseUpdateDealerStatusInput(body: unknown) {
 export function parseReplaceDealerStaffInput(body: unknown) {
   return parseWith(staffReplaceSchema, body);
 }
+
 

@@ -54,8 +54,16 @@ function legacyItemId(item: { id: bigint; legacyPhpOrderItemId?: string | null }
   return item.legacyPhpOrderItemId || item.id.toString();
 }
 
+function isAssignedDispatchStaffRole(actor: AuthActor) {
+  return actor.role === "STAFF" || actor.role === "RSM";
+}
+
+function isGlobalDispatchRole(actor: AuthActor) {
+  return actor.role === "ADMIN" || actor.role === "NSM";
+}
+
 async function hasActiveStaffDealerAssignment(actor: AuthActor, order: Pick<PostgresDispatchOrder, "dealerId">) {
-  if (actor.role !== "STAFF" || !actor.staffId) return false;
+  if (!isAssignedDispatchStaffRole(actor) || !actor.staffId) return false;
   const assignment = await prisma.dealerStaffAssignment.findFirst({
     where: { dealerId: order.dealerId, staffId: actor.staffId, active: true },
     select: { id: true },
@@ -64,15 +72,15 @@ async function hasActiveStaffDealerAssignment(actor: AuthActor, order: Pick<Post
 }
 
 async function canRead(actor: AuthActor, order: Pick<PostgresDispatchOrder, "dealerId" | "assignedStaffId">) {
-  if (actor.role === "ADMIN" || actor.role === "ACCOUNTANT") return true;
+  if (isGlobalDispatchRole(actor) || actor.role === "ACCOUNTANT") return true;
   if (actor.role === "DEALER") return order.dealerId === actor.dealerId;
-  if (actor.role === "STAFF") return order.assignedStaffId === actor.staffId || await hasActiveStaffDealerAssignment(actor, order);
+  if (isAssignedDispatchStaffRole(actor)) return order.assignedStaffId === actor.staffId || await hasActiveStaffDealerAssignment(actor, order);
   return false;
 }
 
 async function canWrite(actor: AuthActor, order: Pick<PostgresDispatchOrder, "dealerId" | "assignedStaffId">) {
-  if (actor.role === "ADMIN") return true;
-  if (actor.role === "STAFF") return order.assignedStaffId === actor.staffId || await hasActiveStaffDealerAssignment(actor, order);
+  if (isGlobalDispatchRole(actor)) return true;
+  if (isAssignedDispatchStaffRole(actor)) return order.assignedStaffId === actor.staffId || await hasActiveStaffDealerAssignment(actor, order);
   return false;
 }
 
@@ -126,7 +134,7 @@ export function mapPostgresOrderDispatchRecords(order: PostgresDispatchOrder): O
       remark: dispatch.remark || "",
       status: normalizeDispatchStatus(dispatch.status),
       actorId: dispatch.actorUserId?.toString() || "",
-      actorRole: dispatch.actorRole === "ADMIN" ? "admin" as const : "staff" as const,
+      actorRole: dispatch.actorRole === "ADMIN" || dispatch.actorRole === "NSM" ? "admin" as const : "staff" as const,
       createdAt: dispatch.createdAt,
     }));
     const currentStatus: DispatchStatus = dispatchedQuantity >= item.quantityPacks ? "successful" : dispatchedQuantity > 0 ? "dispatched" : "pending";

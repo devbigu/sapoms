@@ -39,6 +39,13 @@ test("numeric and string actor IDs normalize to stable strings", () => {
   });
 });
 
+
+test("RSM sessions use assigned-dealer staff scope", () => {
+  assert.deepEqual(orderScope.orderActorFromAuth({ role: "RSM", staffId: 26n, profileId: 26n }), {
+    role: "staff",
+    actorId: "26",
+  });
+});
 test("orders-data adapter requires authenticated session scope instead of query actor identity", async () => {
   const source = await fs.readFile(path.resolve("src/app/api/orders-data/route.ts"), "utf8");
   assert.match(source, /requireAuth\(\)/);
@@ -54,6 +61,7 @@ test("order-access route ignores spoofed actor headers and query identity", asyn
   const source = await fs.readFile(path.resolve("src/app/api/order-access/[id]/route.ts"), "utf8");
   assert.match(source, /requireAuth\(\)/);
   assert.match(source, /orderActorFromAuth\(authActor\)/);
+  assert.match(source, /NextResponse\.json\(serializePrismaValue\(/);
   assert.doesNotMatch(source, /x-omsons-actor-/);
   assert.doesNotMatch(source, /query\.get\("role"\)/);
   assert.doesNotMatch(source, /query\.get\("actor_id"\)/);

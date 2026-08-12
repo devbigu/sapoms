@@ -6,6 +6,7 @@ import { paginationToPrisma } from "@/server/admin/admin-pagination";
 import { AdminRouteError } from "@/server/admin/admin-errors";
 import { normalizeEmail } from "@/server/auth/providers/postgres-auth.provider";
 import { hashPassword } from "@/server/auth/password";
+import { invalidateStaffAssignmentCache } from "@/lib/orderScopeServer";
 import type {
   AdminDealerListInput,
   AdminDealerRecord,
@@ -20,15 +21,31 @@ import type {
 function buildWhere(input: AdminDealerListInput): Prisma.DealerProfileWhereInput {
   const search = input.search.trim();
   const base: Prisma.DealerProfileWhereInput = { deletedAt: null, user: { deletedAt: null } };
-  if (!search) return base;
-  return { AND: [base, { OR: [
-    { businessName: { contains: search, mode: "insensitive" } },
-    { dealerCode: { contains: search, mode: "insensitive" } },
-    { phone: { contains: search, mode: "insensitive" } },
-    { city: { contains: search, mode: "insensitive" } },
-    { gstin: { contains: search, mode: "insensitive" } },
-    { user: { email: { contains: search, mode: "insensitive" } } },
-  ] }] };
+  const filters: Prisma.DealerProfileWhereInput[] = [base];
+
+  if (input.staffId) {
+    filters.push({
+      staffAssignments: {
+        some: {
+          staffId: BigInt(input.staffId),
+          active: true,
+        },
+      },
+    });
+  }
+
+  if (search) {
+    filters.push({ OR: [
+      { businessName: { contains: search, mode: "insensitive" } },
+      { dealerCode: { contains: search, mode: "insensitive" } },
+      { phone: { contains: search, mode: "insensitive" } },
+      { city: { contains: search, mode: "insensitive" } },
+      { gstin: { contains: search, mode: "insensitive" } },
+      { user: { email: { contains: search, mode: "insensitive" } } },
+    ] });
+  }
+
+  return filters.length === 1 ? base : { AND: filters };
 }
 
 const staffAssignmentInclude = {
@@ -71,7 +88,7 @@ function invalid(message: string, code = "INVALID_REQUEST", extra?: Record<strin
 
 async function ensureStaff(tx: Prisma.TransactionClient, staffIds: bigint[]) {
   if (staffIds.length === 0) return [];
-  const staff = await tx.staffProfile.findMany({ where: { id: { in: staffIds }, user: { role: "STAFF", status: "ACTIVE", deletedAt: null } }, include: { user: { select: { email: true, status: true, deletedAt: true } } } });
+  const staff = await tx.staffProfile.findMany({ where: { id: { in: staffIds }, user: { role: { in: ["STAFF", "RSM"] }, status: "ACTIVE", deletedAt: null } }, include: { user: { select: { email: true, status: true, deletedAt: true } } } });
   const found = new Set(staff.map((row) => row.id.toString()));
   const missing = staffIds.map(String).filter((id) => !found.has(id));
   if (missing.length) throw notFound("One or more staff members were not found", "STAFF_NOT_FOUND", { staffIds: missing });
@@ -208,9 +225,32 @@ export class PostgresAdminDealerRepository implements AdminDealerRepository {
           dealerData.region = rsm?.region ?? null;
           changedFields.push("rsmUserId", "region");
         }
+        if (input.assignedStaffIds !== undefined) {
+          const requested = normalizeBigIntList(input.assignedStaffIds);
+          await ensureStaff(tx, requested);
+          const now = new Date();
+          const currentAssignments = await tx.dealerStaffAssignment.findMany({ where: { dealerId } });
+          const requestedSet = new Set(requested.map(String));
+          const currentByStaff = new Map(currentAssignments.map((assignment) => [assignment.staffId.toString(), assignment]));
+          for (const staffId of requested) {
+            const existing = currentByStaff.get(staffId.toString());
+            if (existing) {
+              await tx.dealerStaffAssignment.update({ where: { id: existing.id }, data: { active: true, removedAt: null, assignedByUserId: actor.userId } });
+            } else {
+              await tx.dealerStaffAssignment.create({ data: { dealerId, staffId, assignedByUserId: actor.userId } });
+            }
+          }
+          for (const assignment of currentAssignments) {
+            if (assignment.active && !requestedSet.has(assignment.staffId.toString())) {
+              await tx.dealerStaffAssignment.update({ where: { id: assignment.id }, data: { active: false, removedAt: now } });
+            }
+          }
+          changedFields.push("assignedStaffIds");
+        }
         if (Object.keys(userData).length) await tx.user.update({ where: { id: current.userId }, data: userData });
         if (Object.keys(dealerData).length) await tx.dealerProfile.update({ where: { id: dealerId }, data: dealerData });
         await audit(tx, actor, "ADMIN_DEALER_UPDATED", { dealerId: dealerId.toString(), changedFields: Array.from(new Set(changedFields)) });
+        if (input.assignedStaffIds !== undefined) invalidateStaffAssignmentCache();
         return tx.dealerProfile.findUniqueOrThrow({ where: { id: dealerId }, include });
       });
     } catch (error) {
@@ -284,10 +324,12 @@ export class PostgresAdminDealerRepository implements AdminDealerRepository {
         }
       }
       await audit(tx, actor, "ADMIN_DEALER_STAFF_ASSIGNMENTS_UPDATED", { dealerId: dealerId.toString(), addedStaffIds: added, removedStaffIds: removed, rsmUserId: rsmUserId?.toString() });
+      invalidateStaffAssignmentCache();
       return tx.dealerStaffAssignment.findMany({ where: { dealerId, active: true }, include: staffAssignmentInclude, orderBy: { assignedAt: "desc" } });
     });
   }
 }
 
 export const adminDealerRepository = new PostgresAdminDealerRepository();
+
 

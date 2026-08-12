@@ -61,6 +61,8 @@ assert.equal(resolveStoredAuth(storage({ UserData: json({ name: "No Role" }) }))
 assert.equal(resolveStoredAuth(storage({ UserData: json({ name: "Mystery" }), roletype: "99" })).reason, "unsupported-role", "unknown role is not admin");
 
 assert.equal(resolveStoredAuth(storage({ UserData: json({ name: "A" }), roletype: "3" })).role, "admin");
+assert.equal(resolveStoredAuth(storage({ UserData: json({ admin_id: "n1", role: "nsm" }) })).role, "admin");
+assert.equal(resolveStoredAuth(storage({ UserData: json({ staff_id: "r1", staff_roletype: "RSM", role: "rsm" }) })).role, "staff");
 assert.equal(resolveStoredAuth(storage({ UserData: json({ staff_id: "s1", staff_roletype: "1" }) })).role, "staff");
 assert.equal(resolveStoredAuth(storage({ UserData: json({ staff_id: "s2", staff_roletype: "2" }), roletype: "1" })).role, "staff");
 assert.equal(resolveStoredAuth(storage({ staffData: json({ staff_id: "s3", staff_roletype: "2" }) })).role, "staff");
@@ -93,7 +95,7 @@ assert.equal(getRoleHome("dealer"), "/home");
 assert.equal(getRoleHome("accountant"), "/dashboard/accountant");
 
 const persistedStorage = storage();
-const persisted = persistAuthenticatedSession(persistedStorage, { admin_id: "1", name: "Admin", email: "admin@admin", role: "admin" });
+const persisted = persistAuthenticatedSession(persistedStorage, { admin_id: "1", name: "Admin", email: "admin@admin", role: "nsm" });
 assert.equal(persisted.role, "admin");
 assert.equal(persistedStorage.getItem("status"), "true");
 assert.equal(persistedStorage.getItem("roletype"), "3");

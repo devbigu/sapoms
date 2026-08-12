@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 /**
  * app/drafts/page.tsx
@@ -13,12 +13,14 @@ import moment from "moment";
 import {
   ArrowLeft,
   ArrowRight,
+  Clock3,
   FileText,
   Loader2,
   Pencil,
   Plus,
   Search,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import { type DraftProductRow, type OrderDraft } from "@/lib/drafts";
 import {
@@ -122,6 +124,39 @@ function DraftSkeleton() {
   );
 }
 
+function DraftStatCard({
+  icon,
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  sub: string;
+  tone: "blue" | "amber" | "red";
+}) {
+  const toneClass = {
+    blue: "bg-blue-50 text-blue-600 ring-blue-100",
+    amber: "bg-amber-50 text-amber-600 ring-amber-100",
+    red: "bg-red-50 text-red-600 ring-red-100",
+  }[tone];
+
+  return (
+    <div className="flex min-h-[92px] items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
+      <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md ring-1 ${toneClass}`}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold text-gray-500">{label}</p>
+        <p className="mt-1 text-xl font-bold leading-none text-gray-950">{value}</p>
+        <p className="mt-2 text-[12px] text-gray-500">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function DraftsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -188,6 +223,19 @@ export default function DraftsPage() {
 
     return [...filtered].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   }, [drafts, provisionals, query]);
+
+  const draftStats = useMemo(() => {
+    const pending = drafts.filter((draft) => draft.approval_state?.status === "pending").length;
+    const rejected = drafts.filter((draft) =>
+      draft.source === "custom_discount_rejection" || draft.approval_state?.status === "rejected"
+    ).length;
+
+    return {
+      total: drafts.length,
+      pending,
+      rejected,
+    };
+  }, [drafts]);
 
   const handleDelete = (id: string) => {
     if (!user) return;
@@ -274,9 +322,11 @@ export default function DraftsPage() {
             />
           </section>
 
-          {loading && <DraftSkeleton />}
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-start">
+            <div className="order-2 lg:order-1">
+              {loading && <DraftSkeleton />}
 
-          {!loading && drafts.length === 0 && (
+              {!loading && drafts.length === 0 && (
             <section className="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-14 text-center">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-md bg-gray-50 text-gray-400">
                 <FileText size={20} />
@@ -292,7 +342,7 @@ export default function DraftsPage() {
             </section>
           )}
 
-          {!loading && drafts.length > 0 && visibleDrafts.length === 0 && (
+              {!loading && drafts.length > 0 && visibleDrafts.length === 0 && (
             <section className="rounded-lg border border-gray-200 bg-white px-6 py-12 text-center">
               <p className="text-sm font-semibold text-gray-900">No matching drafts</p>
               <button
@@ -305,10 +355,10 @@ export default function DraftsPage() {
             </section>
           )}
 
-          {!loading && visibleDrafts.length > 0 && (
-            <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-              <div className="divide-y divide-gray-100">
-                {visibleDrafts.map((draft) => {
+              {!loading && visibleDrafts.length > 0 && (
+                <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  <div className="divide-y divide-gray-100">
+                    {visibleDrafts.map((draft) => {
                   const rows = filledRows(draft);
                   const total = draftTotal(draft);
                   const isDeleting = deleteMutation.isPending && deleteMutation.variables?.id === draft.id;
@@ -407,10 +457,36 @@ export default function DraftsPage() {
                       </div>
                     </article>
                   );
-                })}
-              </div>
-            </section>
-          )}
+                    })}
+                  </div>
+                </section>
+              )}
+            </div>
+
+            <aside className="order-1 grid gap-3 sm:grid-cols-3 lg:order-2 lg:grid-cols-1">
+              <DraftStatCard
+                icon={<FileText size={19} />}
+                label="Total Drafts"
+                value={draftStats.total}
+                sub="All saved drafts"
+                tone="blue"
+              />
+              <DraftStatCard
+                icon={<Clock3 size={19} />}
+                label="Pending Drafts"
+                value={draftStats.pending}
+                sub="Waiting for action"
+                tone="amber"
+              />
+              <DraftStatCard
+                icon={<XCircle size={19} />}
+                label="Rejected Drafts"
+                value={draftStats.rejected}
+                sub="Needs review"
+                tone="red"
+              />
+            </aside>
+          </div>
         </div>
       </main>
     </>

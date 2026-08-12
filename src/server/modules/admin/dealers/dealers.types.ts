@@ -1,7 +1,9 @@
 import type { AdminListInput } from "@/server/admin/admin.types";
 import type { Prisma, SalesRegion, UserStatus } from "@prisma/client";
 
-export type AdminDealerListInput = AdminListInput;
+export type AdminDealerListInput = AdminListInput & {
+  staffId?: string;
+};
 
 export type AdminDealerStaffAssignment = {
   id: bigint;
@@ -43,7 +45,7 @@ export type CreateAdminDealerInput = {
   email: string;
   password: string;
   phone?: string;
-  dealerCode: string;
+  dealerCode?: string;
   address?: string;
   city?: string;
   state?: string;
@@ -58,7 +60,7 @@ export type CreateAdminDealerInput = {
   rsmUserId?: string;
 };
 
-export type UpdateAdminDealerInput = Partial<Omit<CreateAdminDealerInput, "password" | "status" | "assignedStaffIds">>;
+export type UpdateAdminDealerInput = Partial<Omit<CreateAdminDealerInput, "password" | "status">>;
 
 export type UpdateDealerStatusInput = {
   status: UserStatus;
@@ -81,5 +83,6 @@ export interface AdminDealerRepository {
   getStaffAssignments(dealerId: bigint): Promise<AdminDealerStaffAssignment[]>;
   replaceStaffAssignments(dealerId: bigint, staffIds: bigint[], actor: AuthActor, rsmUserId?: bigint): Promise<AdminDealerStaffAssignment[]>;
 }
+
 
 

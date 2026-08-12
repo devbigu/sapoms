@@ -80,7 +80,7 @@ const ITEMS_PER_PAGE = 10
 const DEFAULT_CREDIT_DAYS = 60
 const PAYMENT_MODES = ['Cash', 'Cheque', 'NEFT', 'UPI', 'IMPF']
 const EMPTY_BILL_FORM = {
-  orderNumber: '',
+  orderNumbers: [] as string[],
   billAmount: '',
   gstPercent: '18',
   billDate: new Date().toISOString().slice(0, 10),
@@ -154,6 +154,10 @@ function orderAmount(order: RawOrder) {
   return resolveOrderAmounts(order).netPayable
 }
 
+function roundForInput(value: number) {
+  return Math.round(value * 100) / 100
+}
+
 function isStaffLedgerSession() {
   if (typeof window === 'undefined') return false
   const session = resolveStoredAuth(window.localStorage)
@@ -172,7 +176,8 @@ export default function DealerLedgerShellPage() {
   const [billsByDealer, setBillsByDealer] = useState<Record<string, Bill[]>>({})
   const [billDealer, setBillDealer] = useState<Dealer | null>(null)
   const [billForm, setBillForm] = useState(EMPTY_BILL_FORM)
-  const [billFile, setBillFile] = useState<File | null>(null)
+  const [billFiles, setBillFiles] = useState<File[]>([])
+  const [orderDropdownOpen, setOrderDropdownOpen] = useState(false)
   const [paymentTarget, setPaymentTarget] = useState<{ dealer: Dealer; bill: Bill } | null>(null)
   const [paymentForm, setPaymentForm] = useState(EMPTY_PAYMENT_FORM)
   const [isSavingBill, setIsSavingBill] = useState(false)
@@ -279,29 +284,49 @@ export default function DealerLedgerShellPage() {
   const openBillModal = async (dealer: Dealer) => {
     setBillDealer(dealer)
     setBillForm(EMPTY_BILL_FORM)
-    setBillFile(null)
+    setBillFiles([])
+    setOrderDropdownOpen(false)
     await ensureDealerDetails(dealer)
   }
 
   const closeBillModal = () => {
     setBillDealer(null)
     setBillForm(EMPTY_BILL_FORM)
-    setBillFile(null)
+    setBillFiles([])
+    setOrderDropdownOpen(false)
   }
 
-  const handleBillFile = (file: File | null) => {
-    if (!file) {
-      setBillFile(null)
+  const handleBillFiles = (files: FileList | null) => {
+    const selectedFiles = Array.from(files || [])
+    if (selectedFiles.length === 0) {
+      setBillFiles([])
       return
     }
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-    if (!isPdf) {
+    const invalidFile = selectedFiles.find((file) => file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf'))
+    if (invalidFile) {
       showToast({ type: 'error', text: 'Please upload a PDF bill' })
       return
     }
 
-    setBillFile(file)
+    setBillFiles(selectedFiles)
+  }
+
+  const toggleBillOrder = (nextOrderNumber: string, checked: boolean) => {
+    setBillForm((prev) => {
+      const nextOrderNumbers = checked
+        ? Array.from(new Set([...prev.orderNumbers, nextOrderNumber]))
+        : prev.orderNumbers.filter((orderNumber) => orderNumber !== nextOrderNumber)
+      const selectedOrders = (billDealer ? dealerDetails[billDealer.Dealer_Id]?.orders || [] : [])
+        .filter((order) => nextOrderNumbers.includes(orderNumber(order)))
+      const nextAmount = selectedOrders.reduce((sum, order) => sum + orderAmount(order), 0)
+
+      return {
+        ...prev,
+        orderNumbers: nextOrderNumbers,
+        billAmount: nextOrderNumbers.length > 0 ? String(roundForInput(nextAmount)) : '',
+      }
+    })
   }
 
   const submitBill = async (event: FormEvent<HTMLFormElement>) => {
@@ -311,7 +336,7 @@ export default function DealerLedgerShellPage() {
     const amount = Number(billForm.billAmount)
     const gst = Number(billForm.gstPercent)
 
-    if (!billForm.orderNumber || amount <= 0 || gst < 0 || !billForm.billDate) {
+    if (billForm.orderNumbers.length === 0 || amount <= 0 || gst < 0 || !billForm.billDate) {
       showToast({ type: 'error', text: 'Fill all bill fields before saving' })
       return
     }
@@ -320,11 +345,11 @@ export default function DealerLedgerShellPage() {
 
     try {
       const response = await axios.post(`/api/ledger/${encodeURIComponent(billDealer.Dealer_Id)}`, {
-        orderNumber: billForm.orderNumber,
+        orderNumbers: billForm.orderNumbers,
         billAmount: amount,
         gstPercent: gst,
         billDate: billForm.billDate,
-        pdfName: billFile?.name || undefined,
+        pdfNames: billFiles.map((file) => file.name),
       })
 
       const savedBill: Bill | undefined = response.data?.bill
@@ -575,23 +600,50 @@ export default function DealerLedgerShellPage() {
           <form onSubmit={submitBill} className="space-y-4">
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Order Number
+                Orders
               </label>
-              <select
-                value={billForm.orderNumber}
-                onChange={(event) => setBillForm((prev) => ({ ...prev, orderNumber: event.target.value }))}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                required
-              >
-                <option value="">Select order</option>
-                {(dealerDetails[billDealer.Dealer_Id]?.orders || [])
-                  .filter((order) => orderNumber(order))
-                  .map((order) => (
-                    <option key={orderNumber(order)} value={orderNumber(order)}>
-                      {orderLabel(order)} - {formatAmount(orderAmount(order))}
-                    </option>
-                  ))}
-              </select>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setOrderDropdownOpen((open) => !open)}
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <span>
+                    {billForm.orderNumbers.length > 0
+                      ? `${billForm.orderNumbers.length} order${billForm.orderNumbers.length === 1 ? '' : 's'} selected`
+                      : 'Select orders'}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 text-gray-400 transition ${orderDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {orderDropdownOpen && (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-300 bg-white shadow-lg">
+                    {(dealerDetails[billDealer.Dealer_Id]?.orders || [])
+                      .filter((order) => orderNumber(order))
+                      .map((order) => {
+                        const currentOrderNumber = orderNumber(order)
+                        return (
+                          <label key={currentOrderNumber} className="flex cursor-pointer items-center gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-b-0 hover:bg-gray-50">
+                            <input
+                              type="checkbox"
+                              checked={billForm.orderNumbers.includes(currentOrderNumber)}
+                              onChange={(event) => toggleBillOrder(currentOrderNumber, event.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span className="flex-1 text-gray-900">{orderLabel(order)}</span>
+                            <span className="text-xs font-semibold text-gray-600">{formatAmount(orderAmount(order))}</span>
+                          </label>
+                        )
+                      })}
+                    {(dealerDetails[billDealer.Dealer_Id]?.orders || []).filter((order) => orderNumber(order)).length === 0 && (
+                      <div className="px-3 py-4 text-sm text-gray-400">No billable orders found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {billForm.orderNumbers.length > 0 && (
+                <p className="mt-1.5 text-xs text-gray-500">{billForm.orderNumbers.join(', ')}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -630,9 +682,13 @@ export default function DealerLedgerShellPage() {
                 <input
                   type="file"
                   accept="application/pdf,.pdf"
-                  onChange={(event) => handleBillFile(event.target.files?.[0] || null)}
+                  multiple
+                  onChange={(event) => handleBillFiles(event.target.files)}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-indigo-700"
                 />
+                {billFiles.length > 0 && (
+                  <p className="mt-1.5 text-xs text-gray-500">{billFiles.length} PDF{billFiles.length === 1 ? '' : 's'} selected</p>
+                )}
               </div>
             </div>
 

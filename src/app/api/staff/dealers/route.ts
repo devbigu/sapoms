@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const actor = await requireAuth();
-    if (actor.role !== "STAFF" || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    if (!(actor.role === "STAFF" || actor.role === "RSM") || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
     const rows = await prisma.dealerStaffAssignment.findMany({
       where: { staffId: actor.staffId, active: true, removedAt: null, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
       include: { dealer: { include: { user: { select: { email: true, username: true, status: true } } } } },

@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
@@ -33,5 +33,8 @@ test("PostgreSQL dispatch model and transactional quantity protections exist", (
   assert.match(pgDispatch, /prisma\.\$transaction/);
   assert.match(pgDispatch, /dispatchedAt: nextFulfilment === "DISPATCHED"/);
   assert.match(pgDispatch, /actor\.role === "DEALER"/);
+  assert.match(pgDispatch, /isGlobalDispatchRole\(actor\)/);
+  assert.match(pgDispatch, /actor\.role === "STAFF" \|\| actor\.role === "RSM"/);
+  assert.match(pgDispatch, /actor\.role === "ADMIN" \|\| actor\.role === "NSM"/);
   assert.match(pgDispatch, /order\.assignedStaffId === actor\.staffId/);
 });
