@@ -440,10 +440,10 @@ export default function DealerListPage() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
               </div>
-              <div>
+              {/* <div>
                 <h3 className="text-base font-semibold text-gray-900">Activate All Dealers</h3>
                 <p className="text-sm text-gray-500">This will update every dealer account.</p>
-              </div>
+              </div> */}
             </div>
 
             <p className="text-sm leading-6 text-gray-600">
@@ -729,8 +729,8 @@ export default function DealerListPage() {
                   className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
                 >
                   <option value="">All dealers</option>
-                  <option value="active">Wallet dealers</option>
-                  <option value="inactive">Non-wallet dealers</option>
+                  <option value="active">Advance dealers</option>
+                  <option value="inactive">Credit dealers</option>
                 </select>
               </label>
 
@@ -758,7 +758,7 @@ export default function DealerListPage() {
           </div>
         )}
 <div className="mb-4 flex justify-end gap-2">
-          {canManageDealers && (
+          {/* {canManageDealers && (
             <button
               type="button"
               onClick={confirmActivateAllDealers}
@@ -768,7 +768,7 @@ export default function DealerListPage() {
               <CheckCircle2 className="h-4 w-4" />
               {bulkActivating ? "Activating..." : "Activate all dealers"}
             </button>
-          )}
+          )} */}
           <Link
             href={role === "staff" ? "/dashboard/staff/dealer-requests" : "/dashboard/admin/dealer/requests"}
             className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
