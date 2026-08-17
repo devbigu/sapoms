@@ -131,12 +131,18 @@ function getDashboardQueryInfo(value) {
 function buildOrderDisplayNumber(orderId, orderDate) {
   const normalizedId = pickFirstString(orderId);
   if (!normalizedId) return "";
+  const existingMatch = /^OM\/(\d{2}-\d{2})\/DMS-(.+)$/i.exec(normalizedId);
+  if (existingMatch) {
+    const sequence = normalizeOrderId(existingMatch[2]).replace(/^0+(?=\d)/, "").padStart(3, "0");
+    return `OM/${existingMatch[1]}/DMS-${sequence}`;
+  }
   if (/^OM\//i.test(normalizedId)) return normalizedId;
 
   const yearMatch = String(orderDate ?? "").match(/\b(20\d{2})\b/);
   const year = Number(yearMatch ? yearMatch[1] : new Date().getFullYear());
   const yearRange = `${String(year).slice(-2)}-${String(year + 1).slice(-2)}`;
-  return `OM/${yearRange}/DMS-${normalizeOrderId(normalizedId).padStart(5, "0")}`;
+  const sequence = normalizeOrderId(normalizedId).replace(/^0+(?=\d)/, "").padStart(3, "0");
+  return `OM/${yearRange}/DMS-${sequence}`;
 }
 
 function compareResults(left, right) {

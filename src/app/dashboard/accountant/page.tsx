@@ -20,6 +20,7 @@ import {
 import { isAuthenticated, clearAccountantSession } from "@/lib/accountantauth";
 import { downloadOrderInvoice } from "@/lib/invoicegenerator";
 import { OrderAmountSource, withDisplayOrderAmounts } from "@/lib/orderAmounts";
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const YEAR = new Date().getFullYear();
@@ -84,7 +85,7 @@ function downloadCSV(rows: Record<string, any>[], filename: string) {
 
 function ordersToRows(orders: Order[]) {
   return orders.map(o => ({
-    "Order No":        `OM/${YEAR}/${o.order_id}`,
+    "Order No":        formatDisplayOrderNumber(o.order_id),
     "Date":            moment(o.order_date).format("DD MMM YYYY"),
     "Dealer":          o.Dealer_Name,
     "Gross (₹)":       Number(o.order_amount),
@@ -97,7 +98,7 @@ function ordersToRows(orders: Order[]) {
 
 function pendingToRows(orders: PendingOrder[]) {
   return orders.map(o => ({
-    "Order No":     `OM/${YEAR}/${o.order_id}`,
+    "Order No":     formatDisplayOrderNumber(o.order_id),
     "Date":         (o.orderDate || o.order_date || "").slice(0, 10),
     "Dealer":       o.Dealer_Name,
     "Amount (₹)":   Number(o.order_amount),
@@ -472,7 +473,7 @@ function AccountantDashboardInner() {
                         <td className="px-4 py-3 text-[11.5px] text-gray-400 font-mono">{String(idx+1).padStart(2,"0")}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-[12px] font-bold text-indigo-700">OM/{YEAR}/{order.order_id}</span>
+                            <span className="font-mono text-[12px] font-bold text-indigo-700">{formatDisplayOrderNumber(order.order_id)}</span>
                             {deleted && <span className="px-1.5 py-0.5 bg-red-50 border border-red-200 text-red-600 rounded text-[9px] font-bold">DEL</span>}
                           </div>
                         </td>
@@ -535,7 +536,7 @@ function AccountantDashboardInner() {
                         <td className="px-4 py-3 font-mono text-[11.5px] text-gray-400">{String(idx+1).padStart(2,"0")}</td>
                         <td className="px-4 py-3">
                           <span className="font-mono text-[11.5px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
-                            OM/{YEAR}/{order.order_id}
+                            {formatDisplayOrderNumber(order.order_id)}
                           </span>
                         </td>
                         <td className="px-4 py-3">
@@ -623,7 +624,7 @@ function AccountantDashboardInner() {
           </div>
           <button
             onClick={() => downloadCSV([
-              ...chartOrders.map(o  => ({ Type:"Order",  Ref:`OM/${YEAR}/${o.order_id}`, Value:Number(o.total) })),
+              ...chartOrders.map(o  => ({ Type:"Order",  Ref:formatDisplayOrderNumber(o.order_id), Value:Number(o.total) })),
               ...chartDealers.map(d => ({ Type:"Dealer", Ref:d.Dealer_Name,              Value:Number(d.total) })),
             ], `report_${moment().format("YYYY-MM-DD")}`)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
@@ -633,7 +634,7 @@ function AccountantDashboardInner() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
           {[
-            { heading: "Top Orders",  items: chartOrders.map(o  => ({ label:`OM/${YEAR}/${o.order_id}`, value:o.total  })) },
+            { heading: "Top Orders",  items: chartOrders.map(o  => ({ label:formatDisplayOrderNumber(o.order_id), value:o.total  })) },
             { heading: "Top Dealers", items: chartDealers.map(d => ({ label:d.Dealer_Name,               value:d.total  })) },
           ].map(col => (
             <div key={col.heading} className="p-5">

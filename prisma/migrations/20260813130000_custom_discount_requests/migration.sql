@@ -57,37 +57,107 @@ CREATE INDEX IF NOT EXISTS "custom_discount_requests_status_created_at_idx" ON "
 CREATE INDEX IF NOT EXISTS "custom_discount_reorder_logs_request_id_idx" ON "custom_discount_reorder_logs"("request_id");
 CREATE INDEX IF NOT EXISTS "custom_discount_reorder_logs_order_id_idx" ON "custom_discount_reorder_logs"("order_id");
 
-ALTER TABLE "custom_discount_requests"
-  ADD CONSTRAINT "custom_discount_requests_dealer_id_fkey"
-  FOREIGN KEY ("dealer_id") REFERENCES "dealer_profiles"("id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_requests_dealer_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_requests"
+      ADD CONSTRAINT "custom_discount_requests_dealer_id_fkey"
+      FOREIGN KEY ("dealer_id") REFERENCES "dealer_profiles"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_requests"
-  ADD CONSTRAINT "custom_discount_requests_staff_id_fkey"
-  FOREIGN KEY ("staff_id") REFERENCES "staff_profiles"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_requests_staff_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_requests"
+      ADD CONSTRAINT "custom_discount_requests_staff_id_fkey"
+      FOREIGN KEY ("staff_id") REFERENCES "staff_profiles"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_requests"
-  ADD CONSTRAINT "custom_discount_requests_order_id_fkey"
-  FOREIGN KEY ("order_id") REFERENCES "orders"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_requests_order_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_requests"
+      ADD CONSTRAINT "custom_discount_requests_order_id_fkey"
+      FOREIGN KEY ("order_id") REFERENCES "orders"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_requests"
-  ADD CONSTRAINT "custom_discount_requests_order_draft_id_fkey"
-  FOREIGN KEY ("order_draft_id") REFERENCES "order_drafts"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_requests_order_draft_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_requests"
+      ADD CONSTRAINT "custom_discount_requests_order_draft_id_fkey"
+      FOREIGN KEY ("order_draft_id") REFERENCES "order_drafts"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_requests"
-  ADD CONSTRAINT "custom_discount_requests_reviewed_by_user_id_fkey"
-  FOREIGN KEY ("reviewed_by_user_id") REFERENCES "users"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_requests_reviewed_by_user_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_requests"
+      ADD CONSTRAINT "custom_discount_requests_reviewed_by_user_id_fkey"
+      FOREIGN KEY ("reviewed_by_user_id") REFERENCES "users"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_reorder_logs"
-  ADD CONSTRAINT "custom_discount_reorder_logs_request_id_fkey"
-  FOREIGN KEY ("request_id") REFERENCES "custom_discount_requests"("id")
-  ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_reorder_logs_request_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_reorder_logs"
+      ADD CONSTRAINT "custom_discount_reorder_logs_request_id_fkey"
+      FOREIGN KEY ("request_id") REFERENCES "custom_discount_requests"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END
+$$;
 
-ALTER TABLE "custom_discount_reorder_logs"
-  ADD CONSTRAINT "custom_discount_reorder_logs_order_id_fkey"
-  FOREIGN KEY ("order_id") REFERENCES "orders"("id")
-  ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'custom_discount_reorder_logs_order_id_fkey'
+  ) THEN
+    ALTER TABLE "custom_discount_reorder_logs"
+      ADD CONSTRAINT "custom_discount_reorder_logs_order_id_fkey"
+      FOREIGN KEY ("order_id") REFERENCES "orders"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END
+$$;

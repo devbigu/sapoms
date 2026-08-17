@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 import Link from "next/link";
 import { LayoutDashboard, UserRoundPlus, Users, SquareUser, Plus, ClipboardList, Search } from 'lucide-react';
 
@@ -1194,7 +1195,7 @@ function AdminDashboardInner() {
                   ) : data.length > 0 ? (
                     data.map((item) => (
                       <div key={item.order_id} className="report-item">
-                        <span className="report-name">OM/{year}/{item.order_id}</span>
+                        <span className="report-name">{formatDisplayOrderNumber(item.order_id)}</span>
                         <span className="report-value">
                           ₹{Number(item.total).toLocaleString("en-IN")}
                         </span>

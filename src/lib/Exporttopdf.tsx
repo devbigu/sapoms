@@ -1,3 +1,4 @@
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { createClient } from "@supabase/supabase-js";
@@ -85,7 +86,7 @@ export async function generateOrdersPDF(options: ExportOptions): Promise<Blob> {
 
     return [
       String(idx + 1).padStart(2, "0"),
-      `OM/${year}/${order.order_id}${isDeleted ? " [DEL]" : ""}`,
+      `${formatDisplayOrderNumber(order.order_id)}${isDeleted ? " [DEL]" : ""}`,
       moment(order.order_date).format("DD MMM YY"),
       `₹${amounts.gross.toLocaleString("en-IN")}`,
       `₹${amounts.discountAmount.toLocaleString("en-IN")}`,

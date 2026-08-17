@@ -728,7 +728,7 @@ function CancelOrderDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
       <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
         <h2 className="text-base font-bold text-gray-900">{requestMode ? "Request cancellation?" : "Cancel this order?"}</h2>
-        <p className="mt-2 text-sm leading-6 text-gray-600">This action will remove order OM/{new Date().getFullYear()}/{orderId} from the active fulfilment workflow. The original order record will be preserved.</p>
+        <p className="mt-2 text-sm leading-6 text-gray-600">This action will remove order {formatDisplayOrderNumber(orderId)} from the active fulfilment workflow. The original order record will be preserved.</p>
         <label className="mt-5 block text-[11px] font-bold uppercase tracking-wider text-gray-500">{requestMode ? "Cancellation request note" : "Cancellation reason"}</label>
         <textarea
           value={reason}
@@ -831,8 +831,8 @@ function EditOrderDialog({
                   );
                 })}
               </tbody>
-              
-              
+
+
             </table>
           </div>
         ) : (
@@ -1611,7 +1611,7 @@ export default function ViewOrderDealerPage() {
         body: JSON.stringify({
           action: "cancel",
           reason: trimmedReason,
-          formattedOrderNumber: `OM/${year}/${id}`,
+          formattedOrderNumber: formatDisplayOrderNumber(id),
         }),
       });
       const json = await response.json().catch(() => null);
@@ -1783,7 +1783,7 @@ export default function ViewOrderDealerPage() {
                 <h1 className="text-[18px] font-bold text-gray-900">Order Details</h1>
                 {firstOrder?.orderdata_orderid && (
                   <span className="font-mono text-[12px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">
-                    OM/{year}/{firstOrder.orderdata_orderid}
+                    {formatDisplayOrderNumber(firstOrder.orderdata_orderid)}
                   </span>
                 )}
                 {overlayState?.isCancelled && (
@@ -2072,7 +2072,7 @@ export default function ViewOrderDealerPage() {
                           )}
                           <td className="px-4 py-3.5 text-[11px] text-gray-400 font-mono font-semibold">{String(idx + 1).padStart(2, "0")}</td>
                           <td className="px-4 py-3.5 whitespace-nowrap">
-                            <span className="font-mono text-[11px] font-bold text-indigo-600">OM/{year}/{o.orderdata_orderid}</span>
+                            <span className="font-mono text-[11px] font-bold text-indigo-600">{formatDisplayOrderNumber(o.orderdata_orderid)}</span>
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex flex-col gap-1">
@@ -2140,7 +2140,7 @@ export default function ViewOrderDealerPage() {
                       );
                     })}
                   </tbody>
-                  
+
                 </table>
               </div>
             </div>
@@ -2183,7 +2183,7 @@ export default function ViewOrderDealerPage() {
             <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Multi-item Dispatch</p>
-                <h2 className="mt-1 text-[20px] font-bold text-slate-900">OM/{year}/{id}</h2>
+                <h2 className="mt-1 text-[20px] font-bold text-slate-900">{formatDisplayOrderNumber(id)}</h2>
                 <p className="mt-1 text-[13px] text-slate-500">
                   {selectedDispatchLines.length} selected product line{selectedDispatchLines.length === 1 ? "" : "s"}
                 </p>

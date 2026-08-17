@@ -12,6 +12,7 @@ import Footer from "@/components/Footer";
 import Link from "next/link";
 import axios from "axios";
 import { OrderAmountSource, withDisplayOrderAmounts } from "@/lib/orderAmounts";
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 import { useAuthSession } from "@/hooks/useAuthSession";
 // import { getRecentlyViewed, pushRecentlyViewed, type RecentlyViewedItem } from "@/components/Header";
 
@@ -245,12 +246,12 @@ function SectionHeading({
   return (
     <div className="flex items-end justify-between mb-6">
       <div className="flex items-center gap-3">
-        <div> 
+        <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-slate-900 tracking-tight">{title} </h2>
             {badge && (
               <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200">
-                {badge} 
+                {badge}
               </span>
             )}
           </div>
@@ -580,11 +581,11 @@ export default function Page() {
                     <rect x="9" y="3" width="6" height="4" rx="1"/>
                     <path d="M9 12h6M9 16h4"/>
                   </svg>
-                  <span className="font-mono text-[11px] text-slate-400">OM/{year}/{order.order_id}</span>
+                  <span className="font-mono text-[11px] text-slate-400">{formatDisplayOrderNumber(order.order_id)}</span>
                 </div>
                 <div className="p-3 flex flex-col gap-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <p className="font-mono text-[13px] font-bold text-indigo-700">OM/{year}/{order.order_id}</p>
+                    <p className="font-mono text-[13px] font-bold text-indigo-700">{formatDisplayOrderNumber(order.order_id)}</p>
                     {isDeleted && (
                       <span className="px-1.5 py-0.5 bg-red-50 border border-red-200 text-red-700 rounded text-[10px] font-bold">DELETED</span>
                     )}

@@ -8,6 +8,7 @@ import { exportOrdersToSupabase, downloadPDFDirectly } from "@/lib/Exporttopdf";
 import { InvoiceModal } from "@/components/InvoiceModel";
 import { downloadOrderInvoice, uploadOrderInvoiceToSupabase, generateOrderInvoicePDF, listInvoices } from "@/lib/invoicegenerator";
 import { formatAdditionalDiscountBadge, withDisplayOrderAmounts } from "@/lib/orderAmounts";
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 import { useAuthSession } from "@/hooks/useAuthSession";
 import type { AppRole } from "@/lib/roleAccess";
 
@@ -434,7 +435,7 @@ export default function OrderHistoryPage() {
     try {
       const existing = await listInvoices(selectedDealerIds[0] || dealerId || "", 500);
       const existingNumbers = new Set(Array.isArray(existing.data) ? existing.data.map((invoice: any) => String(invoice.invoice_number ?? "")) : []);
-      const duplicates = selectedOrdersForBilling.filter((order) => existingNumbers.has(`OM/${year}/${order.order_id}`));
+      const duplicates = selectedOrdersForBilling.filter((order) => existingNumbers.has(formatDisplayOrderNumber(order.order_id)));
       if (duplicates.length > 0) {
         showBulkBillingToast("error", `Already billed: ${duplicates.map((order) => order.order_id).join(", ")}`);
         return;
@@ -658,7 +659,7 @@ export default function OrderHistoryPage() {
                               <td className="px-4 py-3.5">
                                 <div className="flex items-center gap-2">
                                   <span className="font-mono text-[13px] font-bold text-indigo-700">
-                                    OM/{year}/{oid}
+                                    {formatDisplayOrderNumber(oid)}
                                   </span>
                                   {isDeleted && (
                                     <span className="px-1.5 py-0.5 bg-red-50 border border-red-200 text-red-700 rounded text-[10px] font-bold">DELETED</span>

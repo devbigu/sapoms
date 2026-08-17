@@ -224,6 +224,7 @@ function summaryFrom(orders: LedgerOrder[], transactions: Array<{ type: WalletTr
 
 async function canAccessDealer(client: LedgerClient, actor: AuthActor, dealerId: bigint) {
   if (actor.role === "ADMIN") return true;
+  if (actor.role === "ACCOUNTANT") return true;
   if (actor.role === "DEALER") return actor.dealerId === dealerId;
   if (isStaffLike(actor) && actor.staffId) {
     const assignment = await client.dealerStaffAssignment.findFirst({
@@ -238,6 +239,7 @@ async function canAccessDealer(client: LedgerClient, actor: AuthActor, dealerId:
 function dealerWhereForActor(actor: AuthActor): Prisma.DealerProfileWhereInput {
   const active = { deletedAt: null, user: { status: "ACTIVE" as const } };
   if (actor.role === "ADMIN") return active;
+  if (actor.role === "ACCOUNTANT") return active;
   if (actor.role === "DEALER" && actor.dealerId) return { ...active, id: actor.dealerId };
   if (isStaffLike(actor) && actor.staffId) return { ...active, staffAssignments: { some: { staffId: actor.staffId, active: true } } };
   return { id: BigInt(-1) };

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
+
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -781,7 +783,7 @@ function PendingProductsDashboardInner({ role }: { role: Role }) {
                       <div key={order.orderId} className="rounded-2xl border border-slate-200 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
-                            <p className="font-mono text-[13px] font-bold text-indigo-700">OM/{new Date().getFullYear()}/{order.orderId}</p>
+                            <p className="font-mono text-[13px] font-bold text-indigo-700">{formatDisplayOrderNumber(order.orderId)}</p>
                             {role !== "dealer" && (
                               <p className="mt-1 text-[13px] font-medium text-slate-800">{order.dealerName || order.dealerId}</p>
                             )}

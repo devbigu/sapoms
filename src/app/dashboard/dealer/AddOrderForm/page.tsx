@@ -13,6 +13,7 @@ import { useCartStore } from "@/Store/store";
 import { fetchDealerStatus } from "@/lib/dealerStatus";
 import discountUtils from "@/lib/discount";
 import { createIdempotencyKey } from "@/lib/idempotency";
+import { formatDisplayOrderNumber } from "@/lib/orderDisplay";
 import {
   buildCatalogueIndex,
   findCatalogueEntry,
@@ -319,15 +320,12 @@ function extractOrderIdFromResponse(data: any): string {
 }
 
 function buildExpectedOrderNumber(lastOrderId: string | undefined | null): string {
-  const year = new Date().getFullYear();
   const raw = String(lastOrderId ?? "").trim();
   const lastPart = raw.split("/").pop() ?? "";
   const digits = (lastPart.match(/\d+/g)?.join("") ?? "").trim();
   const lastNumber = digits ? parseInt(digits, 10) : 0;
   const nextNumber = (Number.isFinite(lastNumber) ? lastNumber : 0) + 1;
-  const padding = Math.max(4, digits.length);
-
-  return `OM/${year}/${String(nextNumber).padStart(padding, "0")}`;
+  return formatDisplayOrderNumber(String(nextNumber));
 }
 
 // ─── Coupons ──────────────────────────────────────────────────────────────────
@@ -1257,7 +1255,7 @@ function AddOrderPageInner() {
     const normalizedOrderId = String(orderId || "").trim();
     if (!normalizedOrderId) return;
 
-    const orderNumber = `OM/${new Date().getFullYear()}/${normalizedOrderId}`;
+    const orderNumber = formatDisplayOrderNumber(normalizedOrderId);
     const uniqueIds = Array.from(new Set(
       requests.map((request) => String(request.id || "").trim()).filter(Boolean)
     ));
@@ -2019,7 +2017,7 @@ const verifySubmittedProductNotes = async (orderId: string) => {
     }
     if (refno) fd.append("refno", refno);
     if (appliedCoupon) fd.append("coupon_code", appliedCoupon.code);
-    
+
     const targetApiUrl = `/api/dealer-order`;
     const phpPayload = readFormData(fd);
 
@@ -2677,7 +2675,7 @@ const verifySubmittedProductNotes = async (orderId: string) => {
                       className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-[13.5px] font-mono font-semibold text-gray-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
                       placeholder="e.g. 18"
                     />
-                    
+
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -2717,7 +2715,7 @@ const verifySubmittedProductNotes = async (orderId: string) => {
                         aria-label="Add product custom discount"
                         title="Add product custom discount"
                       >
-                        + Add product 
+                        + Add product
                       </button>
                     )}
                 </div>

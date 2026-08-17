@@ -1,3 +1,4 @@
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/ban-ts-comment */
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -343,7 +344,7 @@ function parsePackSizes(html: string): Record<string, number> {
 }
 
 function invoiceNumber(orderId: string): string {
-    return `OM/${new Date().getFullYear()}/${orderId}`;
+    return formatDisplayOrderNumber(orderId);
 }
 
 function fmt(n: number): string {

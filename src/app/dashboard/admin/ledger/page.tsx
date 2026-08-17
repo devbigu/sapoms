@@ -16,6 +16,7 @@ import {
   Search,
   X,
 } from 'lucide-react'
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay'
 import { resolveOrderAmounts } from '@/lib/orderAmounts'
 import { resolveStoredAuth } from '@/lib/roleAccess'
 
@@ -101,20 +102,35 @@ function formatAmount(value: number | string | undefined) {
   })}`
 }
 
-function formatDate(value: string | undefined) {
-  if (!value) return '-'
-  const date = new Date(`${value.slice(0, 10)}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return value
-  return formatDateObject(date)
+function parseDisplayDate(value: string | undefined) {
+  if (!value) return null
+  const trimmed = value.trim()
+  const displayMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed)
+  if (displayMatch) {
+    const [, day, month, year] = displayMatch
+    const date = new Date(`${year}-${month}-${day}T00:00:00`)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed)
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch
+    const date = new Date(`${year}-${month}-${day}T00:00:00`)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+  return null
 }
 
 function formatDateObject(date: Date) {
   if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${day}/${month}/${date.getFullYear()}`
+}
+
+function formatDate(value: string | undefined) {
+  const date = parseDisplayDate(value)
+  if (!date) return value || '-'
+  return formatDateObject(date)
 }
 
 function addDays(dateValue: string, days: number) {
@@ -144,10 +160,12 @@ function orderNumber(order: RawOrder) {
   return String(order.order_id || '').trim()
 }
 
+function formatLedgerOrderId(value: string) {
+  return formatDisplayOrderNumber(value)
+}
+
 function orderLabel(order: RawOrder) {
-  const number = orderNumber(order)
-  if (!number) return 'Unnumbered order'
-  return `OM/${new Date().getFullYear()}/${number}`
+  return formatLedgerOrderId(orderNumber(order))
 }
 
 function orderAmount(order: RawOrder) {
@@ -652,7 +670,7 @@ export default function DealerLedgerShellPage() {
                 )}
               </div>
               {billForm.orderNumbers.length > 0 && (
-                <p className="mt-1.5 text-xs text-gray-500">{billForm.orderNumbers.join(', ')}</p>
+                <p className="mt-1.5 text-xs text-gray-500">{billForm.orderNumbers.map(formatLedgerOrderId).join(', ')}</p>
               )}
             </div>
 
@@ -945,7 +963,7 @@ function FragmentRow({
                       return (
                         <tr key={bill.id} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-mono text-xs font-semibold text-indigo-700">
-                            OM/{new Date().getFullYear()}/{bill.orderNumber}
+                            {formatLedgerOrderId(bill.orderNumber)}
                           </td>
                           <td className="px-4 py-3">
                             <div className="font-semibold text-gray-900">{formatAmount(bill.billAmount)}</div>

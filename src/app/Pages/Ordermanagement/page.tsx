@@ -6,6 +6,7 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { formatAdditionalDiscountBadge, getCompactOrderDiscountRows, withDisplayOrderAmounts } from '@/lib/orderAmounts'
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 import { STAFF_ORDER_SCOPE_VERSION } from '@/lib/staffOrderScope.js'
 import {
   buildCustomDiscountProgressMap,
@@ -645,7 +646,7 @@ function DispatchDetailsDrawer({
         <div className="dispatch-header">
           <div>
             <p className="dispatch-kicker">Dispatch Details</p>
-            <h2 className="dispatch-title">Order No: OM/{YEAR}/{order.order_id}</h2>
+            <h2 className="dispatch-title">Order No: {formatDisplayOrderNumber(order.order_id)}</h2>
             <p className="dispatch-subtitle">Dealer: {order.Dealer_Name || '—'}</p>
           </div>
           <button type="button" className="dispatch-close" onClick={onClose} aria-label="Close dispatch details">
@@ -972,7 +973,7 @@ export default function OrdersPage() {
       const customDiscountSummary = customDiscountProgressMap[getCustomDiscountProgressKeyForOrder(o.order_id)]
       const base: Record<string, string | number> = {
         'S.No.':        i + 1,
-        'Order No':     `OM/${YEAR}/${o.order_id}`,
+        'Order No':     formatDisplayOrderNumber(o.order_id),
         'Date':         (o.orderDate || o.order_date || '').slice(0, 10),
         'Due Date':     o.outstandingDate || '',
         'Amount (₹)':   amounts.grossAmount,
@@ -1041,7 +1042,7 @@ export default function OrdersPage() {
         body: JSON.stringify({
           action: 'cancel',
           reason: reason || 'Cancelled from order management.',
-          formattedOrderNumber: `OM/${YEAR}/${id}`,
+          formattedOrderNumber: formatDisplayOrderNumber(id),
         }),
       })
       const overlayJson = await overlayRes.json().catch(() => null)
@@ -1562,7 +1563,7 @@ export default function OrdersPage() {
                     {!cancelledLoading && cancelledData.map((order, i) => (
                       <tr key={order.orderId}>
                         <td className="mono-sm">{startIndex + i}</td>
-                        <td><span className="order-id-pill">{order.formattedOrderNumber || `OM/${YEAR}/${order.orderId}`}</span></td>
+                        <td><span className="order-id-pill">{order.formattedOrderNumber || formatDisplayOrderNumber(order.orderId)}</span></td>
                         {cfg.showDealerCol && (
                           <td>
                             <div className="dealer-name">{order.dealerName || (order.originalOrderRef?.Dealer_Name as string) || 'Dealer'}</div>
@@ -1681,7 +1682,7 @@ export default function OrdersPage() {
                         <td className="mono-sm">{startIndex + i}</td>
 
                         <td>
-                          <span className="order-id-pill" dangerouslySetInnerHTML={{ __html: `OM/${YEAR}/${hlId}` }} />
+                          <span className="order-id-pill" dangerouslySetInnerHTML={{ __html: formatDisplayOrderNumber(hlId) }} />
                         </td>
 
                         {cfg.showDealerCol && (

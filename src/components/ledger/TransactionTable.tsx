@@ -4,6 +4,7 @@ import { useState } from 'react'
 import moment from 'moment'
 import { Download, Loader2, Receipt } from 'lucide-react'
 import { downloadOrderInvoice } from '@/lib/invoicegenerator'
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay'
 
 interface RawOrder {
   order_id: string
@@ -256,7 +257,7 @@ export default function TransactionTable({
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-[13px] font-bold text-indigo-700">
-                            {tx.invoice ? `OM/${orderYear}/${tx.invoice}` : tx.id}
+                            {tx.invoice ? formatDisplayOrderNumber(tx.invoice, orderYear) : tx.id}
                           </span>
                           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-bold ${tone.wrap}`}>
                             <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />

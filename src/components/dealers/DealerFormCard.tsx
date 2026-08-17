@@ -313,14 +313,14 @@ export default function DealerFormCard({
       <div className="mx-auto w-full max-w-[80vw] min-w-0 max-md:max-w-full">
         <form onSubmit={handleSubmit} className="border border-[#dfe3ec] bg-white shadow-sm">
           <div className="flex items-end border-b-2 border-[#5d7df0] px-5 pt-4">
-            <button
+            {/* <button
               type="button"
               onClick={resetForm}
               disabled={isSubmitting || isSecondarySubmitting || dealerCodeLoading || Boolean(dealerCodeError)}
               className="mb-2 rounded bg-[#ffc107] px-4 py-2 text-[11px] font-bold text-white shadow-sm transition hover:bg-[#e7ad00] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Reset
-            </button>
+            </button> */}
           </div>
 
           <div className="px-5 pb-5 pt-5">
@@ -645,12 +645,12 @@ function uniqueStaffIds(ids: string[]) {
 
 function normalizeStaffRole(staff: StaffMember): AssignmentRoleKey | null {
   const role = String(staff.role ?? "").toUpperCase();
-  const roleType = String(staff.staff_roletype ?? "").toUpperCase();
+  const roleType = String((staff as StaffMember & { staffRoleType?: string | number }).staffRoleType ?? staff.staff_roletype ?? "").toUpperCase();
 
   if (role === "RSM") return "rsm";
   if (role === "ASM") return "asm";
   if (role === "STAFF" && roleType === "2") return "salesManager";
-  if (role === "STAFF") return "executive";
+  if (role === "STAFF" && (roleType === "1" || roleType === "EXECUTIVE" || roleType === "STAFF")) return "executive";
 
   return null;
 }

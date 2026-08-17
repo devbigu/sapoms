@@ -1,3 +1,4 @@
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -670,7 +671,7 @@ export default function DealerLedgerPage() {
                       </td>
                       <td className="px-3 py-3">
                         <span className="font-mono text-[11.5px] font-bold text-indigo-700">
-                          OM/{YEAR}/{order.order_id}
+                          {formatDisplayOrderNumber(order.order_id)}
                         </span>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">

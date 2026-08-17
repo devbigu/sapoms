@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import axios from 'axios'
 import { STAFF_ORDER_SCOPE_VERSION } from '@/lib/staffOrderScope.js'
 import { formatAdditionalDiscountBadge, withDisplayOrderAmounts } from '@/lib/orderAmounts'
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
 
 type Role = 'admin' | 'dealer' | 'staff' | 'accountant'
 type PendingOrderData = {
@@ -456,7 +457,7 @@ export default function PendingOrdersPage() {
                     return (
                       <tr key={order.order_id ?? i}>
                         <td className="mono-sm">{startIndex + i}</td>
-                        <td><span className="order-id-pill">OM/{YEAR}/{order.order_id}</span></td>
+                        <td><span className="order-id-pill">{formatDisplayOrderNumber(order.order_id)}</span></td>
                         <td>
                           <div className="dealer-name">{order.Dealer_Name || '—'}</div>
                           <div className="dealer-sub">ID: {order.order_dealer}</div>

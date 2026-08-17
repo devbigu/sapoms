@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDisplayOrderNumber } from '@/lib/orderDisplay';
+
 import Link from "next/link";
 
 const YEAR = new Date().getFullYear();
@@ -136,7 +138,7 @@ export default function PendingOrdersPreview({
                   >
                     <div style={{ minWidth: 0, flex: "1 1 260px" }}>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1f2937" }}>
-                        {`OM/${YEAR}/${item.id}`}
+                        {formatDisplayOrderNumber(item.id)}
                       </div>
                       {item.title && (
                         <div
