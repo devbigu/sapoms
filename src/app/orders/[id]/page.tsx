@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import moment from "moment";
 import * as XLSX from "xlsx";
 import { hasPriorityTag } from "@/lib/orderPriority";
+import { formatDisplayOrderNumber } from "@/lib/orderDisplay";
 import { downloadOrderInvoice, type OrderInvoiceData } from "@/lib/invoicegenerator";
 import {
   formatAdditionalDiscountBadge,
