@@ -1,7 +1,7 @@
 import type { Prisma, SalesRegion } from "@prisma/client";
 import type { AuthActor } from "@/server/auth/session";
 
-export const SALES_REGIONS = ["NORTH", "SOUTH", "EAST", "WEST"] as const;
+export const SALES_REGIONS = ["NORTH_1", "NORTH_2", "SOUTH_1", "SOUTH_2", "WEST_1", "WEST_2", "EAST", "ROM", "CENTRAL"] as const;
 export type SalesRegionCode = typeof SALES_REGIONS[number];
 
 export function isSalesRegion(value: unknown): value is SalesRegionCode {
@@ -14,8 +14,12 @@ export function normalizeSalesRegion(value: unknown): SalesRegionCode | undefine
   return isSalesRegion(upper) ? upper : undefined;
 }
 
-export function isAdminLike(actor: Pick<AuthActor, "role">) {
+export function isAdminLike<T extends Pick<AuthActor, "role">>(actor: T): actor is T & { role: "ADMIN" | "NSM" } {
   return actor.role === "ADMIN" || actor.role === "NSM";
+}
+
+export function isStaffLike<T extends Pick<AuthActor, "role">>(actor: T): actor is T & { role: "STAFF" | "RSM" | "ASM" } {
+  return actor.role === "STAFF" || actor.role === "RSM" || actor.role === "ASM";
 }
 
 export function isRsm(actor: Pick<AuthActor, "role">) {

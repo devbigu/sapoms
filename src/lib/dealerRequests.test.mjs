@@ -187,7 +187,10 @@ test("source files keep the approval workflow on the shared dealer form and guar
   assert.match(formPageSource, /\/api\/dealer-requests/);
 
   assert.match(listApiSource, /openRequestKey/);
-  assert.match(listApiSource, /Only staff can submit dealer approval requests/);
+  assert.match(listApiSource, /requireAuth\(\)/);
+  assert.match(listApiSource, /isStaffLike\(authActor\)/);
+  assert.match(listApiSource, /Only staff-like roles can submit dealer approval requests/);
+  assert.doesNotMatch(listApiSource, /resolveDealerRequestActor\(\{[\s\S]*headers:/);
 
   assert.match(detailApiSource, /prisma\.\$transaction/);
   assert.match(detailApiSource, /createAdminDealer\(dealerInput, adminActor, tx\)/);

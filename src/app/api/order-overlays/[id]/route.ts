@@ -31,7 +31,7 @@ function safeText(value: unknown, max = 240) {
 }
 
 function actorRole(role: string | null | undefined): "admin" | "staff" | "dealer" | "accountant" {
-  if (role === "STAFF" || role === "RSM" || role === "NSM") return "staff";
+  if (role === "STAFF" || role === "RSM" || role === "ASM" || role === "NSM") return "staff";
   if (role === "DEALER") return "dealer";
   if (role === "ACCOUNTANT") return "accountant";
   return "admin";

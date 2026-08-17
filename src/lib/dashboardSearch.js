@@ -82,9 +82,9 @@ function normalizeOrderQuery(value) {
   const rawQuery = collapseWhitespace(value);
   const lowered = rawQuery.toLowerCase();
   const compact = lowered.replace(/[\s]+/g, "");
-  const formattedMatch = lowered.match(/^om[\s/-]*(\d{4})[\s/-]*(\d+)$/i);
+  const formattedMatch = lowered.match(/^om[\s/-]*(?:\d{4}|\d{2}[\s/-]*\d{2})[\s/-]*(?:dms[\s/-]*)?(\d+)$/i);
   const exactOrderId = formattedMatch
-    ? normalizeOrderId(formattedMatch[2])
+    ? normalizeOrderId(formattedMatch[1])
     : /^\d+$/.test(rawQuery)
       ? normalizeOrderId(rawQuery)
       : "";
@@ -131,10 +131,12 @@ function getDashboardQueryInfo(value) {
 function buildOrderDisplayNumber(orderId, orderDate) {
   const normalizedId = pickFirstString(orderId);
   if (!normalizedId) return "";
+  if (/^OM\//i.test(normalizedId)) return normalizedId;
 
   const yearMatch = String(orderDate ?? "").match(/\b(20\d{2})\b/);
-  const year = yearMatch ? yearMatch[1] : String(new Date().getFullYear());
-  return `OM/${year}/${normalizedId}`;
+  const year = Number(yearMatch ? yearMatch[1] : new Date().getFullYear());
+  const yearRange = `${String(year).slice(-2)}-${String(year + 1).slice(-2)}`;
+  return `OM/${yearRange}/DMS-${normalizeOrderId(normalizedId).padStart(5, "0")}`;
 }
 
 function compareResults(left, right) {
@@ -249,7 +251,8 @@ function searchDashboardProducts(products, query, options = {}) {
 
 function buildOrderSearchText(order, itemSummary) {
   const orderId = pickFirstString(order.order_id, order.orderId, order.id);
-  const formattedOrderNumber = buildOrderDisplayNumber(orderId, order.order_date || order.orderDate);
+  const storedOrderNumber = pickFirstString(order.order_number, order.orderNumber);
+  const formattedOrderNumber = storedOrderNumber || buildOrderDisplayNumber(orderId, order.order_date || order.orderDate);
   const statusText = pickFirstString(order.order_status, order.status, order.mtstatus);
   const dealerName = pickFirstString(order.Dealer_Name, order.dealer_name, order.dealerName);
   const dateText = pickFirstString(order.order_date, order.orderDate);
@@ -257,6 +260,7 @@ function buildOrderSearchText(order, itemSummary) {
 
   return normalizeLooseText([
     orderId,
+    storedOrderNumber,
     formattedOrderNumber,
     statusText,
     dealerName,
@@ -270,7 +274,8 @@ function scoreOrderResult(order, query, itemSummary) {
   if (!queryInfo.canSearch) return null;
 
   const orderId = pickFirstString(order.order_id, order.orderId, order.id);
-  const formattedOrderNumber = buildOrderDisplayNumber(orderId, order.order_date || order.orderDate);
+  const storedOrderNumber = pickFirstString(order.order_number, order.orderNumber);
+  const formattedOrderNumber = storedOrderNumber || buildOrderDisplayNumber(orderId, order.order_date || order.orderDate);
   const normalizedOrderId = normalizeOrderId(orderId);
   const dealerName = normalizeLooseText(
     pickFirstString(order.Dealer_Name, order.dealer_name, order.dealerName)
@@ -375,7 +380,7 @@ function buildOrderMetadata(order, itemSummary) {
 function toOrderResult(order, role, score, matchType, itemSummary) {
   const orderId = pickFirstString(order.order_id, order.orderId, order.id);
   const dealerName = pickFirstString(order.Dealer_Name, order.dealer_name, order.dealerName);
-  const title = buildOrderDisplayNumber(orderId, order.order_date || order.orderDate) || orderId;
+  const title = pickFirstString(order.order_number, order.orderNumber) || buildOrderDisplayNumber(orderId, order.order_date || order.orderDate) || orderId;
   const href = resolveDashboardSearchHref({
     type: "order",
     orderId,
@@ -544,8 +549,8 @@ function scoreStaffResult(staff, query) {
 function getStaffRoleLabel(value) {
   const raw = String(value ?? "").trim();
   if (raw === "0") return "Admin";
-  if (raw === "1") return "Executive";
-  if (raw === "2") return "Field Executive";
+  if (raw === "1") return "Staff";
+  if (raw === "2") return "Sales Manager";
   return raw || "Staff";
 }
 

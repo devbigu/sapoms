@@ -1,360 +1,522 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import axios from 'axios'
-import { Package, ArrowLeft, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { AlertCircle, ArrowLeft, CheckCircle, ImagePlus, Loader2, Package, Plus, Trash2, X } from 'lucide-react'
 
 type ToastState = { text: string; ok: boolean } | null
+type Column = { id: string; title: string; locked?: boolean; kind?: 'catalogue' | 'pack' | 'unitPrice' | 'packPrice' | 'availability' }
+type VariantRow = { id: string; values: Record<string, string>; active: boolean }
+type CategoryValue = string | { name?: string } | null | undefined
+type CategorySourceProduct = { category?: CategoryValue; categories?: CategoryValue[]; product_category?: CategoryValue; product_categories?: CategoryValue[] }
+
+const defaultCategoryOptions = ['Joints', 'Laboratory Glassware', 'Accessories']
+
+const defaultColumns: Column[] = [
+  { id: 'catalogueNumber', title: 'Catalogue No.', locked: true, kind: 'catalogue' },
+  { id: 'packSize', title: 'Pack Size', locked: true, kind: 'pack' },
+  { id: 'unitPrice', title: 'Price / Unit', locked: true, kind: 'unitPrice' },
+  { id: 'packPrice', title: 'Price / Pack', locked: true, kind: 'packPrice' },
+  { id: 'availability', title: 'Availability', locked: true, kind: 'availability' },
+]
+
+const newId = () => `${Date.now()}_${Math.random().toString(36).slice(2)}`
+
+const initialVariant = (): VariantRow => ({
+  id: newId(),
+  active: true,
+  values: {
+    catalogueNumber: '',
+    packSize: '1',
+    unitPrice: '',
+    packPrice: '',
+    availability: 'In Stock',
+  },
+})
+
+function money(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 'On request'
+  return `Rs. ${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function num(value: string) {
+  const parsed = Number(String(value || '').replace(/,/g, '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+function categoryText(value: CategoryValue) {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  return String(value.name ?? '')
+}
+
+function parseStoredDescription(value: string) {
+  const aboutItems: string[] = []
+  const specRows = new Map<string, Record<string, string>>()
+  const baseParts: string[] = []
+  let mode: 'description' | 'about' | 'specs' = 'description'
+
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const normalized = line.toUpperCase()
+    if (normalized === 'ABOUT THIS ITEM') { mode = 'about'; continue }
+    if (normalized === 'VARIANT SPECIFICATIONS') { mode = 'specs'; continue }
+
+    if (mode === 'about') {
+      const item = line.replace(/^[-*•\s]+/, '').trim()
+      if (item) aboutItems.push(item)
+      continue
+    }
+
+    if (mode === 'specs') {
+      const [catalogueNumberPart, specsPart] = line.split(/\s+-\s+/, 2)
+      const catalogueNumber = catalogueNumberPart?.trim()
+      if (!catalogueNumber || !specsPart) continue
+      const specs: Record<string, string> = {}
+      specsPart.split(';').forEach((entry) => {
+        const [key, ...valueParts] = entry.split(':')
+        const specKey = key?.trim()
+        const specValue = valueParts.join(':').trim()
+        if (specKey && specValue) specs[specKey] = specValue
+      })
+      if (Object.keys(specs).length) specRows.set(catalogueNumber, specs)
+      continue
+    }
+
+    baseParts.push(line)
+  }
+
+  return { description: baseParts.join('\n'), aboutItems, specRows }
+}
+function rupeesFromPaise(value: unknown) {
+  const parsed = Number(String(value ?? '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? String(parsed / 100) : ''
+}
+
+function buildDescription(base: string, bullets: string[], columns: Column[], rows: VariantRow[]) {
+  const parts = [base.trim()].filter(Boolean)
+  const cleanBullets = bullets.map((item) => item.trim()).filter(Boolean)
+  if (cleanBullets.length) parts.push(`ABOUT THIS ITEM\n${cleanBullets.map((item) => `- ${item}`).join('\n')}`)
+
+  const specColumns = columns.filter((column) => !column.locked && column.title.trim())
+  if (specColumns.length) {
+    const lines = rows.map((row) => {
+      const cat = row.values.catalogueNumber?.trim() || 'Variant'
+      const specs = specColumns
+        .map((column) => `${column.title.trim()}: ${(row.values[column.id] || '').trim()}`)
+        .filter((line) => !line.endsWith(': '))
+      return specs.length ? `${cat} - ${specs.join('; ')}` : ''
+    }).filter(Boolean)
+    if (lines.length) parts.push(`VARIANT SPECIFICATIONS\n${lines.join('\n')}`)
+  }
+  return parts.join('\n\n')
+}
 
 export default function AddProductPage() {
   const router = useRouter()
-
-  const [loading,     setLoading]     = useState(false)
-  const [toast,       setToast]       = useState<ToastState>(null)
-
-  const [name,        setName]        = useState("")
-  const [price,       setPrice]       = useState("")
-  const [discription, setDiscription] = useState("")
-  const [unit,        setUnit]        = useState("")
-  const [cat,         setCat]         = useState("")
-  const [quantity,    setQuantity]    = useState("")
+  const searchParams = useSearchParams()
+  const editingProductId = searchParams.get('id') ?? ''
+  const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState<ToastState>(null)
+  const [initialLoading, setInitialLoading] = useState(false)
 
   const showToast = (text: string, ok: boolean) => {
     setToast({ text, ok })
     setTimeout(() => setToast(null), 3500)
   }
 
+  const [name, setName] = useState('')
+  const [productCode, setProductCode] = useState('')
+  const [category, setCategory] = useState('Joints')
+  const [customCategory, setCustomCategory] = useState('')
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(defaultCategoryOptions)
+  const [unit, setUnit] = useState('Pcs.')
+  const [description, setDescription] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
+  const [imagePreview, setImagePreview] = useState('')
+  const [aboutInput, setAboutInput] = useState('')
+  const [aboutItems, setAboutItems] = useState<string[]>([])
+  const [columns, setColumns] = useState<Column[]>(defaultColumns)
+  const firstVariant = useMemo(() => initialVariant(), [])
+  const [variants, setVariants] = useState<VariantRow[]>([firstVariant])
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(firstVariant.id)
+
+  const selectedVariant = variants.find((row) => row.id === selectedVariantId) ?? variants[0]
+  const selectedPack = Math.max(1, Math.trunc(num(selectedVariant?.values.packSize || '1')) || 1)
+  const selectedUnitPrice = num(selectedVariant?.values.unitPrice || '')
+  const selectedPackPrice = num(selectedVariant?.values.packPrice || '') || selectedPack * selectedUnitPrice
+  const availability = selectedVariant?.values.availability || 'In Stock'
+  const effectiveCategory = customCategory.trim() || category.trim()
+
+  useEffect(() => {
+    let cancelled = false
+    const collect = (items: CategorySourceProduct[]) => {
+      const next = new Set(defaultCategoryOptions)
+      items.forEach((product) => {
+        const values = [product.category, product.product_category, ...(product.categories ?? []), ...(product.product_categories ?? [])]
+        values.forEach((value) => categoryText(value).split('>').map((part) => part.trim()).filter(Boolean).forEach((part) => next.add(part)))
+      })
+      if (!cancelled) setCategoryOptions(Array.from(next).sort((a, b) => a.localeCompare(b)))
+    }
+
+    Promise.all([
+      fetch('/api/admin/products?page=1&pageSize=1000', { cache: 'no-store' }).then((res) => res.ok ? res.json() : null).catch(() => null),
+      fetch('/data/nested_omsons_products.json', { cache: 'force-cache' }).then((res) => res.ok ? res.json() : []).catch(() => []),
+    ]).then(([adminPayload, cataloguePayload]) => {
+      const adminItems = Array.isArray(adminPayload?.data?.items) ? adminPayload.data.items : Array.isArray(adminPayload?.items) ? adminPayload.items : []
+      const catalogueItems = Array.isArray(cataloguePayload) ? cataloguePayload : []
+      collect([...adminItems, ...catalogueItems])
+    })
+
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!editingProductId) return
+    let cancelled = false
+    setInitialLoading(true)
+    fetch(`/api/admin/products/${encodeURIComponent(editingProductId)}`, { cache: 'no-store', credentials: 'include' })
+      .then(async (res) => {
+        const payload = await res.json()
+        if (!res.ok || !payload?.success) throw new Error(payload?.message || 'Product unavailable')
+        return payload.data
+      })
+      .then((product) => {
+        if (cancelled) return
+        const parsed = parseStoredDescription(product.description || '')
+        const specTitles = new Set<string>()
+        parsed.specRows.forEach((specs) => Object.keys(specs).forEach((key) => specTitles.add(key)))
+        const extraColumns: Column[] = Array.from(specTitles).map((title) => ({ id: `custom_${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`, title }))
+        const nextColumns = [...defaultColumns, ...extraColumns]
+        const nextRows: VariantRow[] = (product.variants || []).map((variant: any) => {
+          const catalogueNumber = variant.catalogueNumber || variant.sku || ''
+          const specs = parsed.specRows.get(catalogueNumber) || parsed.specRows.get(variant.sku) || {}
+          const values: Record<string, string> = {
+            catalogueNumber,
+            packSize: String(variant.packSize || 1),
+            unitPrice: rupeesFromPaise(variant.unitPricePaise),
+            packPrice: rupeesFromPaise(variant.packPricePaise),
+            availability: variant.active ? 'In Stock' : 'Out of Stock',
+          }
+          extraColumns.forEach((column) => { values[column.id] = specs[column.title] || '' })
+          return { id: variant.id || newId(), active: variant.active !== false, values }
+        })
+        const fallbackRow = initialVariant()
+        setName(product.name || '')
+        setProductCode(product.productCode || '')
+        setCategory(product.category?.name || 'Joints')
+        setCustomCategory('')
+        setUnit(product.variants?.[0]?.unitName || 'Pcs.')
+        setDescription(parsed.description)
+        setImageUrl(product.imageUrl || '')
+        setImagePreview('')
+        setAboutItems(parsed.aboutItems)
+        setAboutInput('')
+        setColumns(nextColumns)
+        setVariants(nextRows.length ? nextRows : [fallbackRow])
+        setSelectedVariantId((nextRows[0] || fallbackRow).id)
+      })
+      .catch((error) => showToast(error instanceof Error ? error.message : 'Failed to load product.', false))
+      .finally(() => { if (!cancelled) setInitialLoading(false) })
+    return () => { cancelled = true }
+  }, [editingProductId])
+
+  const visibleCategoryBadges = useMemo(() => {
+    const values = [effectiveCategory, ...categoryOptions.filter((item) => item !== effectiveCategory)].filter(Boolean)
+    return values.slice(0, 12)
+  }, [categoryOptions, effectiveCategory])
+
+  const variantLabels = useMemo(() => variants
+    .map((row) => {
+      const socketColumn = columns.find((column) => column.title.toLowerCase().includes('socket'))
+      return { id: row.id, label: (socketColumn ? row.values[socketColumn.id]?.trim() : '') || row.values.catalogueNumber?.trim() }
+    })
+    .filter((item): item is { id: string; label: string } => Boolean(item.label)), [columns, variants])
+
   const resetForm = () => {
-    setName(""); setPrice(""); setDiscription("")
-    setUnit(""); setCat(""); setQuantity("")
+    const next = initialVariant()
+    setName(''); setProductCode(''); setCategory('Joints'); setCustomCategory(''); setUnit('Pcs.'); setDescription(''); setImageUrl(''); setImagePreview('')
+    setAboutInput(''); setAboutItems([]); setColumns(defaultColumns); setVariants([next]); setSelectedVariantId(next.id)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim() || !price.trim()) {
-      showToast("Product name and price are required.", false)
-      return
-    }
+  const updateRow = (rowId: string, columnId: string, value: string) => {
+    setVariants((rows) => rows.map((row) => {
+      if (row.id !== rowId) return row
+      const values = { ...row.values, [columnId]: value }
+      if (columnId === 'packSize' || columnId === 'unitPrice') {
+        const packSize = Math.max(1, Math.trunc(num(values.packSize || '1')) || 1)
+        const unitPrice = num(values.unitPrice || '')
+        values.packPrice = unitPrice ? String(packSize * unitPrice) : ''
+      }
+      return { ...row, values }
+    }))
+  }
+
+  const addAboutItem = () => {
+    const value = aboutInput.trim()
+    if (!value) return
+    setAboutItems((items) => [...items, value])
+    setAboutInput('')
+  }
+
+  const addColumn = () => {
+    const id = `custom_${Date.now()}`
+    setColumns((items) => [...items, { id, title: 'New Specification' }])
+    setVariants((rows) => rows.map((row) => ({ ...row, values: { ...row.values, [id]: '' } })))
+  }
+
+  const addVariant = () => {
+    const row = initialVariant()
+    for (const column of columns) row.values[column.id] = row.values[column.id] ?? ''
+    setVariants((rows) => [...rows, row])
+    setSelectedVariantId(row.id)
+  }
+
+  const removeVariant = (rowId: string) => {
+    setVariants((rows) => {
+      const next = rows.length > 1 ? rows.filter((row) => row.id !== rowId) : rows
+      if (selectedVariantId === rowId) setSelectedVariantId(next[0]?.id ?? null)
+      return next
+    })
+  }
+
+  const handleImageChange = (file?: File) => {
+    if (!file) return
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!name.trim()) return showToast('Product name is required.', false)
+    if (!variants.some((row) => row.values.catalogueNumber?.trim())) return showToast('At least one catalogue number is required.', false)
+
     setLoading(true)
     try {
-      const res = await fetch("/api/admin/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch(editingProductId ? `/api/admin/products/${encodeURIComponent(editingProductId)}` : '/api/admin/products', {
+        method: editingProductId ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          description: discription,
-          variants: [{
-            sku: cat,
-            catalogueNumber: cat,
-            unitName: unit,
-            packSize: Number(quantity) || 1,
-            unitPrice: Number(price) || 0,
-          }],
+          productCode,
+          imageUrl,
+          categoryName: effectiveCategory,
+          active: true,
+          description: buildDescription(description, aboutItems, columns, variants),
+          variants: variants.map((row) => {
+            const packSize = Math.max(1, Math.trunc(num(row.values.packSize || '1')) || 1)
+            const unitPrice = num(row.values.unitPrice || '')
+            const packPrice = num(row.values.packPrice || '') || packSize * unitPrice
+            const catalogueNumber = row.values.catalogueNumber?.trim()
+            return { id: /^\d+$/.test(row.id) ? row.id : undefined, sku: catalogueNumber, catalogueNumber, unitName: unit || 'Pcs.', packSize, unitPrice, packPrice, active: row.values.availability !== 'Out of Stock' }
+          }),
         }),
       })
-      if (!res.ok) throw new Error("Save failed")
-      showToast("Product added successfully!", true)
-      resetForm()
+      if (!res.ok) throw new Error('Save failed')
+      showToast(editingProductId ? 'Product updated successfully.' : 'Product added successfully.', true)
+      if (editingProductId) router.push('/Pages/products')
+      else resetForm()
     } catch {
-      showToast("Failed to add product. Please try again.", false)
+      showToast(editingProductId ? 'Failed to update product. Please try again.' : 'Failed to add product. Please try again.', false)
     } finally {
       setLoading(false)
     }
   }
 
-  const fields = [
-    { label: "Product Name",      placeholder: "e.g. Bio Scientific Kit",   value: name,        setter: setName,        type: "text",   required: true,  col: 2 },
-    { label: "Price (₹)",         placeholder: "e.g. 1200",                  value: price,       setter: setPrice,       type: "number", required: true,  col: 1 },
-    { label: "Quantity",          placeholder: "e.g. 50",                    value: quantity,    setter: setQuantity,    type: "number", required: false, col: 1 },
-    { label: "Unit",              placeholder: "e.g. pcs, box, ml",         value: unit,        setter: setUnit,        type: "text",   required: false, col: 1 },
-    { label: "Catalogue Number",  placeholder: "e.g. CAT-00142",            value: cat,         setter: setCat,         type: "text",   required: false, col: 1 },
-    { label: "Description",       placeholder: "Brief product description…", value: discription, setter: setDiscription, type: "text",   required: false, col: 2 },
-  ]
-
   return (
     <>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        .ap-root {
-          min-height: 100vh;
-          background: #f4f5f9;
-          font-family: 'Outfit', sans-serif;
-          color: #0f172a;
-        }
-
-        /* ── Topbar ── */
-        .ap-topbar {
-          background: linear-gradient(135deg, #0f1729 0%, #1a2744 100%);
-          height: 64px; padding: 0 32px;
-          display: flex; align-items: center; gap: 14px;
-          position: sticky; top: 0; z-index: 20;
-          box-shadow: 0 2px 16px rgba(0,0,0,0.18);
-        }
-        .back-btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 6px 13px 6px 9px; border-radius: 8px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.06);
-          font-size: 12.5px; font-weight: 500; color: rgba(255,255,255,0.72);
-          cursor: pointer; font-family: inherit; transition: all 0.15s;
-        }
-        .back-btn:hover { background: rgba(255,255,255,0.12); color: #fff; transform: translateX(-1px); }
-        .ap-topbar-div { width: 1px; height: 22px; background: rgba(255,255,255,0.12); }
-        .ap-topbar-title { font-size: 15px; font-weight: 600; color: #fff; }
-        .ap-topbar-sub   { font-size: 11.5px; color: rgba(255,255,255,0.42); margin-top: 1px; }
-
-        /* ── Body ── */
-        .ap-body { padding: 32px; max-width: 900px; margin: 0 auto; }
-
-        /* ── Page header ── */
-        .ap-page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
-        .ap-icon-wrap {
-          width: 52px; height: 52px; border-radius: 14px;
-          background: linear-gradient(135deg, #1e3a8a, #3b5bdb);
-          display: flex; align-items: center; justify-content: center;
-          box-shadow: 0 4px 14px rgba(59,91,219,0.3); flex-shrink: 0;
-        }
-        .ap-page-title   { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; color: #0f172a; }
-        .ap-page-caption { font-size: 13px; color: #64748b; margin-top: 3px; }
-
-        /* ── Form card ── */
-        .form-card {
-          background: #fff;
-          border: 1px solid #e8edf5;
-          border-radius: 20px;
-          box-shadow: 0 2px 16px rgba(0,0,0,0.05);
-          overflow: hidden;
-        }
-        .form-card-header {
-          padding: 20px 28px;
-          border-bottom: 1px solid #f1f5fb;
-          background: #f8faff;
-          display: flex; align-items: center; justify-content: space-between;
-        }
-        .form-card-title { font-size: 13px; font-weight: 600; color: #334155; text-transform: uppercase; letter-spacing: 0.07em; }
-        .required-note { font-size: 11.5px; color: #94a3b8; }
-        .required-note span { color: #ef4444; }
-
-        .form-body { padding: 28px; }
-
-        /* ── Grid ── */
-        .form-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 20px 24px;
-        }
-        .col-2 { grid-column: span 2; }
-        @media (max-width: 640px) {
-          .form-grid { grid-template-columns: 1fr; }
-          .col-2 { grid-column: span 1; }
-        }
-
-        /* ── Field ── */
-        .field { display: flex; flex-direction: column; gap: 7px; }
-        .field-label {
-          font-size: 12.5px; font-weight: 600; color: #374151;
-          display: flex; align-items: center; gap: 4px;
-        }
-        .field-label .req { color: #ef4444; font-size: 13px; }
-
-        .field-input {
-          padding: 10px 14px;
-          border: 1.5px solid #e2e8f0;
-          border-radius: 10px;
-          font-size: 13.5px;
-          font-family: 'Outfit', sans-serif;
-          color: #0f172a;
-          background: #fff;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-          width: 100%;
-        }
-        .field-input::placeholder { color: #94a3b8; font-size: 13px; }
-        .field-input:focus {
-          border-color: #3b5bdb;
-          box-shadow: 0 0 0 3px rgba(59,91,219,0.1);
-          background: #fafbff;
-        }
-        .field-input:hover:not(:focus) { border-color: #cbd5e1; }
-
-        /* number input — remove arrows */
-        .field-input[type="number"]::-webkit-inner-spin-button,
-        .field-input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
-        .field-input[type="number"] { -moz-appearance: textfield; font-family: 'JetBrains Mono', monospace; }
-
-        /* ── Divider ── */
-        .form-divider { border: none; border-top: 1px solid #f1f5fb; margin: 24px 0; }
-
-        /* ── Actions ── */
-        .form-actions { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
-        .btn-reset {
-          padding: 10px 20px; border-radius: 10px;
-          border: 1.5px solid #e2e8f0; background: #fff;
-          font-size: 13.5px; font-weight: 500; color: #374151;
-          cursor: pointer; font-family: inherit; transition: all 0.14s;
-        }
-        .btn-reset:hover { background: #f8fafc; border-color: #cbd5e1; }
-        .btn-reset:disabled { opacity: 0.4; cursor: not-allowed; }
-
-        .btn-submit {
-          padding: 10px 28px; border-radius: 10px; border: none;
-          background: linear-gradient(135deg, #1e3a8a, #3b5bdb);
-          font-size: 13.5px; font-weight: 600; color: #fff;
-          cursor: pointer; font-family: inherit; transition: all 0.15s;
-          display: inline-flex; align-items: center; gap: 8px;
-          box-shadow: 0 3px 10px rgba(59,91,219,0.3);
-        }
-        .btn-submit:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 5px 16px rgba(59,91,219,0.36); }
-        .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-
-        /* ── Toast ── */
-        .toast {
-          position: fixed; bottom: 24px; right: 24px; z-index: 100;
-          padding: 13px 18px; border-radius: 12px;
-          font-size: 13px; font-weight: 500;
-          display: flex; align-items: center; gap: 9px;
-          box-shadow: 0 6px 24px rgba(0,0,0,0.13);
-          animation: toastIn 0.22s ease;
-          max-width: 340px;
-        }
-        .toast-ok  { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+        *, *::before, *::after { box-sizing: border-box; }
+        .ap-root { min-height: 100vh; background: #f8fafc; color: #0f172a; font-family: Outfit, Inter, system-ui, sans-serif; }
+        .ap-topbar { height: 60px; padding: 0 32px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 20; }
+        .back-btn, .icon-btn, .small-btn, .btn-submit, .btn-reset { font: inherit; cursor: pointer; }
+        .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; color: #475569; font-size: 12px; font-weight: 700; }
+        .ap-topbar-title { font-size: 15px; font-weight: 800; }
+        .ap-topbar-sub { font-size: 11.5px; color: #94a3b8; margin-top: 1px; }
+        .ap-body { width: min(1380px, calc(100vw - 48px)); margin: 0 auto; padding: 28px 0 44px; }
+        .ap-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin-bottom: 20px; }
+        .ap-heading h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: 0; }
+        .ap-heading p { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+        .product-grid { display: grid; grid-template-columns: 310px minmax(0, 1fr) 290px; gap: 22px; align-items: start; }
+        .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; }
+        .image-panel { padding: 18px; }
+        .image-box { aspect-ratio: 1; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .image-box img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+        .upload-placeholder { color: #94a3b8; display: flex; flex-direction: column; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; }
+        .upload-row { display: grid; gap: 9px; margin-top: 14px; }
+        .field { display: flex; flex-direction: column; gap: 6px; }
+        .field-label, .section-title { font-size: 12px; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: .06em; }
+        .field-input, .field-textarea, .table-input, .column-input { width: 100%; border: 1px solid #dbe3ef; border-radius: 7px; background: #fff; color: #0f172a; outline: none; font: inherit; font-size: 13px; }
+        .field-input { height: 38px; padding: 8px 10px; }
+        .field-textarea { min-height: 86px; resize: vertical; padding: 10px; line-height: 1.45; }
+        .field-input:focus, .field-textarea:focus, .table-input:focus, .column-input:focus { border-color: #6A5ACD; box-shadow: 0 0 0 3px rgba(106,90,205,.12); }
+        .details-panel { padding: 20px; display: grid; gap: 18px; }
+        .badge-row, .variant-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .category-picker { display: grid; gap: 10px; }
+        .category-custom { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 10px; }
+        .category-badge { border: 1px solid #e2e8f0; background: #f8fafc; color: #475569; border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+        .category-badge.primary { background: #fefce8; color: #a16207; border-color: #fde68a; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .wide { grid-column: 1 / -1; }
+        .about-add { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 8px; }
+        .small-btn, .icon-btn { border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 7px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 800; }
+        .small-btn:hover, .icon-btn:hover, .back-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+        .bullet-list { display: grid; gap: 8px; margin-top: 10px; }
+        .bullet-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px; gap: 8px; align-items: center; }
+        .bullet-dot { color: #6A5ACD; font-weight: 900; text-align: center; }
+        .summary-card { padding: 20px; border: 2px solid #e2e8f0; border-radius: 14px; position: sticky; top: 82px; background: #fff; }
+        .summary-label { margin: 0 0 4px; font-size: 12px; color: #94a3b8; }
+        .summary-price { margin: 0; font-size: 28px; font-weight: 900; }
+        .summary-line { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid #f1f5f9; font-size: 13px; }
+        .summary-line span:first-child { color: #64748b; }
+        .summary-line span:last-child { font-weight: 800; text-align: right; }
+        .stock-ok { color: #16a34a; }
+        .stock-out { color: #dc2626; }
+        .variant-section { margin-top: 24px; }
+        .section-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
+        .variant-btn { border: 2px solid #e2e8f0; background: #fff; color: #374151; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .variant-btn.active { border-color: #6A5ACD; background: #6A5ACD; color: #fff; }
+        .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 860px; }
+        th { padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; color: #334155; font-size: 12px; text-align: left; white-space: nowrap; }
+        td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+        .table-input { min-width: 120px; height: 34px; padding: 7px 9px; }
+        .column-input { min-width: 130px; height: 30px; padding: 5px 7px; font-weight: 800; }
+        .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e2e8f0; }
+        .btn-reset { padding: 10px 18px; border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 8px; font-size: 13px; font-weight: 800; }
+        .btn-submit { padding: 10px 22px; border: 1px solid #6A5ACD; background: #6A5ACD; color: #fff; border-radius: 8px; font-size: 13px; font-weight: 900; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-submit:disabled, .btn-reset:disabled { opacity: .55; cursor: not-allowed; }
+        .toast { position: fixed; right: 24px; bottom: 24px; z-index: 100; padding: 12px 16px; border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,.14); display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 800; }
+        .toast-ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
         .toast-err { background: #fff1f2; color: #be123c; border: 1px solid #fecdd3; }
-        @keyframes toastIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-
-        /* ── Preview strip (filled fields) ── */
-        .preview-strip {
-          margin-top: 24px; padding: 16px 20px;
-          background: #f8faff; border: 1px solid #e8edf5; border-radius: 12px;
-          display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-        }
-        .preview-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.07em; margin-right: 4px; }
-        .preview-chip {
-          padding: 3px 10px; border-radius: 20px;
-          font-size: 12px; font-weight: 500;
-          background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe;
-        }
-        .preview-chip.price { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; font-family: 'JetBrains Mono', monospace; }
-        .preview-chip.cat   { background: #f1f5fb; color: #334155; border-color: #e2e8f0; font-family: 'JetBrains Mono', monospace; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 1080px) { .product-grid { grid-template-columns: 1fr; } .summary-card { position: static; } }
+        @media (max-width: 640px) { .ap-topbar { padding: 0 16px; } .ap-body { width: calc(100vw - 28px); padding-top: 18px; } .ap-heading { align-items: flex-start; flex-direction: column; } .info-grid, .category-custom { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
       `}</style>
 
       <div className="ap-root">
-
-        {/* Toast */}
         {toast && (
-          <div className={`toast ${toast.ok ? "toast-ok" : "toast-err"}`}>
-            {toast.ok
-              ? <CheckCircle size={15} />
-              : <AlertCircle size={15} />
-            }
+          <div className={`toast ${toast.ok ? 'toast-ok' : 'toast-err'}`}>
+            {toast.ok ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
             {toast.text}
           </div>
         )}
 
-        {/* ── Topbar ── */}
         <div className="ap-topbar">
-          <button className="back-btn" onClick={() => router.back()}>
-            <ArrowLeft size={13} />
-            Back
+          <button className="back-btn" type="button" onClick={() => router.back()}>
+            <ArrowLeft size={14} /> Back
           </button>
-          <div className="ap-topbar-div" />
           <div>
             <div className="ap-topbar-title">Product Catalogue</div>
-            <div className="ap-topbar-sub">Add a new product to the system</div>
+            <div className="ap-topbar-sub">{editingProductId ? 'Edit existing PostgreSQL product' : 'Add a new product to the system'}</div>
           </div>
         </div>
 
-        <div className="ap-body">
-
-          {/* ── Page header ── */}
-          <div className="ap-page-header">
-            <div className="ap-icon-wrap">
-              <Package size={24} color="#fff" />
-            </div>
+        <main className="ap-body">
+          <div className="ap-heading">
             <div>
-              <div className="ap-page-title">Add Product</div>
-              <div className="ap-page-caption">Fill in the details below to add a new product</div>
+              <h1>{editingProductId ? 'Edit Product' : 'Add Product'}</h1>
+              <p>{editingProductId ? 'Update the catalogue entry, variants, pack pricing, and customer-facing summary.' : 'Build the catalogue entry, variants, pack pricing, and customer-facing summary.'}</p>
             </div>
           </div>
 
-          {/* ── Form card ── */}
-          <div className="form-card">
-            <div className="form-card-header">
-              <span className="form-card-title">Product Details</span>
-              <span className="required-note"><span>*</span> Required fields</span>
-            </div>
-
-            <div className="form-body">
-              <form onSubmit={handleSubmit}>
-                <div className="form-grid">
-                  {fields.map(field => (
-                    <div
-                      key={field.label}
-                      className={`field${field.col === 2 ? " col-2" : ""}`}
-                    >
-                      <label className="field-label">
-                        {field.label}
-                        {field.required && <span className="req">*</span>}
-                      </label>
-                      <input
-                        type={field.type}
-                        className="field-input"
-                        placeholder={field.placeholder}
-                        value={field.value}
-                        onChange={e => field.setter(e.target.value)}
-                        disabled={loading}
-                        min={field.type === "number" ? "0" : undefined}
-                      />
-                    </div>
-                  ))}
+          <form onSubmit={handleSubmit}>
+            <div className="product-grid">
+              <aside className="panel image-panel">
+                <div className="image-box">
+                  {imagePreview || imageUrl ? <img src={imagePreview || imageUrl} alt="Product preview" /> : (
+                    <div className="upload-placeholder"><ImagePlus size={42} /><span>Upload product image</span></div>
+                  )}
                 </div>
+                <div className="upload-row">
+                  <label className="field"><span className="field-label">Image Upload</span><input className="field-input" type="file" accept="image/*" onChange={(event) => handleImageChange(event.target.files?.[0])} disabled={loading || initialLoading} /></label>
+                  <label className="field"><span className="field-label">Image URL</span><input className="field-input" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="/images/product.png or https://..." disabled={loading} /></label>
+                </div>
+              </aside>
 
-                {/* Live preview strip */}
-                {(name || price || cat || unit) && (
-                  <div className="preview-strip">
-                    <span className="preview-label">Preview</span>
-                    {name  && <span className="preview-chip">{name}</span>}
-                    {price && <span className="preview-chip price">₹{Number(price).toLocaleString("en-IN")}</span>}
-                    {cat   && <span className="preview-chip cat">{cat}</span>}
-                    {unit  && <span className="preview-chip">{unit}</span>}
-                    {quantity && <span className="preview-chip">Qty: {quantity}</span>}
+              <section className="panel details-panel">
+                <div className="category-picker">
+                  <div className="section-title">Product Category</div>
+                  <div className="badge-row" style={{ marginTop: 9 }}>
+                    {visibleCategoryBadges.map((item, index) => <button key={`${item}-${index}`} className={`category-badge ${item === effectiveCategory ? 'primary' : ''}`} type="button" onClick={() => { setCategory(item); setCustomCategory('') }} disabled={loading}>{item}</button>)}
                   </div>
-                )}
-
-                <hr className="form-divider" />
-
-                <div className="form-actions">
-                  <button
-                    type="button"
-                    className="btn-reset"
-                    onClick={resetForm}
-                    disabled={loading}
-                  >
-                    Reset
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn-submit"
-                    disabled={loading}
-                  >
-                    {loading
-                      ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Saving…</>
-                      : <><Package size={14} /> Add Product</>
-                    }
-                  </button>
+                  <div className="category-custom">
+                    <select className="field-input" value={category} onChange={(event) => { setCategory(event.target.value); setCustomCategory('') }} disabled={loading}>
+                      {categoryOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                    <input className="field-input" value={customCategory} onChange={(event) => setCustomCategory(event.target.value)} placeholder="Add custom / new category" disabled={loading} />
+                  </div>
                 </div>
 
-              </form>
+                <div className="info-grid">
+                  <label className="field wide"><span className="field-label">Product Name *</span><input className="field-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Interchangeable Joint Adapter" disabled={loading} /></label>
+                  <label className="field"><span className="field-label">SKU / Product Code</span><input className="field-input" value={productCode} onChange={(event) => setProductCode(event.target.value)} placeholder="e.g. 152" disabled={loading} /></label>
+                  <label className="field"><span className="field-label">Selected Category</span><input className="field-input" value={effectiveCategory} readOnly placeholder="Choose or add a category above" /></label>
+                  <label className="field"><span className="field-label">Unit</span><input className="field-input" value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="Pcs." disabled={loading} /></label>
+                  <label className="field wide"><span className="field-label">Description</span><textarea className="field-textarea" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Brief product description" disabled={loading} /></label>
+                </div>
+
+                <div>
+                  <div className="section-title">About This Item</div>
+                  <div className="about-add" style={{ marginTop: 9 }}>
+                    <input className="field-input" value={aboutInput} onChange={(event) => setAboutInput(event.target.value)} placeholder="Complies with DIN 12249." disabled={loading} />
+                    <button className="icon-btn" type="button" onClick={addAboutItem} disabled={loading} aria-label="Add item"><Plus size={16} /></button>
+                  </div>
+                  <div className="bullet-list">
+                    {aboutItems.map((item, index) => (
+                      <div className="bullet-row" key={`${item}-${index}`}>
+                        <span className="bullet-dot">&bull;</span>
+                        <input className="field-input" value={item} onChange={(event) => setAboutItems((items) => items.map((old, itemIndex) => itemIndex === index ? event.target.value : old))} disabled={loading} />
+                        <button className="icon-btn" type="button" onClick={() => setAboutItems((items) => items.filter((_, itemIndex) => itemIndex !== index))} disabled={loading} aria-label="Remove item"><X size={14} /></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              <aside className="summary-card">
+                <p className="summary-label">{variants.length > 1 ? 'Starting from' : 'Price'}</p>
+                <p className="summary-price">{money(selectedPackPrice)}</p>
+                <div style={{ marginTop: 14 }}>
+                  <div className="summary-line"><span>Pack of</span><span>{selectedPack} Pcs.</span></div>
+                  <div className="summary-line"><span>Price per unit</span><span>{money(selectedUnitPrice)}</span></div>
+                  <div className="summary-line"><span>Availability</span><span className={availability === 'Out of Stock' ? 'stock-out' : 'stock-ok'}>{availability}</span></div>
+                  <div className="summary-line"><span>Variants</span><span>{variantLabels.length || 1}</span></div>
+                </div>
+              </aside>
             </div>
-          </div>
 
-        </div>
+            <section className="variant-section">
+              <div className="section-head">
+                <div>
+                  <div className="section-title">Select Variant</div>
+                  <div className="variant-buttons" style={{ marginTop: 9 }}>
+                    {variantLabels.length ? variantLabels.map((item) => <button key={item.id} type="button" className={`variant-btn ${selectedVariant?.id === item.id ? 'active' : ''}`} onClick={() => setSelectedVariantId(item.id)}>{item.label}</button>) : <span className="category-badge">Add catalogue numbers below</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <button className="small-btn" type="button" onClick={addColumn} disabled={loading}><Plus size={14} /> Add Column</button>
+                  <button className="small-btn" type="button" onClick={addVariant} disabled={loading}><Plus size={14} /> Add Variant</button>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead><tr>{columns.map((column) => <th key={column.id}>{column.locked ? column.title : <input className="column-input" value={column.title} onChange={(event) => setColumns((items) => items.map((item) => item.id === column.id ? { ...item, title: event.target.value } : item))} disabled={loading} />}</th>)}<th /></tr></thead>
+                  <tbody>
+                    {variants.map((row) => <tr key={row.id}>{columns.map((column) => <td key={column.id}>{column.kind === 'availability' ? <select className="table-input" value={row.values[column.id] || 'In Stock'} onChange={(event) => updateRow(row.id, column.id, event.target.value)} disabled={loading}><option>In Stock</option><option>Out of Stock</option><option>On Request</option></select> : <input className="table-input" value={row.values[column.id] || ''} onChange={(event) => updateRow(row.id, column.id, event.target.value)} placeholder={column.kind === 'catalogue' ? '152/1' : column.kind === 'pack' ? '10' : column.kind === 'unitPrice' ? '94' : column.kind === 'packPrice' ? '940' : column.title} disabled={loading} />}</td>)}<td><button className="icon-btn" type="button" onClick={() => removeVariant(row.id)} disabled={loading || variants.length === 1} aria-label="Remove variant"><Trash2 size={14} /></button></td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <div className="actions">
+              <button className="btn-reset" type="button" onClick={resetForm} disabled={loading}>Reset</button>
+              <button className="btn-submit" type="submit" disabled={loading}>{loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Saving...</> : <><Package size={15} /> {editingProductId ? 'Update Product' : 'Add Product'}</>}</button>
+            </div>
+          </form>
+        </main>
       </div>
-
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
     </>
   )
 }

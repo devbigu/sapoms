@@ -37,13 +37,16 @@ export function mapAccountantProfile(user: UserLike, profile: AccountantProfile)
 }
 
 export function mapStaffProfile(user: UserLike, profile: StaffProfile) {
+  const staffRoleType = profile.staffRoleType ?? (user.role === "STAFF" ? "1" : user.role);
   return sanitizeLegacyProfile({
     staff_id: profile.id.toString(),
     staff_name: profile.displayName,
     staff_email: user.email,
-    staff_roletype: profile.staffRoleType ?? "1",
+    staff_roletype: staffRoleType,
     staff_designation: valueOrEmpty(profile.designation),
     staff_location: valueOrEmpty(profile.location),
+    sales_region: valueOrEmpty(profile.salesRegion),
+    salesRegion: valueOrEmpty(profile.salesRegion),
     role: "staff",
   });
 }
@@ -61,6 +64,7 @@ export function mapDealerProfile(user: UserLike, profile: DealerProfile) {
     discount: valueOrZero(profile.discountPercent),
     gst: valueOrEmpty(profile.gstin),
     creditdays: valueOrZero(profile.creditDays),
+    termsAcceptedAt: profile.termsAcceptedAt?.toISOString() ?? "",
     role: "dealer",
   });
 }
@@ -81,6 +85,7 @@ export function mapPostgresUserToLegacyProfile(user: User & {
       return withClientRole(mapAccountantProfile(user, user.accountantProfile), user.role);
     case "STAFF":
     case "RSM":
+    case "ASM":
       if (!user.staffProfile) throw new Error("Missing role profile");
       return withClientRole(mapStaffProfile(user, user.staffProfile), user.role);
     case "DEALER":
@@ -100,7 +105,7 @@ export function getProfileId(user: {
 }) {
   if ((user.role === "ADMIN" || user.role === "NSM") && user.adminProfile) return user.adminProfile.id;
   if (user.role === "ACCOUNTANT" && user.accountantProfile) return user.accountantProfile.id;
-  if ((user.role === "STAFF" || user.role === "RSM") && user.staffProfile) return user.staffProfile.id;
+  if ((user.role === "STAFF" || user.role === "RSM" || user.role === "ASM") && user.staffProfile) return user.staffProfile.id;
   if (user.role === "DEALER" && user.dealerProfile) return user.dealerProfile.id;
   throw new Error("Missing role profile");
 }

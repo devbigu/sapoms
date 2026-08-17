@@ -1,6 +1,7 @@
 import type { OrderAcceptanceStatus, OrderFulfilmentStatus, OrderStatus } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
+import { buildOrderRegionWhere, isStaffLike } from "@/server/auth/sales-scope";
 
 export class PostgresOrderStatusError extends Error {
   status: number;
@@ -76,7 +77,7 @@ export async function findPostgresStatusOrder(orderId: unknown) {
 }
 
 function isAssignedStaffRole(actor: AuthActor) {
-  return actor.role === "STAFF" || actor.role === "RSM";
+  return isStaffLike(actor);
 }
 
 async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "read" | "acceptance" | "fulfilment" | "cancel") {
@@ -89,6 +90,17 @@ async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "r
     if (order.dealerId !== actor.dealerId) throw new PostgresOrderStatusError(403, "forbidden", "This order belongs to another Dealer.");
     if (permission !== "read" && permission !== "cancel") {
       throw new PostgresOrderStatusError(403, "forbidden", "Dealers cannot perform staff-only order transitions.");
+    }
+    return;
+  }
+  if (actor.role === "RSM") {
+    const regionWhere = await buildOrderRegionWhere(actor, undefined, prisma);
+    const scoped = await prisma.order.findFirst({ where: { id: order.id, ...regionWhere }, select: { id: true } });
+    if (!scoped) {
+      throw new PostgresOrderStatusError(403, "forbidden", "This order is outside your RSM scope.");
+    }
+    if (permission === "cancel") {
+      throw new PostgresOrderStatusError(403, "forbidden", "Staff, RSM, and ASM cannot cancel Dealer orders.");
     }
     return;
   }
@@ -138,8 +150,33 @@ export async function updatePostgresOrderAcceptance(orderId: unknown, actor: Aut
   if (!order) return null;
   await assertCanAct(actor, order, "acceptance");
   if (order.status === "CANCELLED") throw new PostgresOrderStatusError(409, "order_already_cancelled", "Cancelled orders cannot be accepted or declined.");
-  assertAcceptanceTransition(order.acceptanceStatus, next);
   const now = new Date();
+
+  if (actor.role === "RSM") {
+    if (order.rsmApprovalStatus !== "AWAITING" || (next !== "ACCEPTED" && next !== "DECLINED")) {
+      throw new PostgresOrderStatusError(409, "invalid_transition", "RSM approval can move only from awaiting to approved or declined.");
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          rsmApprovalStatus: next,
+          rsmReviewedByUserId: actor.userId,
+          rsmReviewedByName: actor.displayName || actor.email,
+          rsmReviewedAt: now,
+          status: next === "DECLINED" ? "DECLINED" : order.status,
+        },
+      });
+      await tx.orderOverlay.create({ data: { orderId: order.id, type: "rsm_acceptance", status: next.toLowerCase(), value: next, actorUserId: actor.userId, actorRole: actor.role, metadata: { source: "postgres_status", stage: "rsm" } } });
+      return row;
+    });
+    return { ...updated, accept_order: legacyAcceptOrderAlias(updated.acceptanceStatus), del_status: legacyDelStatusAlias(updated.status) };
+  }
+
+  if (order.rsmApprovalStatus !== "ACCEPTED") {
+    throw new PostgresOrderStatusError(403, "rsm_approval_required", "Order is not available for staff acceptance until RSM approval is complete.");
+  }
+  assertAcceptanceTransition(order.acceptanceStatus, next);
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.order.update({
       where: { id: order.id },

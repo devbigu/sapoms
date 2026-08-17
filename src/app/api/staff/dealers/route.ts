@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 import { mapDealerProfileAliases } from "@/server/modules/profiles/profile-aliases";
 
 export const runtime = "nodejs";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 export async function GET() {
   try {
     const actor = await requireAuth();
-    if (!(actor.role === "STAFF" || actor.role === "RSM") || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    if (!isStaffLike(actor) || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
     const rows = await prisma.dealerStaffAssignment.findMany({
       where: { staffId: actor.staffId, active: true, removedAt: null, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
       include: { dealer: { include: { user: { select: { email: true, username: true, status: true } } } } },

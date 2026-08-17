@@ -17,6 +17,7 @@ enum AuthRole {
   NSM
   ACCOUNTANT
   RSM
+  ASM
   STAFF
   DEALER
 }
@@ -41,15 +42,21 @@ enum UserRole {
   NSM
   ACCOUNTANT
   RSM
+  ASM
   STAFF
   DEALER
 }
 
 enum SalesRegion {
-  NORTH
-  SOUTH
+  NORTH_1
+  NORTH_2
+  SOUTH_1
+  SOUTH_2
+  WEST_1
+  WEST_2
   EAST
-  WEST
+  ROM
+  CENTRAL
 }
 
 enum UserStatus {
@@ -239,19 +246,28 @@ model AccountantProfile {
 }
 
 model StaffProfile {
-  id            BigInt  @id @default(autoincrement())
-  userId        BigInt  @unique @map("user_id")
-  displayName   String  @map("display_name")
-  designation   String?
-  location      String?
-  staffRoleType String? @map("staff_role_type")
-  salesRegion   SalesRegion? @map("sales_region")
+  id             BigInt  @id @default(autoincrement())
+  userId         BigInt  @unique @map("user_id")
+  parentRsmId    BigInt? @map("parent_rsm_id")
+  parentAsmId    BigInt? @map("parent_asm_id")
+  displayName    String  @map("display_name")
+  designation    String?
+  location       String?
+  staffRoleType  String? @map("staff_role_type")
+  salesRegion    SalesRegion? @map("sales_region")
+  assignedStates String[] @default([]) @map("assigned_states")
 
   user                   User                    @relation(fields: [userId], references: [id])
+  parentRsm              StaffProfile?           @relation("StaffParentRsm", fields: [parentRsmId], references: [id], onDelete: SetNull)
+  parentAsm              StaffProfile?           @relation("StaffParentAsm", fields: [parentAsmId], references: [id], onDelete: SetNull)
+  asmChildren            StaffProfile[]          @relation("StaffParentRsm")
+  executiveChildren      StaffProfile[]          @relation("StaffParentAsm")
   assignedOrders         Order[]
   customDiscountRequests CustomDiscountRequest[]
   dealerAssignments      DealerStaffAssignment[]
 
+  @@index([parentRsmId])
+  @@index([parentAsmId])
   @@map("staff_profiles")
 }
 
@@ -270,6 +286,7 @@ model DealerProfile {
   discountPercent  Decimal?  @map("discount_percent") @db.Decimal(9, 4)
   creditDays       Int?      @map("credit_days")
   creditLimitPaise BigInt?   @map("credit_limit_paise")
+  termsAcceptedAt  DateTime? @map("terms_accepted_at") @db.Timestamptz(6)
   imageUrl         String?   @map("image_url")
   region           SalesRegion?
   rsmUserId        BigInt?   @map("rsm_user_id")
@@ -509,6 +526,14 @@ model Order {
 
   acceptanceStatus OrderAcceptanceStatus @default(AWAITING) @map("acceptance_status")
 
+  rsmApprovalStatus OrderAcceptanceStatus @default(AWAITING) @map("rsm_approval_status")
+
+  rsmReviewedByUserId BigInt? @map("rsm_reviewed_by_user_id")
+
+  rsmReviewedByName String? @map("rsm_reviewed_by_name")
+
+  rsmReviewedAt DateTime? @map("rsm_reviewed_at") @db.Timestamptz(6)
+
   fulfilmentStatus OrderFulfilmentStatus @default(PENDING) @map("fulfilment_status")
 
   acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz(6)
@@ -545,6 +570,7 @@ model Order {
   @@index([assignedStaffId, createdAt])
   @@index([status, createdAt])
   @@index([acceptanceStatus])
+  @@index([rsmApprovalStatus])
   @@index([fulfilmentStatus])
   @@index([orderNumber])
   @@map("orders")
@@ -844,6 +870,14 @@ model CustomDiscountRequest {
 
   status DiscountRequestStatus @default(PENDING)
 
+  rsmApprovalStatus DiscountRequestStatus @default(PENDING) @map("rsm_approval_status")
+
+  rsmReviewedByUserId BigInt? @map("rsm_reviewed_by_user_id")
+
+  rsmReviewedByName String? @map("rsm_reviewed_by_name")
+
+  rsmReviewedAt DateTime? @map("rsm_reviewed_at") @db.Timestamptz(6)
+
   requestedDiscountPercent Decimal @default(0) @map("requested_discount_percent") @db.Decimal(7, 4)
 
   currentDiscountPercent Decimal @default(0) @map("current_discount_percent") @db.Decimal(7, 4)
@@ -888,6 +922,7 @@ model CustomDiscountRequest {
   reorderLogs CustomDiscountReorderLog[]
 
   @@index([dealerId, status])
+  @@index([rsmApprovalStatus, status, createdAt])
   @@index([orderId])
   @@index([orderDraftId])
   @@index([status, createdAt])

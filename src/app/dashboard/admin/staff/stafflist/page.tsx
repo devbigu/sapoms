@@ -11,6 +11,8 @@ type StaffData = {
   staff_name: string
   staff_email: string
   staff_roletype: string
+  sales_region?: string
+  salesRegion?: string
   role?: string
   staff_password: string
   staff_designation: string
@@ -29,16 +31,48 @@ const ADMIN_STAFF_URL = "/api/admin/staff"
 const ITEMS_PER_PAGE = 10
 const getStaffEditRoute = (staffId: string) => `/dashboard/admin/staff/${encodeURIComponent(staffId)}`
 
-function roleBadge(staff: Pick<StaffData, "role" | "staff_roletype">) {
+function getFloatingMenuPosition(button: HTMLElement) {
+  const rect = button.getBoundingClientRect()
+  const menuWidth = 176
+  const gutter = 12
+  return {
+    top: Math.min(rect.bottom + 8, window.innerHeight - gutter),
+    left: Math.max(gutter, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter)),
+  }
+}
+
+function isMenuOpen(openMenu: FloatingMenuState, id: string) {
+  return openMenu?.id === id
+}
+
+function openFloatingMenu(
+  event: React.MouseEvent<HTMLButtonElement>,
+  id: string,
+  setOpenMenu: React.Dispatch<React.SetStateAction<FloatingMenuState>>,
+) {
+  event.stopPropagation()
+  const position = getFloatingMenuPosition(event.currentTarget)
+  setOpenMenu((prev) => prev?.id === id ? null : { id, ...position })
+}
+
+function formatSalesRegion(value?: string) {
+  const normalized = String(value ?? "").trim().toUpperCase()
+  if (!normalized) return ""
+  return normalized.charAt(0) + normalized.slice(1).toLowerCase()
+}
+
+function roleBadge(staff: Pick<StaffData, "role" | "staff_roletype" | "sales_region" | "salesRegion">) {
   const authRole = String(staff.role ?? "").toUpperCase()
   const staffRoleType = String(staff.staff_roletype ?? "").toUpperCase()
+  const regionLabel = formatSalesRegion(staff.sales_region || staff.salesRegion)
 
   if (authRole === "NSM") return { bg: "bg-emerald-50", text: "text-emerald-700", label: "NSM" }
-  if (authRole === "RSM" || staffRoleType === "RSM") return { bg: "bg-sky-50", text: "text-sky-700", label: "RSM" }
+  if (authRole === "RSM" || staffRoleType === "RSM") return { bg: "bg-sky-50", text: "text-sky-700", label: regionLabel ? `${regionLabel} RSM` : "RSM" }
+  if (authRole === "ASM" || staffRoleType === "ASM") return { bg: "bg-cyan-50", text: "text-cyan-700", label: "ASM" }
 
   switch (staffRoleType) {
-    case "1": return { bg: "bg-indigo-50", text: "text-indigo-700", label: "Executive" }
-    case "2": return { bg: "bg-violet-50", text: "text-violet-700", label: "Field Executive" }
+    case "1": return { bg: "bg-indigo-50", text: "text-indigo-700", label: "Staff" }
+    case "2": return { bg: "bg-violet-50", text: "text-violet-700", label: "Sales Manager" }
     default:  return { bg: "bg-gray-100",  text: "text-gray-500",   label: "Unknown" }
   }
 }
@@ -48,6 +82,7 @@ function initials(name: string) {
 }
 
 type AppRole = "admin" | "staff" | "accountant"
+type FloatingMenuState = { id: string; top: number; left: number } | null
 
 function getRole(): AppRole {
   if (typeof window === 'undefined') return 'admin'
@@ -64,7 +99,7 @@ export default function StaffListPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toastMsg,      setToastMsg]      = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(() => new Set())
-  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [openMenu, setOpenMenu] = useState<FloatingMenuState>(null)
   const [role, setRole] = useState<AppRole>('admin')
 
   const queryClient = useQueryClient()
@@ -267,7 +302,7 @@ export default function StaffListPage() {
         </div>
       )}
 
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="p-6 admin-page-shell">
 
         {/* Header */}
         <div className="mb-8">
@@ -405,15 +440,15 @@ export default function StaffListPage() {
                         <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                           <div className="relative">
                             <button
-                              onClick={(e) => { e.stopPropagation(); setOpenMenu(prev => prev === staff.staff_id ? null : staff.staff_id) }}
+                              onClick={(e) => openFloatingMenu(e, staff.staff_id, setOpenMenu)}
                               data-menu-id={staff.staff_id}
                               className="p-2 rounded-md text-gray-600 hover:bg-gray-50 transition"
                               aria-label="Open actions"
                             >
                               <MoreVertical className="w-4 h-4" />
                             </button>
-                            {openMenu === staff.staff_id && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} className="absolute right-0 mt-2 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+                            {isMenuOpen(openMenu, staff.staff_id) && (
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} style={{ top: openMenu?.top ?? 0, left: openMenu?.left ?? 0 }} className="fixed w-44 bg-white border border-gray-200 rounded-md shadow-2xl z-[9999] py-1">
                                 <Link href={getStaffEditRoute(staff.staff_id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Edit</Link>
                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(staff.staff_id); setOpenMenu(null) }} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">Delete</button>
                               </div>

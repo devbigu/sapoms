@@ -24,6 +24,15 @@ const include = {
   variants: { orderBy: { id: "asc" as const } },
 } satisfies Prisma.ProductInclude;
 
+async function resolveCategoryId(categoryName?: string): Promise<bigint | null> {
+  const name = String(categoryName ?? "").trim().slice(0, 160);
+  if (!name) return null;
+  const existing = await prisma.productCategory.findFirst({ where: { name: { equals: name, mode: "insensitive" } }, select: { id: true } });
+  if (existing) return existing.id;
+  const created = await prisma.productCategory.create({ data: { name }, select: { id: true } });
+  return created.id;
+}
+
 export class PostgresAdminProductRepository {
   async list(input: AdminProductListInput): Promise<{ items: AdminProductRecord[]; total: number }> {
     const where = buildWhere(input);
@@ -40,15 +49,17 @@ export class PostgresAdminProductRepository {
   }
 
   async create(input: ProductWriteInput): Promise<AdminProductRecord> {
+    const categoryId = await resolveCategoryId(input.categoryName);
     return prisma.product.create({
-      data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, active: input.active ?? true, variants: { create: input.variants.map((variant) => ({ sku: variant.sku || null, catalogueNumber: variant.catalogueNumber || variant.sku || null, unitName: variant.unitName || null, packSize: variant.packSize ?? null, unitPricePaise: variant.unitPricePaise ?? BigInt(0), packPricePaise: variant.packPricePaise ?? BigInt(0), active: variant.active ?? true })) } },
+      data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, categoryId, active: input.active ?? true, variants: { create: input.variants.map((variant) => ({ sku: variant.sku || null, catalogueNumber: variant.catalogueNumber || variant.sku || null, unitName: variant.unitName || null, packSize: variant.packSize ?? null, unitPricePaise: variant.unitPricePaise ?? BigInt(0), packPricePaise: variant.packPricePaise ?? BigInt(0), active: variant.active ?? true })) } },
       include,
     });
   }
 
   async update(productId: bigint, input: ProductWriteInput): Promise<AdminProductRecord> {
+    const categoryId = await resolveCategoryId(input.categoryName);
     return prisma.$transaction(async (tx) => {
-      await tx.product.update({ where: { id: productId }, data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, active: input.active ?? true } });
+      await tx.product.update({ where: { id: productId }, data: { productCode: input.productCode || null, name: input.name, description: input.description || null, imageUrl: input.imageUrl || null, categoryId, active: input.active ?? true } });
       const keepVariantIds = input.variants.map((variant) => variant.id).filter((id): id is string => Boolean(id && /^\d+$/.test(id))).map((id) => BigInt(id));
       await tx.productVariant.deleteMany({ where: { productId, ...(keepVariantIds.length ? { id: { notIn: keepVariantIds } } : {}) } });
       for (const variant of input.variants) {

@@ -2,6 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
+import { buildOrderRegionWhere } from "@/server/auth/sales-scope";
 import type { OrdersActor } from "@/lib/orderPagination";
 
 const orderInclude = {
@@ -132,6 +133,12 @@ export function mapPostgresOrderItemToLegacy(item: PostgresOrderLike["items"][nu
     status: order.status,
     order_status: legacyOrderStatus(order.status),
     accept_order: legacyAcceptance(order.acceptanceStatus),
+    rsmApprovalStatus: order.rsmApprovalStatus,
+    rsm_approval_status: order.rsmApprovalStatus,
+    rsmReviewedBy: order.rsmReviewedByName || "",
+    rsm_reviewed_by: order.rsmReviewedByName || "",
+    rsmReviewedAt: order.rsmReviewedAt?.toISOString?.() ?? null,
+    rsm_reviewed_at: order.rsmReviewedAt?.toISOString?.() ?? null,
     acceptanceStatus: order.acceptanceStatus,
     acceptance_status: order.acceptanceStatus,
     fulfilmentStatus: order.fulfilmentStatus,
@@ -194,6 +201,12 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderLike) {
     status: order.status,
     order_status: legacyOrderStatus(order.status),
     accept_order: legacyAcceptance(order.acceptanceStatus),
+    rsmApprovalStatus: order.rsmApprovalStatus,
+    rsm_approval_status: order.rsmApprovalStatus,
+    rsmReviewedBy: order.rsmReviewedByName || "",
+    rsm_reviewed_by: order.rsmReviewedByName || "",
+    rsmReviewedAt: order.rsmReviewedAt?.toISOString?.() ?? null,
+    rsm_reviewed_at: order.rsmReviewedAt?.toISOString?.() ?? null,
     acceptanceStatus: order.acceptanceStatus,
     acceptance_status: order.acceptanceStatus,
     fulfilmentStatus: order.fulfilmentStatus,
@@ -245,26 +258,29 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderLike) {
   return row;
 }
 
-function actorWhere(actor: OrdersActor, assignedDealerIds: Array<string | number> = []): Prisma.OrderWhereInput {
+async function actorWhere(actor: OrdersActor, assignedDealerIds: Array<string | number> = []): Promise<Prisma.OrderWhereInput> {
   if (actor.role === "dealer") return { dealerId: BigInt(actor.actorId) };
+  if (actor.isRsm && actor.userId) return buildOrderRegionWhere({ userId: BigInt(actor.userId), role: "RSM" }, undefined, prisma);
   if (actor.role === "staff") {
     const assignedDealerBigInts = assignedDealerIds
       .map((id) => String(id ?? "").trim())
       .filter((id) => /^\d+$/.test(id))
       .map((id) => BigInt(id));
-    return {
+    const staffScope = {
       OR: [
         { assignedStaffId: BigInt(actor.actorId) },
         ...(assignedDealerBigInts.length > 0 ? [{ dealerId: { in: assignedDealerBigInts } }] : []),
       ],
-    };
+    } satisfies Prisma.OrderWhereInput;
+    return actor.isAsm ? staffScope : { rsmApprovalStatus: "ACCEPTED", ...staffScope };
   }
   return {};
 }
 
 export async function listPostgresOrderHeaders(actor: OrdersActor, assignedDealerIds: Array<string | number> = []) {
+  const where = await actorWhere(actor, assignedDealerIds);
   const orders = await prisma.order.findMany({
-    where: actorWhere(actor, assignedDealerIds),
+    where,
     include: orderInclude,
     orderBy: { orderDate: "desc" },
   });

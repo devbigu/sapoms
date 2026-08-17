@@ -40,6 +40,7 @@ export function mapAdminDealer(record: AdminDealerRecord) {
     .map(mapAdminDealerStaffAssignment);
   const assignedstaff = assignedStaff.map((staff) => staff.staffId).join(",");
   const region = record.region || "";
+  const walletStatus = record.wallet?.status === "ACTIVE" ? "active" : "inactive";
   const rsm = record.regionalManager?.staffProfile ? {
     id: record.regionalManager.id.toString(),
     userId: record.regionalManager.id.toString(),
@@ -65,6 +66,7 @@ export function mapAdminDealer(record: AdminDealerRecord) {
     creditDays,
     creditLimitPaise,
     status: record.user.status,
+    walletStatus,
     assignedStaff,
     region,
     rsmUserId: record.rsmUserId?.toString() || "",

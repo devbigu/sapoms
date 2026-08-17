@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { generatePostgresDealerCode } from "@/server/modules/dealers/dealer-code.service";
-import { requireRole } from "@/server/auth/session";
+import { requireAuth } from "@/server/auth/session";
+import { isAdminLike, isStaffLike } from "@/server/auth/sales-scope";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,10 @@ function json(body: Record<string, unknown>, init?: ResponseInit) {
 
 export async function GET(request: NextRequest) {
   try {
-    await requireRole(["ADMIN", "STAFF"]);
+    const actor = await requireAuth();
+    if (!(isAdminLike(actor) || isStaffLike(actor))) {
+      throw new Error("Forbidden");
+    }
 
     const dealerCode = await generatePostgresDealerCode(request.nextUrl.searchParams.get("candidate"));
     if (!dealerCode) {

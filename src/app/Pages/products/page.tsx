@@ -31,6 +31,7 @@ type ProductData = {
   product_categories: string[]
   product_stock_state: string
   product_detail_href: string
+  admin_product_id?: string
 }
 
 type ProductResponse = {
@@ -70,7 +71,7 @@ function getVariantPackSize(variant?: CatalogueVariant): string {
   return Number.isFinite(pack) && pack > 0 ? String(pack) : ""
 }
 
-function mapCatalogueProductToRows(product: CatalogueProduct, matchingVariants?: Array<CatalogueVariant | undefined>): ProductData[] {
+function mapCatalogueProductToRows(product: CatalogueProduct & { adminProductId?: string }, matchingVariants?: Array<CatalogueVariant | undefined>): ProductData[] {
   const variants = matchingVariants?.length
     ? matchingVariants
     : product.variants?.length
@@ -98,6 +99,7 @@ function mapCatalogueProductToRows(product: CatalogueProduct, matchingVariants?:
       product_categories: productCategories,
       product_stock_state: variant?.inStock === false ? "Out of stock" : "In stock",
       product_detail_href: `/Products/${encodeURIComponent(sku || productSku)}`,
+      admin_product_id: product.adminProductId,
     }
   })
 }
@@ -206,8 +208,16 @@ function ProductListContent() {
       const res = await fetch('/api/admin/products?page=1&pageSize=1000', { cache: 'no-store' })
       if (!res.ok) throw new Error('Products unavailable')
       const json = await res.json()
-      const catalogueProducts = (json.data ?? json.items ?? []).map((product: any) => ({
+      const adminItems = Array.isArray(json.data?.items)
+        ? json.data.items
+        : Array.isArray(json.items)
+          ? json.items
+          : Array.isArray(json.data)
+            ? json.data
+            : []
+      const catalogueProducts = adminItems.map((product: any) => ({
         id: product.id,
+        adminProductId: product.id,
         sku: product.productCode || product.id,
         name: product.name,
         descriptionHtml: product.description || '',
@@ -255,7 +265,7 @@ function ProductListContent() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/products/${encodeURIComponent(id)}`, { method: "DELETE" })
+      const res = await fetch(`/api/admin/products/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" })
       if (!res.ok) throw new Error("Delete failed")
       setToastMsg({ text: "Deleted successfully", ok: true })
       refetch()
@@ -535,12 +545,15 @@ function ProductListContent() {
 
                     <td className="pr-[22px] pl-4 py-[14px]">
                       <div className="flex items-center gap-1.5">
-                        <button className="inline-flex items-center gap-1 px-[11px] py-1.5 rounded-lg text-[12px] font-medium bg-[#f8faff] text-[#475569] border-[1.5px] border-[#e2e8f0] cursor-pointer transition-all hover:bg-[#eff6ff] hover:border-[#bfdbfe] hover:text-[#1d4ed8]">
+                        <button
+                          onClick={() => product.admin_product_id ? router.push(`/Pages/products/addproducts?id=${encodeURIComponent(product.admin_product_id)}`) : setToastMsg({ text: "Only PostgreSQL products can be edited here", ok: false })}
+                          className="inline-flex items-center gap-1 px-[11px] py-1.5 rounded-lg text-[12px] font-medium bg-[#f8faff] text-[#475569] border-[1.5px] border-[#e2e8f0] cursor-pointer transition-all hover:bg-[#eff6ff] hover:border-[#bfdbfe] hover:text-[#1d4ed8]"
+                        >
                           <Pencil size={12} />
                           Edit
                         </button>
                         <button
-                          onClick={() => setDeleteConfirm(product.product_id)}
+                          onClick={() => product.admin_product_id ? setDeleteConfirm(product.admin_product_id) : setToastMsg({ text: "Only PostgreSQL products can be deleted here", ok: false })}
                           className="inline-flex items-center gap-1 px-[11px] py-1.5 rounded-lg text-[12px] font-medium bg-white text-[#64748b] border-[1.5px] border-[#e2e8f0] cursor-pointer transition-all hover:bg-[#fff1f2] hover:border-[#fecdd3] hover:text-[#be123c]"
                         >
                           <Trash2 size={12} />

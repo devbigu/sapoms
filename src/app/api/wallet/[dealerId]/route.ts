@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 import { getWalletSnapshot } from "@/lib/postgresWallet";
 
 export const runtime = "nodejs";
@@ -13,7 +14,7 @@ function parseDealerId(value: string) {
 async function canReadWallet(actor: Awaited<ReturnType<typeof requireAuth>>, dealerId: bigint) {
   if (actor.role === "ADMIN") return true;
   if (actor.role === "DEALER") return actor.dealerId === dealerId;
-  if (actor.role === "STAFF" && actor.staffId) {
+  if (isStaffLike(actor) && actor.staffId) {
     const assignment = await prisma.dealerStaffAssignment.findFirst({
       where: { dealerId, staffId: actor.staffId, active: true, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
       select: { id: true },

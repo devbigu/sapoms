@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 
 export type ReportActorScope = "admin" | "accountant" | "staff";
 
@@ -43,7 +44,7 @@ function dateRange(from?: string | null, to?: string | null) {
 export function reportActorFromAuth(actor: AuthActor): DealerReportActor | null {
   if (actor.role === "ADMIN") return { scope: "admin" };
   if (actor.role === "ACCOUNTANT") return { scope: "accountant" };
-  if (actor.role === "STAFF" && actor.staffId) return { scope: "staff", staffId: actor.staffId };
+  if (isStaffLike(actor) && actor.staffId) return { scope: "staff", staffId: actor.staffId };
   return null;
 }
 

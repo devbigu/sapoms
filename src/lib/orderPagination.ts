@@ -4,6 +4,9 @@ import { filterOrdersForActor, resolveOrderDealerId } from "@/lib/staffOrderScop
 export type OrdersActor = {
   role: "admin" | "accountant" | "staff" | "dealer";
   actorId: string;
+  isRsm?: boolean;
+  isAsm?: boolean;
+  userId?: string;
 };
 
 export type UpstreamOrderPage<T> = {

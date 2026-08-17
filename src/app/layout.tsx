@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
-import Providers from './providers'
-import Sidebar from "@/components/layout/sidebar";
 import ReactQueryProvider from "@/app/providers/ReactQueryproviders";
-import Cart from "./Pages/Cart/page";
+import DealerTermsGate from "@/components/terms/DealerTermsGate";
 
 export const metadata: Metadata = {
   title: "Omsons",
@@ -23,13 +21,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className="antialiased">
+      <body className="antialiased">
         <ReactQueryProvider>
+          <DealerTermsGate />
           {children}
         </ReactQueryProvider>
       </body>
-
     </html>
   );
 }

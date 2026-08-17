@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { OrderFulfilmentStatus, OrderStatus, Prisma, UserRole } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 import { normalizeSku } from "@/lib/orderProductNotes.mjs";
 import { PostgresOrderStatusError, findPostgresStatusOrder } from "@/lib/postgresOrderStatus";
 import { mapPostgresOrderItemToLegacy, mapPostgresOrderToLegacy, type PostgresOrderRecord } from "@/lib/postgresOrders";
@@ -55,7 +56,7 @@ function legacyItemId(item: { id: bigint; legacyPhpOrderItemId?: string | null }
 }
 
 function isAssignedDispatchStaffRole(actor: AuthActor) {
-  return actor.role === "STAFF" || actor.role === "RSM";
+  return isStaffLike(actor);
 }
 
 function isGlobalDispatchRole(actor: AuthActor) {

@@ -92,6 +92,9 @@ export type NormalizedCustomDiscountRequest = {
   orderDraftId: string;
   status: string;
   normalizedStatus: CustomDiscountStatus | string;
+  rsmApprovalStatus: string;
+  rsmReviewedBy: string;
+  rsmReviewedAt: string | null;
   discountScope: CustomDiscountScope;
   targetProduct: {
     productKey?: string;
@@ -473,6 +476,9 @@ export function normalizeCustomDiscountRequestRecord(
     orderDraftId,
     status,
     normalizedStatus,
+    rsmApprovalStatus: cleanText(record.rsmApprovalStatus || record.rsm_approval_status) || "pending",
+    rsmReviewedBy: cleanText(record.rsmReviewedBy || record.rsm_reviewed_by),
+    rsmReviewedAt: cleanText(record.rsmReviewedAt || record.rsm_reviewed_at) || null,
     discountScope,
     targetProduct: record.targetProduct && typeof record.targetProduct === "object"
       ? {

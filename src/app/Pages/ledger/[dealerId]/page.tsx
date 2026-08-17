@@ -508,6 +508,7 @@ export default function DealerLedgerPage() {
   const summary = ledgerData?.summary || { totalDebit: 0, totalCredit: 0, netBalance: 0 }
   const summaryStats = ledgerData?.summaryStats
   const isLive = ledgerData?.isLive ?? true
+  const canManageLedgerEntries = userRole === 'accountant'
   const transactions = transactionsData?.data || []
   const transactionCount = transactionsData?.count || 0
   const transactionPage = transactionsData?.page || transactionsPage
@@ -580,6 +581,7 @@ export default function DealerLedgerPage() {
           walletTransactions={walletData?.transactions}
           walletLoading={isWalletLoading}
           onPayMoneyClick={() => setPayModalOpen(true)}
+          canRecordPayment={canManageLedgerEntries}
         />
 
         {/* Summary Cards */}

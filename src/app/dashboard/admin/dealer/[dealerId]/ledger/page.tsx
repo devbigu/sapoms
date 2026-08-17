@@ -90,10 +90,14 @@ interface TransactionsResponse {
   message?: string
 }
 
-function isStaffLedgerSession() {
-  if (typeof window === 'undefined') return false
+function getLedgerViewerRole() {
+  if (typeof window === 'undefined') return null
   const session = resolveStoredAuth(window.localStorage)
-  return session.status === 'authenticated' && session.role === 'staff'
+  return session.status === 'authenticated' ? session.role : null
+}
+
+function isStaffLedgerSession() {
+  return getLedgerViewerRole() === 'staff'
 }
 
 export default function DealerLedgerPage() {
@@ -103,6 +107,7 @@ export default function DealerLedgerPage() {
   const dealerId = params.dealerId as string
 
   const [redirectingStaff, setRedirectingStaff] = useState(() => isStaffLedgerSession())
+  const [viewerRole, setViewerRole] = useState<string | null>(null)
   const [payModalOpen, setPayModalOpen] = useState(false)
   const [payLoading, setPayLoading] = useState(false)
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false)
@@ -117,7 +122,9 @@ export default function DealerLedgerPage() {
   const [transactionsPage, setTransactionsPage] = useState(1)
 
   useEffect(() => {
-    if (!dealerId || !isStaffLedgerSession()) return
+    const role = getLedgerViewerRole()
+    setViewerRole(role)
+    if (!dealerId || role !== 'staff') return
     setRedirectingStaff(true)
     router.replace(`/Pages/ledger/${encodeURIComponent(dealerId)}`)
   }, [dealerId, router])
@@ -273,7 +280,7 @@ export default function DealerLedgerPage() {
   if (redirectingStaff) {
     return (
       <div className="min-h-screen bg-gray-100">
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-6 admin-page-shell">
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
             Opening assigned dealer ledger...
           </div>
@@ -285,7 +292,7 @@ export default function DealerLedgerPage() {
   if (ledgerError) {
     return (
       <div className="min-h-screen bg-gray-100">
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-6 admin-page-shell">
           <div className="flex items-center gap-3 p-4 bg-red-50 rounded-lg border border-red-200">
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
             <div>
@@ -304,6 +311,7 @@ export default function DealerLedgerPage() {
   const summary = ledgerData?.summary || { totalDebit: 0, totalCredit: 0, netBalance: 0 }
   const summaryStats = ledgerData?.summaryStats
   const isLive = ledgerData?.isLive ?? true
+  const canManageLedgerEntries = viewerRole === 'accountant'
   const transactions = transactionsData?.data || []
   const transactionCount = transactionsData?.count || 0
   const transactionPage = transactionsData?.page || transactionsPage
@@ -447,7 +455,7 @@ export default function DealerLedgerPage() {
         </div>
       )}
 
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="p-6 admin-page-shell">
         {!isLive && (
           <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
             Showing offline cached ledger data. Connection to main billing system is temporarily unavailable.
@@ -471,6 +479,7 @@ export default function DealerLedgerPage() {
           walletTransactions={walletData?.transactions}
           walletLoading={isWalletLoading}
           onPayMoneyClick={() => setPayModalOpen(true)}
+          canRecordPayment={canManageLedgerEntries}
           canAdjustWallet
           onAdjustWalletClick={() => setWalletAdjustOpen(true)}
         />

@@ -144,7 +144,7 @@ export default function CustomDiscountApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 px-6 py-6" style={{ fontFamily: "'DM Sans','Helvetica Neue',sans-serif" }}>
-      <div className="mx-auto max-w-[1400px] space-y-5">
+      <div className="admin-page-shell space-y-5">
         <div className="flex flex-col gap-4 border-b border-gray-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <button
@@ -228,6 +228,11 @@ export default function CustomDiscountApprovalsPage() {
                     <p className="text-[12px] text-gray-400">
                       Submitted {request.createdAt ? new Date(request.createdAt).toLocaleString("en-IN") : "-"}
                     </p>
+                    {request.rsmApprovalStatus === "approved" && (
+                      <p className="text-[12px] font-semibold text-emerald-700">
+                        RSM Approved{request.rsmReviewedBy ? ` by ${request.rsmReviewedBy}` : ""}
+                      </p>
+                    )}
                     {request.discountScope === "product" && request.targetProduct && (
                       <p className="text-[12px] font-semibold text-indigo-700">
                         Custom discount target: {request.targetProduct.displayName || request.targetProduct.variantCode || request.targetProduct.productname || "Selected product"}

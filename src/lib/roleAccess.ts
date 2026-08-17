@@ -13,6 +13,7 @@ export type StoredUser = Record<string, unknown> & {
   Dealer_Email?: string;
   Dealer_Number?: string;
   Dealer_Dealercode?: string;
+  termsAcceptedAt?: string;
   name?: string;
   username?: string;
   email?: string;

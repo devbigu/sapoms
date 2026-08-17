@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Search } from "lucide-react";
+import { resolveStoredAuth } from "@/lib/roleAccess";
 import {
   applyDealerStatusOverrides,
   fetchDealerStatusOverrides,
@@ -216,13 +217,9 @@ function isLoggedIn(): boolean {
   }
 }
 
-function isStaffRole(): boolean {
-  const roleType =
-    localStorage.getItem("roletype") ??
-    localStorage.getItem("roleType") ??
-    localStorage.getItem("role");
-
-  return roleType === "1" || roleType === "staff";
+function hasStaffAccess(): boolean {
+  const auth = resolveStoredAuth(localStorage);
+  return auth.status === "authenticated" && auth.role === "staff";
 }
 
 function normalizeAssignedStaff(
@@ -360,7 +357,7 @@ export default function StaffDealerListPage() {
         return;
       }
 
-      if (!isStaffRole()) {
+      if (!hasStaffAccess()) {
         router.replace("/dashboard");
         return;
       }

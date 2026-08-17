@@ -3,6 +3,7 @@ import "server-only";
 import { OrderAcceptanceStatus, OrderFulfilmentStatus, OrderStatus, WalletTransactionType, type Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 import { applyWalletChange, fromPaise, roundMoney, toPaise } from "@/lib/postgresWallet";
 import { mapPostgresOrderToLegacy } from "@/lib/postgresOrders";
 
@@ -224,7 +225,7 @@ function summaryFrom(orders: LedgerOrder[], transactions: Array<{ type: WalletTr
 async function canAccessDealer(client: LedgerClient, actor: AuthActor, dealerId: bigint) {
   if (actor.role === "ADMIN") return true;
   if (actor.role === "DEALER") return actor.dealerId === dealerId;
-  if (actor.role === "STAFF" && actor.staffId) {
+  if (isStaffLike(actor) && actor.staffId) {
     const assignment = await client.dealerStaffAssignment.findFirst({
       where: { dealerId, staffId: actor.staffId, active: true, dealer: { deletedAt: null, user: { status: "ACTIVE" } } },
       select: { id: true },
@@ -238,7 +239,7 @@ function dealerWhereForActor(actor: AuthActor): Prisma.DealerProfileWhereInput {
   const active = { deletedAt: null, user: { status: "ACTIVE" as const } };
   if (actor.role === "ADMIN") return active;
   if (actor.role === "DEALER" && actor.dealerId) return { ...active, id: actor.dealerId };
-  if (actor.role === "STAFF" && actor.staffId) return { ...active, staffAssignments: { some: { staffId: actor.staffId, active: true } } };
+  if (isStaffLike(actor) && actor.staffId) return { ...active, staffAssignments: { some: { staffId: actor.staffId, active: true } } };
   return { id: BigInt(-1) };
 }
 
@@ -327,7 +328,7 @@ export async function getDealerLedgerTransactions(actor: AuthActor, rawDealerId:
 
 export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, body: Record<string, unknown>) {
   const dealerId = parseBigIntId(rawDealerId, "dealer id");
-  if (actor.role !== "ADMIN") throw Object.assign(new Error("Only Admin can save ledger bills."), { status: 403 });
+  if (actor.role !== "ACCOUNTANT") throw Object.assign(new Error("Only Accountant can save ledger bills."), { status: 403 });
 
   const requestedOrderNumbers = Array.isArray(body.orderNumbers)
     ? body.orderNumbers.map((value) => String(value || "").trim()).filter(Boolean)
@@ -393,7 +394,7 @@ export async function recordLedgerBill(actor: AuthActor, rawDealerId: string, bo
 
 export async function recordLedgerPayment(actor: AuthActor, rawDealerId: string, body: Record<string, unknown>, idempotencyHeader?: string | null) {
   const dealerId = parseBigIntId(rawDealerId, "dealer id");
-  if (actor.role !== "ADMIN") throw Object.assign(new Error("Only Admin can record ledger payments."), { status: 403 });
+  if (actor.role !== "ACCOUNTANT") throw Object.assign(new Error("Only Accountant can record ledger payments."), { status: 403 });
   const idempotencyKey = String(idempotencyHeader || body.idempotencyKey || "").trim().slice(0, 240);
   if (!idempotencyKey) throw Object.assign(new Error("Idempotency key is required."), { status: 400 });
   const amount = Number(body.amount);

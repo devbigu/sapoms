@@ -26,7 +26,7 @@ test("dealer profile route is own-profile only and session authorized", () => {
 
 test("staff profile route is own-profile only and session authorized", () => {
   assert.match(staffProfileRoute, /requireAuth()/);
-  assert.match(staffProfileRoute, /actor.role !== "STAFF"/);
+  assert.match(staffProfileRoute, /!\["STAFF", "RSM"\]\.includes\(actor\.role\)/);
   assert.match(staffProfileRoute, /actor.staffId/);
   assert.match(staffProfileRoute, /where: { id: actor.staffId }/);
   assert.match(staffProfileRoute, /hashPassword/);
@@ -57,4 +57,11 @@ test("legacy UI aliases are preserved", () => {
   for (const alias of ["Dealer_Id", "Dealer_Name", "Dealer_Email", "Dealer_Number", "staffname", "staff_id", "staff_name"]) {
     assert.match(aliases, new RegExp(alias));
   }
+});
+
+test("staff dealer list resolves staff access through shared auth parsing", () => {
+  const staffDealerListPage = read("src/app/dashboard/staff/dealerlist/page.tsx");
+  assert.match(staffDealerListPage, /resolveStoredAuth\(localStorage\)/);
+  assert.match(staffDealerListPage, /auth\.status === "authenticated" && auth\.role === "staff"/);
+  assert.doesNotMatch(staffDealerListPage, /return roleType === "1" \|\| roleType === "staff"/);
 });

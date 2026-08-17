@@ -175,3 +175,58 @@ test("loadCatalogueProducts normalizes merged variant specification aliases", as
     globalThis.fetch = originalFetch;
   }
 });
+
+test("loadCatalogueProducts normalizes PostgreSQL products into the catalogue shape", async () => {
+  const originalFetch = globalThis.fetch;
+  const client = await importCatalogueClient();
+
+  globalThis.fetch = async (url) => {
+    const pathName = String(url);
+    if (pathName.includes("omsons_products_from_excel_with_images") || pathName.includes("nested_omsons_products")) return { ok: true, json: async () => [] };
+    if (pathName === "/api/products") {
+      return { ok: true, json: async () => ({ success: true, data: [{ id: "pg-152", sku: "PG-152", productCode: "PG-152", name: "Sandbox PostgreSQL Joint", category: "JOINTS", categories: ["JOINTS"], imageUrl: "https://res.cloudinary.com/demo/image/upload/sample.jpg", images: ["https://res.cloudinary.com/demo/image/upload/sample.jpg"], active: true, descriptionHtml: "Base description\n\nABOUT THIS ITEM\n- First point\n- Second point\n\nVARIANT SPECIFICATIONS\n152/1 - Socket Size: 10/19; Diameter: 13; Height: 120\n152/2 - Socket Size: 12/21; Diameter: 14; Height: 125", variants: [{ id: "v1", sku: "152/1", catalogueNumber: "152/1", packSize: 10, unitPricePaise: "9400", price: 94, active: true }, { id: "v2", sku: "152/2", catalogueNumber: "152/2", packSize: 10, unitPricePaise: "9900", price: 99, active: true }] }] }) };
+    }
+    throw new Error(`Unexpected URL ${pathName}`);
+  };
+
+  try {
+    const products = await client.loadCatalogueProducts();
+    const product = products.find((item) => item.sku === "PG-152");
+    assert.equal(product.name, "Sandbox PostgreSQL Joint");
+    assert.deepEqual(product.categories, ["JOINTS"]);
+    assert.equal(product.images[0], "https://res.cloudinary.com/demo/image/upload/sample.jpg");
+    assert.deepEqual(product.features, ["First point", "Second point"]);
+    assert.equal(product.descriptionHtml, "Base description");
+    assert.equal(product.variants.length, 2);
+    assert.equal(product.variants[0].pack, 10);
+    assert.equal(product.variants[0].price, 94);
+    assert.equal(product.variants[0].inStock, true);
+    assert.equal(product.variants[0].specs["Socket Size"], "10/19");
+    assert.equal(product.variants[1].specs.Height, "125");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("loadCatalogueProducts lets PostgreSQL products win duplicate catalogue SKUs", async () => {
+  const originalFetch = globalThis.fetch;
+  const client = await importCatalogueClient();
+
+  globalThis.fetch = async (url) => {
+    const pathName = String(url);
+    if (pathName.includes("omsons_products_from_excel_with_images")) return { ok: true, json: async () => [{ id: "DUP", sku: "DUP", name: "JSON Product", variants: [] }] };
+    if (pathName.includes("nested_omsons_products")) return { ok: true, json: async () => [] };
+    if (pathName === "/api/products") return { ok: true, json: async () => ({ success: true, data: [{ id: "pg-dup", sku: "DUP", name: "PostgreSQL Product", active: true, variants: [{ id: "pg-v", sku: "DUP/1", catalogueNumber: "DUP/1", price: 12, packSize: 1, active: true }] }] }) };
+    throw new Error(`Unexpected URL ${pathName}`);
+  };
+
+  try {
+    const products = await client.loadCatalogueProducts();
+    const matches = products.filter((item) => item.sku === "DUP");
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].name, "PostgreSQL Product");
+    assert.equal(matches[0].variants[0].sku, "DUP/1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

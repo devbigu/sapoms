@@ -228,10 +228,13 @@ export default function ProductDetailsPage() {
         setAllProducts(data);
 
         // Match by product sku or by variant sku
-        let found = data.find(p => p.sku === sku);
+        let found = data.find(p => p.sku === sku || p.id === sku);
         if (!found) {
-          found = data.find(p => p.variants?.some(v => v.sku === sku));
-          if (found) setSelectedVariantSKU(sku);
+          found = data.find(p => p.variants?.some(v => v.sku === sku || v.id === sku));
+          if (found) {
+            const matchedVariant = found.variants?.find(v => v.sku === sku || v.id === sku);
+            setSelectedVariantSKU(matchedVariant?.sku ?? sku);
+          }
         }
 
         if (found) {

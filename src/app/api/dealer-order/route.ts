@@ -63,7 +63,8 @@ async function nextOrderNumber(tx: Prisma.TransactionClient) {
     create: { year, lastValue: BigInt(1) },
     update: { lastValue: { increment: BigInt(1) } },
   });
-  return `OM/${year}/${sequence.lastValue.toString().padStart(4, "0")}`;
+  const yearRange = `${String(year).slice(-2)}-${String(year + 1).slice(-2)}`;
+  return `OM/${yearRange}/DMS-${sequence.lastValue.toString().padStart(5, "0")}`;
 }
 
 function parseItems(rows: Array<Record<string, unknown>>): ParsedItem[] {

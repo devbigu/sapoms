@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
-import { requireAuth } from "@/server/auth/session";
+import { requireAuth, type AuthActor } from "@/server/auth/session";
+import { buildDealerRegionWhere } from "@/server/auth/sales-scope";
 import {
   assertDealerScope,
   assertDraftBelongsToDealer,
@@ -32,6 +33,12 @@ async function loadRequest(id: string) {
   return prisma.customDiscountRequest.findUnique({ where: { id: BigInt(id) }, include: customDiscountInclude });
 }
 
+async function assertRsmDiscountScope(actor: AuthActor, dealerId: bigint) {
+  const dealerWhere = await buildDealerRegionWhere(actor, undefined, prisma);
+  const scoped = await prisma.dealerProfile.findFirst({ where: { id: dealerId, ...dealerWhere }, select: { id: true } });
+  if (!scoped) throw Object.assign(new Error("This request is outside your RSM scope"), { status: 403 });
+}
+
 function rejectionRows(request: any) {
   const products = Array.isArray(request.orderSnapshot?.products) ? request.orderSnapshot.products : [];
   return products.slice(0, 100).map((product: any, index: number) => ({
@@ -58,7 +65,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const ownerId = row.dealerId.toString();
       if (!actorId || actorId !== ownerId) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
     }
-    assertDealerScope(actor, row.dealerId);
+    if (actor.role === "RSM") await assertRsmDiscountScope(actor, row.dealerId);
+    else assertDealerScope(actor, row.dealerId);
     return NextResponse.json({ success: true, data: mapCustomDiscount(row) });
   } catch (error) {
     console.error("[GET /api/custom-discount-requests/[id]]", error);
@@ -78,23 +86,41 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const ownerId = existing.dealerId.toString();
       if (!actorId || actorId !== ownerId) return NextResponse.json({ success: false, message: "Request not found" }, { status: 404 });
     }
-    assertDealerScope(actor, existing.dealerId);
+    if (actor.role === "RSM") await assertRsmDiscountScope(actor, existing.dealerId);
+    else assertDealerScope(actor, existing.dealerId);
 
     const rawStatus = text(body.status, 40);
-    const nextStatus = rawStatus ? statusValue(rawStatus) : null;
+    const rawRsmStatus = text(body.rsmStatus ?? body.rsmApprovalStatus ?? (actor.role === "RSM" ? body.status : ""), 40);
+    const nextStatus = rawStatus && actor.role !== "RSM" ? statusValue(rawStatus) : null;
+    const nextRsmStatus = rawRsmStatus ? statusValue(rawRsmStatus) : null;
     const orderId = text(body.orderId || body.order_id, 80);
     const hasOrderLink = !!orderId;
     const reviewUpdate = !!nextStatus;
-    if (rawStatus && !nextStatus) return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
+    const rsmReviewUpdate = !!nextRsmStatus;
+    if (rawStatus && actor.role !== "RSM" && !nextStatus) return NextResponse.json({ success: false, message: "Invalid status" }, { status: 400 });
+    if (rawRsmStatus && !nextRsmStatus) return NextResponse.json({ success: false, message: "Invalid RSM status" }, { status: 400 });
     const wantsResubmit = text(body.action, 40).toLowerCase() === "resubmit" || body.orderSnapshot !== undefined || body.products !== undefined || body.requestedDiscountPercent !== undefined || body.requestedProductDiscounts !== undefined;
     if (reviewUpdate && actor?.role !== "ADMIN") throw Object.assign(new Error("Only Admin can review custom discounts"), { status: 403 });
+    if (rsmReviewUpdate && actor?.role !== "RSM") throw Object.assign(new Error("Only RSM can perform RSM custom discount review"), { status: 403 });
+    if (reviewUpdate && existing.rsmApprovalStatus !== "APPROVED") throw Object.assign(new Error("RSM approval is required before Admin review"), { status: 409 });
     if (wantsResubmit && actor?.role === "ADMIN") throw Object.assign(new Error("Admin cannot resubmit dealer custom discounts"), { status: 403 });
     if (wantsResubmit && !["PENDING", "REJECTED"].includes(String(existing.status))) throw Object.assign(new Error("Only pending or rejected requests can be resubmitted"), { status: 409 });
-    if (!reviewUpdate && typeof body.allowReorder !== "boolean" && !hasOrderLink && !wantsResubmit) {
+    if (!reviewUpdate && !rsmReviewUpdate && typeof body.allowReorder !== "boolean" && !hasOrderLink && !wantsResubmit) {
       return NextResponse.json({ success: false, message: "No supported update supplied" }, { status: 400 });
     }
 
     const data: any = { updatedAt: new Date() };
+    if (rsmReviewUpdate && nextRsmStatus) {
+      if (existing.rsmApprovalStatus !== "PENDING") throw Object.assign(new Error("RSM review is already complete"), { status: 409 });
+      data.rsmApprovalStatus = nextRsmStatus;
+      data.rsmReviewedByUserId = actor.userId;
+      data.rsmReviewedByName = actor.displayName || actor.email;
+      data.rsmReviewedAt = new Date();
+      if (nextRsmStatus === "REJECTED") {
+        data.status = "REJECTED";
+        data.allowReorder = false;
+      }
+    }
     if (reviewUpdate && nextStatus) {
       data.status = nextStatus;
       data.adminNote = text(body.adminNote ?? body.admin_note, 1500) || null;
@@ -118,7 +144,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         orderDraftId: body.orderDraftId ?? body.order_draft_id ?? existing.orderDraftId?.toString(),
       }, existing.dealerId, existing.staffId);
       await assertDraftBelongsToDealer(rebuilt.orderDraftId, existing.dealerId);
-      Object.assign(data, rebuilt, { status: "PENDING", adminNote: null, reviewedByUserId: null, reviewedAt: null, allowReorder: false });
+      Object.assign(data, rebuilt, { status: "PENDING", rsmApprovalStatus: "PENDING", rsmReviewedByUserId: null, rsmReviewedByName: null, rsmReviewedAt: null, adminNote: null, reviewedByUserId: null, reviewedAt: null, allowReorder: false });
     }
 
     const updated = await prisma.$transaction(async (tx) => {

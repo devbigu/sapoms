@@ -40,6 +40,7 @@ export type ProductWriteInput = {
   name: string;
   description?: string;
   imageUrl?: string;
+  categoryName?: string;
   active?: boolean;
   variants: ProductVariantWriteInput[];
 };

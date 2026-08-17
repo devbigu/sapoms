@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, type AuthActor } from "@/server/auth/session";
+import { isAdminLike, isStaffLike } from "@/server/auth/sales-scope";
 
 import { ensurePostgresDealerRequestIndexes, getPostgresDealerRequestCollection, isPostgresDealerRequestDependencyError } from "@/lib/postgresDealerRequests";
 import { findDealerCodeReservationConflict } from "@/server/modules/dealers/dealer-code.service";
@@ -8,7 +10,6 @@ import {
   buildDealerRequestCreateDocument,
   buildDealerRequestListSearchQuery,
   buildDealerRequestReference,
-  resolveDealerRequestActor,
   toDealerRequestDetail,
   toDealerRequestListItem,
 } from "@/lib/dealerRequests";
@@ -16,6 +17,27 @@ import { normalizeDealerFormSnapshot, validateDealerFormSnapshot } from "@/lib/d
 
 export const runtime = "nodejs";
 
+function actorFromAuth(authActor: AuthActor) {
+  if (isAdminLike(authActor)) {
+    return {
+      role: "admin" as const,
+      actorId: authActor.userId.toString(),
+      actorName: authActor.displayName || authActor.email || "Admin",
+      roletype: authActor.role,
+    };
+  }
+
+  if (isStaffLike(authActor) && authActor.staffId) {
+    return {
+      role: "staff" as const,
+      actorId: authActor.staffId.toString(),
+      actorName: authActor.displayName || authActor.email || "Staff",
+      roletype: authActor.role,
+    };
+  }
+
+  return null;
+}
 function safeNumber(value: string | null, fallback: number) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -33,16 +55,10 @@ function isDuplicateKeyError(error: unknown) {
 
 export async function GET(request: NextRequest) {
   try {
-    const actor = resolveDealerRequestActor({
-      headers: request.headers,
-      role: request.nextUrl.searchParams.get("role"),
-      actorId: request.nextUrl.searchParams.get("actorId"),
-      actorName: request.nextUrl.searchParams.get("actorName"),
-      roletype: request.nextUrl.searchParams.get("roletype"),
-    });
+    const actor = actorFromAuth(await requireAuth());
 
     if (!actor || (actor.role !== "admin" && actor.role !== "staff")) {
-      return buildResponseError("Dealer request access is restricted to admin and staff", 403);
+      return buildResponseError("Dealer request access is restricted to admin and staff-like roles", 403);
     }
 
     const status = request.nextUrl.searchParams.get("status");
@@ -98,16 +114,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const actor = resolveDealerRequestActor({
-      headers: request.headers,
-      role: body.role,
-      actorId: body.actorId,
-      actorName: body.actorName,
-      roletype: body.roletype,
-    });
+    const actor = actorFromAuth(await requireAuth());
 
     if (!actor || actor.role !== "staff") {
-      return buildResponseError("Only staff can submit dealer approval requests", 403);
+      return buildResponseError("Only staff-like roles can submit dealer approval requests", 403);
     }
 
     let snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? body);

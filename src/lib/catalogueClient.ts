@@ -35,6 +35,122 @@ function hasSpecValue(value: unknown) {
   return String(value ?? "").trim().length > 0;
 }
 
+function textValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function rupeesFromPaiseValue(value: unknown) {
+  if (typeof value === "number") return value / 100;
+  if (typeof value === "bigint") return Number(value) / 100;
+  const parsed = Number(String(value ?? "").trim());
+  return Number.isFinite(parsed) ? parsed / 100 : 0;
+}
+
+function parsePostgresDescription(description: string) {
+  const features: string[] = [];
+  const variantSpecs = new Map<string, Record<string, string>>();
+  const baseParts: string[] = [];
+  let mode: "description" | "about" | "specs" = "description";
+
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const normalized = line.toUpperCase();
+    if (normalized === "ABOUT THIS ITEM") {
+      mode = "about";
+      continue;
+    }
+    if (normalized === "VARIANT SPECIFICATIONS") {
+      mode = "specs";
+      continue;
+    }
+
+    if (mode === "about") {
+      const feature = line.replace(/^[-*•\s]+/, "").trim();
+      if (feature) features.push(feature);
+      continue;
+    }
+
+    if (mode === "specs") {
+      const [catalogueNumberPart, specsPart] = line.split(/\s+-\s+/, 2);
+      const catalogueNumber = textValue(catalogueNumberPart);
+      if (!catalogueNumber || !specsPart) continue;
+      const specs: Record<string, string> = {};
+      specsPart.split(";").forEach((entry) => {
+        const [key, ...valueParts] = entry.split(":");
+        const specKey = textValue(key);
+        const specValue = textValue(valueParts.join(":"));
+        if (specKey && specValue) specs[specKey] = specValue;
+      });
+      if (Object.keys(specs).length) variantSpecs.set(catalogueNumber, specs);
+      continue;
+    }
+
+    baseParts.push(line);
+  }
+
+  return { descriptionHtml: baseParts.join("<br />"), features, variantSpecs };
+}
+
+function normalizePostgresProduct(product: CatalogueProduct & Record<string, unknown>): CatalogueProduct {
+  const rawDescription = textValue(product.descriptionHtml ?? product.product_discription ?? product.description);
+  const parsedDescription = parsePostgresDescription(rawDescription);
+  const productSku = textValue(product.sku ?? product.productCode ?? product.id);
+  const images = Array.isArray(product.images)
+    ? product.images.map(textValue).filter(Boolean)
+    : textValue(product.imageUrl) ? [textValue(product.imageUrl)] : [];
+  const category = textValue(product.category);
+  const categories = Array.isArray(product.categories)
+    ? product.categories.map(textValue).filter(Boolean)
+    : category ? [category] : [];
+
+  const variants = (Array.isArray(product.variants) ? product.variants : []).map((variant, index) => {
+    const row = variant as CatalogueVariant & Record<string, unknown>;
+    const catalogueNumber = textValue(row.catalogueNumber ?? row.product_cat ?? row.sku ?? row.id);
+    const variantSku = textValue(row.sku ?? catalogueNumber ?? row.id) || productSku + "/" + (index + 1);
+    const pack = Math.max(1, Math.trunc(numberValue(row.pack ?? row.packSize ?? row.product_quantity, 1)) || 1);
+    const specs = mergeVariantSpecs(
+      row.specs as Record<string, string> | undefined,
+      parsedDescription.variantSpecs.get(catalogueNumber) ?? parsedDescription.variantSpecs.get(variantSku),
+    ) ?? {};
+
+    return {
+      id: textValue(row.id ?? variantSku),
+      sku: variantSku,
+      slug: textValue(row.slug ?? variantSku),
+      name: textValue(row.name) || catalogueNumber || product.name,
+      specs,
+      specsText: textValue(row.specsText),
+      pack,
+      price: numberValue(row.price ?? row.unitPrice ?? row.product_price, rupeesFromPaiseValue(row.unitPricePaise)),
+      priceLabel: textValue(row.priceLabel),
+      inStock: row.inStock === undefined ? row.active !== false && product.active !== false : Boolean(row.inStock),
+      images: Array.isArray(row.images) && row.images.length ? row.images.map(textValue).filter(Boolean) : images,
+    };
+  });
+
+  return normalizeCatalogueProductSpecs({
+    id: textValue(product.id ?? productSku),
+    sku: productSku,
+    slug: textValue(product.slug ?? productSku),
+    name: textValue(product.name),
+    category,
+    categories,
+    page: numberValue(product.page, 0),
+    features: Array.isArray(product.features) && product.features.length
+      ? product.features.map(textValue).filter(Boolean)
+      : parsedDescription.features,
+    descriptionHtml: parsedDescription.descriptionHtml || rawDescription,
+    images,
+    variants,
+  });
+}
+
 function mergeVariantSpecs(
   primarySpecs?: Record<string, string>,
   fallbackSpecs?: Record<string, string>
@@ -119,7 +235,8 @@ function mergeCatalogueProduct(
 
 function mergeCatalogueProducts(
   enrichedProducts: CatalogueProduct[],
-  completeProducts: CatalogueProduct[]
+  completeProducts: CatalogueProduct[],
+  postgresProducts: CatalogueProduct[] = []
 ) {
   const completeByKey = new Map<string, CatalogueProduct>();
   for (const product of completeProducts) {
@@ -142,7 +259,19 @@ function mergeCatalogueProducts(
     merged.push(normalizeCatalogueProductSpecs(product));
   }
 
-  return merged;
+  const outputByKey = new Map<string, CatalogueProduct>();
+  const order: string[] = [];
+  const addOrReplace = (product: CatalogueProduct) => {
+    const key = keyFor(product.sku || product.id);
+    if (!key) return;
+    if (!outputByKey.has(key)) order.push(key);
+    outputByKey.set(key, product);
+  };
+
+  merged.forEach(addOrReplace);
+  postgresProducts.map(normalizePostgresProduct).forEach(addOrReplace);
+
+  return order.map((key) => outputByKey.get(key)).filter((product): product is CatalogueProduct => Boolean(product));
 }
 
 async function fetchCatalogueFile(path: string): Promise<CatalogueProduct[]> {
@@ -155,6 +284,18 @@ async function fetchCatalogueFile(path: string): Promise<CatalogueProduct[]> {
   return Array.isArray(products) ? products : [];
 }
 
+async function fetchPostgresCatalogueProducts(): Promise<CatalogueProduct[]> {
+  try {
+    const response = await fetch("/api/products", { cache: "no-store", credentials: "include" });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    const products = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+    return products as CatalogueProduct[];
+  } catch {
+    return [];
+  }
+}
+
 export async function loadCatalogueProducts(): Promise<CatalogueProduct[]> {
   if (cachedProducts) return cachedProducts;
   if (cataloguePromise) return cataloguePromise;
@@ -162,9 +303,10 @@ export async function loadCatalogueProducts(): Promise<CatalogueProduct[]> {
   cataloguePromise = Promise.all([
     fetchCatalogueFile("/data/omsons_products_from_excel_with_images.json"),
     fetchCatalogueFile("/data/nested_omsons_products.json").catch(() => []),
+    fetchPostgresCatalogueProducts(),
   ])
-    .then(([enrichedProducts, completeProducts]) => {
-      cachedProducts = mergeCatalogueProducts(enrichedProducts, completeProducts);
+    .then(([enrichedProducts, completeProducts, postgresProducts]) => {
+      cachedProducts = mergeCatalogueProducts(enrichedProducts, completeProducts, postgresProducts);
       return cachedProducts;
     })
     .finally(() => {

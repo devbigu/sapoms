@@ -19,6 +19,9 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  LineChart,
+  Line,
+  CartesianGrid,
 } from "recharts";
 import { fetchDealerStatusOverrides, normalizeDealerStatus, type DealerStatusDocument } from "@/lib/dealerStatus";
 import PendingProductsPreview from "@/components/dashboard/PendingProductsPreview";
@@ -34,6 +37,16 @@ type Item = {
 
 type Dealer = {
   Dealer_Name: string;
+  total: string;
+};
+
+type SalesRegionKey = "NORTH_1" | "NORTH_2" | "SOUTH_1" | "SOUTH_2" | "WEST_1" | "WEST_2" | "EAST" | "ROM" | "CENTRAL";
+
+type RegionalSalesPoint = { month: string } & Record<SalesRegionKey, number>;
+
+type RegionalDistributor = {
+  dealerId?: string;
+  dealerName: string;
   total: string;
 };
 
@@ -53,6 +66,12 @@ type AdminDashboardApiResponse = {
       dealerName: string;
       total: string;
     }>;
+    regionalPerformance?: Array<{ month: string } & Record<SalesRegionKey, string>>;
+    topDistributorsByRegion?: Partial<Record<SalesRegionKey, Array<{
+      dealerId?: string;
+      dealerName: string;
+      total: string;
+    }>>>;
     warnings?: string[];
   };
   message?: string;
@@ -118,7 +137,37 @@ type PendingOrderRecord = {
   accept_order?: string;
 };
 
-const logoImage = "https://omsonsapp.vercel.app/headicon.png";
+const SALES_REGIONS: SalesRegionKey[] = ["NORTH_1", "NORTH_2", "SOUTH_1", "SOUTH_2", "WEST_1", "WEST_2", "EAST", "ROM", "CENTRAL"];
+const REGION_META: Record<SalesRegionKey, { label: string; color: string; soft: string }> = {
+  NORTH_1: { label: "North 1", color: "#4f8fcb", soft: "#dbeafe" },
+  NORTH_2: { label: "North 2", color: "#2563eb", soft: "#dbeafe" },
+  SOUTH_1: { label: "South 1", color: "#f2cf5b", soft: "#fef3c7" },
+  SOUTH_2: { label: "South 2", color: "#d97706", soft: "#fef3c7" },
+  WEST_1: { label: "West 1", color: "#c084fc", soft: "#f3e8ff" },
+  WEST_2: { label: "West 2", color: "#7c3aed", soft: "#f3e8ff" },
+  EAST: { label: "East", color: "#6fd08c", soft: "#dcfce7" },
+  ROM: { label: "ROM", color: "#0f766e", soft: "#ccfbf1" },
+  CENTRAL: { label: "Central", color: "#f97316", soft: "#ffedd5" },
+};
+
+function formatRegionLabel(region: SalesRegionKey) {
+  return REGION_META[region].label;
+}
+
+function formatMonthLabel(month: string) {
+  const date = new Date(`${month}-01T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return month;
+  return date.toLocaleString("en-IN", { month: "short", year: "2-digit", timeZone: "UTC" });
+}
+
+function createEmptyRegionalDistributorMap(): Record<SalesRegionKey, RegionalDistributor[]> {
+  return SALES_REGIONS.reduce((acc, region) => {
+    acc[region] = [];
+    return acc;
+  }, {} as Record<SalesRegionKey, RegionalDistributor[]>);
+}
+
+const logoImage = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSpEaVwAg53quyQVTj-mv49IsltHY8yDluFOPemDksHkQ&s=10";
 
 
 const NAV_ITEMS = [
@@ -153,16 +202,16 @@ const NAV_ITEMS = [
     icon: <SquareUser />
   },
   { label: "Order List",
-     href: "/Pages/Ordermanagement", 
-     icon: <ClipboardList size={15} /> 
+     href: "/Pages/Ordermanagement",
+     icon: <ClipboardList size={15} />
   },
   { label: "Dealer Category Report",
      href: "/dashboard/admin/reports/dealer-category",
-    icon: <ClipboardList size={15} /> 
+    icon: <ClipboardList size={15} />
   },
   { label: "Pending Orders",
      href: "/Pages/Ordermanagement/outstandingorders",
-    icon: <ClipboardList size={15} /> 
+    icon: <ClipboardList size={15} />
   },
 ];
 
@@ -257,6 +306,9 @@ function AdminDashboardInner() {
 
   const [data, setData] = useState<Item[]>([]);
   const [dealerData, setDealerData] = useState<Dealer[]>([]);
+  const [regionalSalesData, setRegionalSalesData] = useState<RegionalSalesPoint[]>([]);
+  const [regionalTopDistributors, setRegionalTopDistributors] = useState<Record<SalesRegionKey, RegionalDistributor[]>>(createEmptyRegionalDistributorMap);
+  const [selectedRegion, setSelectedRegion] = useState<SalesRegionKey>("NORTH_1");
   const [adminData, setAdminData] = useState<AdminStats>({
     dealerCount: 0,
     staffCount: 0,
@@ -315,7 +367,20 @@ function AdminDashboardInner() {
         setDealerData((dashboardJson.data?.topDealers ?? []).map((dealer) => ({
           Dealer_Name: dealer.dealerName,
           total: dealer.total,
-        })));
+        }) as Dealer));
+        setRegionalSalesData((dashboardJson.data?.regionalPerformance ?? []).map((entry) => ({
+          month: entry.month,
+          ...Object.fromEntries(SALES_REGIONS.map((region) => [region, Number((entry as Record<string, unknown>)[region] ?? 0)])),
+        }) as RegionalSalesPoint));
+        const distributorsByRegion = createEmptyRegionalDistributorMap();
+        for (const region of SALES_REGIONS) {
+          distributorsByRegion[region] = (dashboardJson.data?.topDistributorsByRegion?.[region] ?? []).map((dealer) => ({
+            dealerId: dealer.dealerId,
+            dealerName: dealer.dealerName,
+            total: dealer.total,
+          }));
+        }
+        setRegionalTopDistributors(distributorsByRegion);
 
         setAdminData({
           dealerCount: Number(dashboardJson.data?.summary?.dealerCount ?? 0),
@@ -433,6 +498,12 @@ function AdminDashboardInner() {
   const distributorTotalPages = distributorResponse?.last_page ?? Math.max(1, Math.ceil(distributorTotal / 10));
   const distributorStartIndex = distributorRows.length > 0 ? (distributorPage - 1) * 10 + 1 : 0;
   const distributorEndIndex = distributorRows.length > 0 ? (distributorPage - 1) * 10 + distributorRows.length : 0;
+  const regionalLineData = useMemo(() => regionalSalesData.map((point) => ({
+    ...point,
+    label: formatMonthLabel(point.month),
+  })), [regionalSalesData]);
+  const selectedRegionalDistributors = regionalTopDistributors[selectedRegion] ?? [];
+  const hasRegionalSales = regionalSalesData.some((point) => SALES_REGIONS.some((region) => point[region] > 0));
 
   const distributorPageNumbers = (): (number | "...")[] => {
     const pages: (number | "...")[] = [];
@@ -477,7 +548,7 @@ function AdminDashboardInner() {
     .toUpperCase()
     .substring(0, 2) || "AD";
 
-  
+
   return (
     <>
       <style>{`
@@ -537,7 +608,7 @@ function AdminDashboardInner() {
         .btn-add:hover { opacity: .82; transform: translateY(-1px); }
 
         /* ── Content ─────────────────────────────── */
-        .content { padding: 24px 22px; max-width: 1440px; margin: 0 auto; }
+        .content { padding: 24px 22px; width: min(100%, 80vw); max-width: none; margin: 0 auto; }
 
         /* ── Stat Cards ──────────────────────────── */
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
@@ -596,6 +667,8 @@ function AdminDashboardInner() {
         .page-btn:disabled { opacity: .4; cursor: not-allowed; }
 
         /* ── Charts row ──────────────────────────── */
+        .insights-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
+        @media (min-width: 1100px) { .insights-row { grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); } }
         .charts-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
         @media (min-width: 900px) { .charts-row { grid-template-columns: 1fr 1fr; } }
 
@@ -610,6 +683,16 @@ function AdminDashboardInner() {
         .legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
         .leg { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #6b7280; }
         .leg-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .region-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+        .region-tab { border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease; }
+        .region-tab:hover { transform: translateY(-1px); }
+        .region-list { display: flex; flex-direction: column; gap: 10px; }
+        .region-rank-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f3f4f6; border-radius: 14px; padding: 12px 14px; background: #fafafa; }
+        .region-rank-meta { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .region-rank-pill { width: 28px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+        .region-rank-name { font-size: 13px; font-weight: 600; color: #111827; }
+        .region-rank-value { font-size: 13px; font-weight: 700; color: #111827; font-family: 'DM Mono', monospace; }
+        .region-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; color: #9ca3af; font-size: 13px; text-align: center; }
 
         /* ── Reports row ─────────────────────────── */
         .reports-row { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -782,8 +865,115 @@ function AdminDashboardInner() {
             </div>
 
             {/* ── Charts ── */}
+            <div className="insights-row">
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <div className="panel-title">RSM Net Sales</div>
+                    <div className="panel-sub">Monthly net sales by regional sales manager zone</div>
+                  </div>
+                  <div className="legend">
+                    {SALES_REGIONS.map((region) => (
+                      <span key={region} className="leg">
+                        <span className="leg-dot" style={{ background: REGION_META[region].color }} />
+                        {formatRegionLabel(region)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="chart-canvas">
+                  {loading ? (
+                    <div className="region-empty">Loading regional sales...</div>
+                  ) : hasRegionalSales ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={regionalLineData}>
+                        <CartesianGrid stroke="#e5e7eb" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: "#1e1b4b", border: "1px solid #4f46e5", borderRadius: "8px" }}
+                          labelStyle={{ color: "#c7d2fe" }}
+                          formatter={(value, _name, item) => {
+                            const region = String(item?.dataKey ?? "") as SalesRegionKey;
+                            return [`₹${Number(value ?? 0).toLocaleString("en-IN")}`, formatRegionLabel(region)];
+                          }}
+                        />
+                        {SALES_REGIONS.map((region) => (
+                          <Line
+                            key={region}
+                            type="monotone"
+                            dataKey={region}
+                            stroke={REGION_META[region].color}
+                            strokeWidth={2.75}
+                            dot={{ r: 4.5, fill: "#ffffff", stroke: REGION_META[region].color, strokeWidth: 2 }}
+                            activeDot={{ r: 6, fill: "#ffffff", stroke: REGION_META[region].color, strokeWidth: 2.5 }}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="region-empty">No regional sales data available yet.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <div className="panel-title">Top Distributors by Region</div>
+                    <div className="panel-sub">Select a zone to review its highest net sales distributors</div>
+                  </div>
+                </div>
+                <div className="region-tabs">
+                  {SALES_REGIONS.map((region) => {
+                    const active = selectedRegion === region;
+                    return (
+                      <button
+                        key={region}
+                        type="button"
+                        className="region-tab"
+                        style={{
+                          borderColor: active ? REGION_META[region].color : "#e5e7eb",
+                          background: active ? REGION_META[region].soft : "#fff",
+                          color: active ? REGION_META[region].color : "#6b7280",
+                        }}
+                        onClick={() => setSelectedRegion(region)}
+                      >
+                        {formatRegionLabel(region)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="region-list">
+                  {loading ? (
+                    <div className="region-empty">Loading distributors...</div>
+                  ) : selectedRegionalDistributors.length > 0 ? (
+                    selectedRegionalDistributors.map((dealer, index) => (
+                      <div key={`${selectedRegion}-${dealer.dealerId || dealer.dealerName}-${index}`} className="region-rank-row">
+                        <div className="region-rank-meta">
+                          <span
+                            className="region-rank-pill"
+                            style={{ background: REGION_META[selectedRegion].soft, color: REGION_META[selectedRegion].color }}
+                          >
+                            {index + 1}
+                          </span>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="region-rank-name">{dealer.dealerName}</div>
+                            <div className="panel-sub">{formatRegionLabel(selectedRegion)} region</div>
+                          </div>
+                        </div>
+                        <div className="region-rank-value">?{Number(dealer.total).toLocaleString("en-IN")}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="region-empty">No distributors found for the {formatRegionLabel(selectedRegion).toLowerCase()} region.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* <PendingProductsPreview role="admin" moreHref="/dashboard/admin/pending-products" /> */}
-{/* 
+{/*
             <div className="table-card">
               <div className="table-toolbar">
                 <div>
@@ -1044,3 +1234,4 @@ function AdminDashboardInner() {
     </>
   );
 }
+

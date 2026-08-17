@@ -1,4 +1,4 @@
-export type AuthRole = "ADMIN" | "NSM" | "ACCOUNTANT" | "RSM" | "STAFF" | "DEALER";
+export type AuthRole = "ADMIN" | "NSM" | "ACCOUNTANT" | "RSM" | "ASM" | "STAFF" | "DEALER";
 export type LegacyAuthSource = "PHP" | "MONGODB";
 
 export type LegacyAuthenticatedActor = {

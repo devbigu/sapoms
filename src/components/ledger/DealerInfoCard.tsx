@@ -30,9 +30,10 @@ interface DealerInfoCardProps {
   walletBalance?: number;
   walletTransactions?: WalletTransaction[];
   walletLoading?: boolean;
-  onPayMoneyClick: () => void;
+  onPayMoneyClick?: () => void;
   onAdjustWalletClick?: () => void;
   canAdjustWallet?: boolean;
+  canRecordPayment?: boolean;
 }
 
 function formatAmount(value: number) {
@@ -57,6 +58,7 @@ export default function DealerInfoCard({
   onPayMoneyClick,
   onAdjustWalletClick,
   canAdjustWallet = false,
+  canRecordPayment = false,
 }: DealerInfoCardProps) {
   if (isLoading) {
     return (
@@ -99,12 +101,14 @@ export default function DealerInfoCard({
           <h1 className="text-2xl font-bold text-gray-900">{dealer.Dealer_Name}</h1>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={onPayMoneyClick}
-            className="rounded-lg bg-gray-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800"
-          >
-            Pay Money
-          </button>
+          {canRecordPayment && onPayMoneyClick && (
+            <button
+              onClick={onPayMoneyClick}
+              className="rounded-lg bg-gray-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800"
+            >
+              Pay Money
+            </button>
+          )}
           {canAdjustWallet && onAdjustWalletClick && (
             <button
               onClick={onAdjustWalletClick}

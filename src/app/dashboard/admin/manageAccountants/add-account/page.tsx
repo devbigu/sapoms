@@ -316,7 +316,7 @@ export default function ManageAccountantsPage() {
   };
 
   return (
-    <div className="px-6 py-6 max-w-5xl mx-auto" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+    <div className="px-6 py-6 admin-page-shell" style={{ fontFamily: "'DM Sans', sans-serif" }}>
 
       {/* Header */}
       <div className="flex items-start justify-between mb-6 flex-wrap gap-4">

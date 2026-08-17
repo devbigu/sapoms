@@ -20,6 +20,8 @@ type StaffOption = {
   staff_id: string
   staff_name: string
   staff_roletype: string
+  role?: string
+  status?: string
 }
 
 type DiagnosticPassword = {
@@ -44,6 +46,15 @@ async function parseJsonResponse<T>(res: Response): Promise<T> {
   } catch {
     throw new Error("Invalid JSON response")
   }
+}
+
+function staffRoleLabel(staff: StaffOption) {
+  const roleType = String(staff.staff_roletype || staff.role || "").toUpperCase()
+  if (roleType === "1") return "Exe"
+  if (roleType === "2") return "Field Exe"
+  if (roleType === "RSM") return "RSM"
+  if (roleType === "ASM") return "ASM"
+  return "Staff"
 }
 
 function splitCsv(value: unknown) {
@@ -183,7 +194,13 @@ export default function EditDealerPage() {
       try {
         const res = await fetch(`${ADMIN_STAFF_URL}?page=1&limit=100`, { credentials: "include" })
         const json = await parseJsonResponse<any>(res)
-        if (active) setStaffOptions(json.data || [])
+        if (active) {
+          setStaffOptions((json.data || []).filter((staff: StaffOption) => {
+            const role = String(staff.role || "").toUpperCase()
+            const status = String(staff.status || "").toUpperCase()
+            return ["STAFF", "RSM", "ASM"].includes(role) && (!status || status === "ACTIVE")
+          }))
+        }
       } catch {
         console.error("Failed to fetch staff")
       }
@@ -373,7 +390,7 @@ export default function EditDealerPage() {
         </div>
       )}
 
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6 admin-page-shell">
 
         {/* Header */}
         <div className="mb-8">
@@ -537,7 +554,7 @@ export default function EditDealerPage() {
                     <option value="">Select staff to add</option>
                     {staffOptions.map(staff => (
                       <option key={staff.staff_id} value={staff.staff_id}>
-                        {staff.staff_name} {String(staff.staff_roletype) === "1" ? "(Exe)" : "(Fie-Exe)"}
+                        {staff.staff_name} ({staffRoleLabel(staff)})
                       </option>
                     ))}
                   </select>
@@ -561,7 +578,7 @@ export default function EditDealerPage() {
                 >
                   {staffOptions.map(staff => (
                     <option key={staff.staff_id} value={staff.staff_id}>
-                      {staff.staff_name} {String(staff.staff_roletype) === "1" ? "(Exe)" : "(Fie-Exe)"}
+                      {staff.staff_name} ({staffRoleLabel(staff)})
                     </option>
                   ))}
                 </select>

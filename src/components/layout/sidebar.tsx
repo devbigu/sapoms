@@ -6,8 +6,9 @@ import {
   LayoutDashboard, UserRoundPlus, Users, SquareUser,
   Plus, ClipboardList, Home, LogOut, Package, Images,
   ShieldCheck, Gift, Receipt, TrendingUp, BookOpen, FileText,
-  Wallet,
+  Wallet, MapPinned, ChevronDown,
 } from "lucide-react";
+import { useState } from "react";
 import { clearAuthStorage, type AppRole, type StoredUser } from "@/lib/roleAccess";
 import { useAuthSession } from "@/hooks/useAuthSession";
 
@@ -35,6 +36,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     {                         label: "Add Dealer",          href: "/dashboard/admin/dealer/AddDealerForm",            icon: <UserRoundPlus size={15} />   },
     {                         label: "Dealer Requests",     href: "/dashboard/admin/dealer/requests",                 icon: <Receipt size={15} />         },
     { section: "Staff",       label: "Staff List",         href: "/dashboard/admin/staff/stafflist",                 icon: <Users size={15} />           },
+    {                         label: "Manage Regions",     href: "/dashboard/admin/manage-regions",                 icon: <MapPinned size={15} />       },
     {                         label: "Add Staff",           href: "/dashboard/admin/staff/addstaff",                  icon: <SquareUser size={15} />      },
     { section: "Products",    label: "Products",           href: "/Pages/products",                                  icon: <Package size={15} />         },
     {                         label: "Add Product",         href: "/Pages/products/addproducts",                      icon: <Plus size={15} />            },
@@ -90,7 +92,7 @@ function getInitials(name?: string) {
 }
 
 function staffRoleLabel(rt?: string) {
-  return rt === "0" ? "Admin" : rt === "1" ? "Executive" : rt === "2" ? "Field Executive" : "Staff";
+  return rt === "0" ? "Admin" : rt === "1" ? "Staff" : rt === "2" ? "Sales Manager" : "Staff";
 }
 
 export default function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -103,6 +105,7 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
       ? ({ ...auth.session.user, role: auth.session.role } as StoredUser & SidebarUser)
       : null;
   const role                  = user?.role;
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
 
   const name =
     role === "dealer"     ? user?.Dealer_Name :
@@ -136,7 +139,6 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     });
   };
 
-  // Group nav by section
   const grouped: { section?: string; items: NavItem[] }[] = [];
   (role ? NAV[role] : []).forEach(item => {
     if (item.section) {
@@ -146,6 +148,21 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
       if (last) last.items.push(item);
     }
   });
+
+  const activeSections = new Set(
+    grouped
+      .filter((group) => group.section && group.items.some((item) => pathname === item.href || (item.href.length > 1 && pathname.startsWith(item.href))))
+      .map((group) => group.section as string),
+  );
+
+  const toggleSection = (section: string) => {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  };
 
   return (
     <>
@@ -171,24 +188,47 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
 
         /* Head */
         .sb-head { padding: 26px 22px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); }
-        .sb-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; background: rgba(99,102,241,0.16); color: #818cf8; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 10px; }
+        .sb-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 6px; background: rgba(99,102,241,0.16); color: #818cf8; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 10px; }
         .sb-title { font-size: 17px; font-weight: 600; color: #fff; letter-spacing: -.3px; }
 
         /* User card */
-        .sb-user { margin: 14px 14px 0; padding: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; }
+        .sb-user { margin: 14px 14px 0; padding: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; }
         .sb-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg,#6366f1,#a78bfa); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 8px; }
         .sb-uname { font-size: 13px; font-weight: 600; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sb-meta  { font-size: 10.5px; color: #475569; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .sb-role  { margin-top: 6px; display: inline-block; font-size: 10px; font-family: monospace; background: rgba(99,102,241,0.18); color: #a5b4fc; padding: 2px 8px; border-radius: 6px; }
+        .sb-role  { margin-top: 6px; display: inline-block; font-size: 10px; font-family: monospace; background: rgba(99,102,241,0.18); color: #a5b4fc; padding: 2px 8px; border-radius: 4px; }
 
         /* Nav */
         .sb-nav { flex: 1; padding: 10px; margin-top: 10px; overflow-y: auto; }
         .sb-nav::-webkit-scrollbar { width: 4px; }
         .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 
-        .sb-section { font-size: 9.5px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .1em; padding: 10px 13px 4px; }
+                .sb-section {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border: 0;
+          background: transparent;
+          color: #64748b;
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: .08em;
+          margin-top: 6px;
+          padding: 9px 13px 7px;
+          text-align: left;
+          text-transform: uppercase;
+        }
+        .sb-section:hover { color: #cbd5e1; }
+        .sb-section-icon { width: 13px; height: 13px; transition: transform .16s; }
+        .sb-section.collapsed .sb-section-icon { transform: rotate(-90deg); }
+        .sb-group-items { display: grid; grid-template-rows: 1fr; overflow: hidden; transition: grid-template-rows .18s ease; }
+        .sb-group-items.collapsed { grid-template-rows: 0fr; }
+        .sb-group-inner { min-height: 0; }
 
-        .sb-link { display: flex; align-items: center; gap: 11px; padding: 10px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 500; color: #64748b; text-decoration: none; margin-bottom: 2px; transition: background .16s, color .16s; }
+        .sb-link { display: flex; align-items: center; gap: 11px; padding: 10px 13px; border-radius: 6px; font-size: 13.5px; font-weight: 500; color: #64748b; text-decoration: none; margin-bottom: 2px; transition: background .16s, color .16s; }
         .sb-link:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
         .sb-link.active { background: rgba(99,102,241,0.18); color: #a5b4fc; }
         .sb-link-dot { width: 5px; height: 5px; border-radius: 50%; background: #6366f1; margin-left: auto; flex-shrink: 0; opacity: 0; transition: opacity .15s; }
@@ -196,7 +236,7 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
 
         /* Footer */
         .sb-foot { padding: 14px; border-top: 1px solid rgba(255,255,255,0.07); }
-        .sb-logout { width: 100%; padding: 9px 14px; border-radius: 11px; background: transparent; border: 1px solid rgba(255,255,255,0.09); font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .16s; }
+        .sb-logout { width: 100%; padding: 9px 14px; border-radius: 6px; background: transparent; border: 1px solid rgba(255,255,255,0.09); font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all .16s; }
         .sb-logout:hover { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.28); color: #f87171; }
       `}</style>
 
@@ -236,26 +276,38 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
         <nav className="sb-nav">
           {grouped.map((group, gi) => (
             <div key={gi}>
-              {group.section && (
-                <div className="sb-section">{group.section}</div>
-              )}
-              {group.items.map(item => {
-                const active =
-                  pathname === item.href ||
-                  (item.href.length > 1 && pathname.startsWith(item.href));
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onClose}
-                    className={`sb-link${active ? " active" : ""}`}
-                  >
-                    {item.icon}
-                    {item.label}
-                    <span className="sb-link-dot" />
-                  </Link>
-                );
-              })}
+              {group.section ? (
+                <button
+                  type="button"
+                  className={`sb-section${(collapsedSections.has(group.section) && !activeSections.has(group.section)) ? " collapsed" : ""}`}
+                  onClick={() => toggleSection(group.section!)}
+                  aria-expanded={!(collapsedSections.has(group.section) && !activeSections.has(group.section))}
+                >
+                  <span>{group.section}</span>
+                  <ChevronDown className="sb-section-icon" />
+                </button>
+              ) : null}
+              <div className={`sb-group-items${group.section && (collapsedSections.has(group.section) && !activeSections.has(group.section)) ? " collapsed" : ""}`}>
+                <div className="sb-group-inner">
+                  {group.items.map(item => {
+                    const active =
+                      pathname === item.href ||
+                      (item.href.length > 1 && pathname.startsWith(item.href));
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={onClose}
+                        className={`sb-link${active ? " active" : ""}`}
+                      >
+                        {item.icon}
+                        {item.label}
+                        <span className="sb-link-dot" />
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           ))}
         </nav>

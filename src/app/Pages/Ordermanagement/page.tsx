@@ -21,6 +21,10 @@ type OrderData = {
   reason: string; accept_order: string; outstandingDate: string; Dealer_Name: string
   orderdata_item_quantity: string; readyquantity: string; mtstatus: string
   orderdata_datetime: string; staffid: string
+  rsmApprovalStatus?: string
+  rsm_approval_status?: string
+  rsmReviewedBy?: string
+  rsm_reviewed_by?: string
 }
 type DispatchOrderProduct = {
   orderdata_id: string
@@ -1128,7 +1132,7 @@ export default function OrdersPage() {
     } finally {
       setDispatchHistoryLoading(false)
     }
-  }, [dispatchOrder?.order_id, dispatchProducts])
+  }, [dispatchOrder, dispatchProducts])
 
   const openDispatchDetails = useCallback((order: OrderData) => {
     setDispatchOrder(order)
@@ -1717,6 +1721,11 @@ export default function OrdersPage() {
                             <span className="badge-dot" style={{ background: ab.dot }} />
                             {ab.label}
                           </span>
+                          {String(order.rsmApprovalStatus || order.rsm_approval_status || "").toUpperCase() === "ACCEPTED" && (
+                            <div className="qty-info" style={{ color: '#047857', fontWeight: 600 }}>
+                              RSM Approved{(order.rsmReviewedBy || order.rsm_reviewed_by) ? ` by ${order.rsmReviewedBy || order.rsm_reviewed_by}` : ''}
+                            </div>
+                          )}
                         </td>
 
                         <td>

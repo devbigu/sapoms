@@ -2,10 +2,11 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
-import axios from 'axios'
 import { CheckCircle2, Search, Trash2, Eye, EyeOff, MoreVertical } from 'lucide-react'
 import { confirmAlert } from 'react-confirm-alert'
 type DealerStatus = "active" | "inactive" | "suspended"
+type DealerStatusFilter = "" | "ACTIVE" | "INACTIVE" | "SUSPENDED"
+type WalletFilter = "" | "active" | "inactive"
 
 function normalizeDealerStatus(value: unknown): DealerStatus {
   const normalized = String(value ?? "").trim().toLowerCase()
@@ -48,6 +49,7 @@ type Dealer = {
   creditdays: string
   annualtarget: string
   currentlimit: string
+  walletStatus?: string
 }
 
 type DealerResponse = {
@@ -73,6 +75,7 @@ type StaffListResponse = {
 }
 
 type AppRole = "admin" | "staff" | "accountant"
+type FloatingMenuState = { id: string; top: number; left: number } | null
 
 const SHIMMER = "animate-pulse bg-gray-200 rounded"
 const ADMIN_DEALERS_URL = "/api/admin/dealers"
@@ -82,6 +85,30 @@ const STAFF_OPTIONS_LIMIT = 100
 const getDealerEditRoute = (dealerId: string) => `/dashboard/admin/dealer/${encodeURIComponent(dealerId)}`
 const getDealerViewRoute = (dealerId: string) => `${getDealerEditRoute(dealerId)}/view`
 const getStaffDealerRoute = (dealerId: string) => `/dashboard/staff/dealer/${encodeURIComponent(dealerId)}`
+
+function getFloatingMenuPosition(button: HTMLElement) {
+  const rect = button.getBoundingClientRect()
+  const menuWidth = 176
+  const gutter = 12
+  return {
+    top: Math.min(rect.bottom + 8, window.innerHeight - gutter),
+    left: Math.max(gutter, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - gutter)),
+  }
+}
+
+function isMenuOpen(openMenu: FloatingMenuState, id: string) {
+  return openMenu?.id === id
+}
+
+function openFloatingMenu(
+  event: React.MouseEvent<HTMLButtonElement>,
+  id: string,
+  setOpenMenu: React.Dispatch<React.SetStateAction<FloatingMenuState>>,
+) {
+  event.stopPropagation()
+  const position = getFloatingMenuPosition(event.currentTarget)
+  setOpenMenu((prev) => prev?.id === id ? null : { id, ...position })
+}
 
 function statusBadge(s: string) {
   return dealerStatusBadge(normalizeDealerStatus(s))
@@ -182,10 +209,12 @@ export default function DealerListPage() {
   const [search,        setSearch]        = useState("")
   const [searchInput,   setSearchInput]   = useState("")
   const [selectedStaffId, setSelectedStaffId] = useState("")
+  const [statusFilter, setStatusFilter] = useState<DealerStatusFilter>("")
+  const [walletFilter, setWalletFilter] = useState<WalletFilter>("")
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toastMsg,      setToastMsg]      = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(() => new Set())
-  const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [openMenu, setOpenMenu] = useState<FloatingMenuState>(null)
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null)
   const [bulkActivating, setBulkActivating] = useState(false)
   const [statusOverrides, setStatusOverrides] = useState<Record<string, DealerStatus>>({})
@@ -222,7 +251,7 @@ export default function DealerListPage() {
   })
 
   const { data: response, isLoading, isError, refetch } = useQuery<DealerResponse>({
-    queryKey: ["dealers", role, staffId, page, search, selectedStaffId],
+    queryKey: ["dealers", role, staffId, page, search, selectedStaffId, statusFilter, walletFilter],
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(page),
@@ -231,6 +260,8 @@ export default function DealerListPage() {
       })
 
       if (selectedStaffId) params.set("staffId", selectedStaffId)
+      if (statusFilter) params.set("status", statusFilter)
+      if (walletFilter) params.set("wallet", walletFilter)
 
       return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?${params.toString()}`)
     },
@@ -276,7 +307,7 @@ export default function DealerListPage() {
   useEffect(() => {
     if (role === "staff") return
     queryClient.prefetchQuery({
-      queryKey: ["dealers", role, staffId, page + 1, search, selectedStaffId],
+      queryKey: ["dealers", role, staffId, page + 1, search, selectedStaffId, statusFilter, walletFilter],
       queryFn: async () => {
         const params = new URLSearchParams({
           page: String(page + 1),
@@ -285,11 +316,13 @@ export default function DealerListPage() {
         })
 
         if (selectedStaffId) params.set("staffId", selectedStaffId)
+        if (statusFilter) params.set("status", statusFilter)
+        if (walletFilter) params.set("wallet", walletFilter)
 
         return fetchJson<DealerResponse>(`${ADMIN_DEALERS_URL}?${params.toString()}`)
       },
     })
-  }, [page, queryClient, role, search, selectedStaffId, staffId])
+  }, [page, queryClient, role, search, selectedStaffId, staffId, statusFilter, walletFilter])
 
   // Debounced search
   useEffect(() => {
@@ -568,7 +601,7 @@ export default function DealerListPage() {
 
   const canManageDealers = role === "admin" || role === "staff"
   const canViewDealerPasswords = role === "admin"
-  const tableColumnCount = canViewDealerPasswords ? 8 : 7
+  const tableColumnCount = canViewDealerPasswords ? 9 : 8
   const startIndex = role === "staff" ? 1 : (page - 1) * ITEMS_PER_PAGE + 1
   const endIndex   = role === "staff" ? data.length : Math.min(page * ITEMS_PER_PAGE, total)
 
@@ -619,7 +652,7 @@ export default function DealerListPage() {
         </div>
       )}
 
-      <div className="p-6 max-w-7xl mx-auto">
+      <div className="p-6 admin-page-shell">
 
         {/* Header */}
         <div className="mb-8">
@@ -668,16 +701,51 @@ export default function DealerListPage() {
                 </select>
               </label>
 
-              {selectedStaffId && (
+              <label className="flex w-full flex-col gap-1 text-xs font-medium uppercase tracking-wide text-gray-500 sm:w-44">
+                Status
+                <select
+                  value={statusFilter}
+                  onChange={(event) => {
+                    setPage(1)
+                    setStatusFilter(event.target.value as DealerStatusFilter)
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  <option value="">All status</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                  <option value="SUSPENDED">Suspended</option>
+                </select>
+              </label>
+
+              <label className="flex w-full flex-col gap-1 text-xs font-medium uppercase tracking-wide text-gray-500 sm:w-48">
+                Wallet type
+                <select
+                  value={walletFilter}
+                  onChange={(event) => {
+                    setPage(1)
+                    setWalletFilter(event.target.value as WalletFilter)
+                  }}
+                  className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+                >
+                  <option value="">All dealers</option>
+                  <option value="active">Wallet dealers</option>
+                  <option value="inactive">Non-wallet dealers</option>
+                </select>
+              </label>
+
+              {(selectedStaffId || statusFilter || walletFilter) && (
                 <button
                   type="button"
                   onClick={() => {
                     setPage(1)
                     setSelectedStaffId("")
+                    setStatusFilter("")
+                    setWalletFilter("")
                   }}
                   className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                 >
-                  Clear filter
+                  Clear filters
                 </button>
               )}
             </div>
@@ -729,6 +797,7 @@ export default function DealerListPage() {
                   {canViewDealerPasswords && (
                     <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Password</th>
                   )}
+                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Wallet</th>
                   <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Status</th>
                   <th className="px-4 py-4 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide">Actions</th>
                 </tr>
@@ -811,6 +880,14 @@ export default function DealerListPage() {
                       )}
 
                       <td className="px-4 py-4">
+                        {String(dealer.walletStatus ?? "").toLowerCase() === "active" ? (
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">Wallet</span>
+                        ) : (
+                          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">Non-wallet</span>
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4">
                         <span className={`${badge.bg} ${badge.text} text-xs font-medium px-2.5 py-1 rounded-full`}>
                           {badge.label}
                         </span>
@@ -820,15 +897,15 @@ export default function DealerListPage() {
                         <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                           <div className="relative">
                             <button
-                              onClick={(e) => { e.stopPropagation(); setOpenMenu(prev => prev === dealer.Dealer_Id ? null : dealer.Dealer_Id) }}
+                              onClick={(e) => openFloatingMenu(e, dealer.Dealer_Id, setOpenMenu)}
                               data-menu-id={dealer.Dealer_Id}
                               className="p-2 rounded-md text-gray-600 hover:bg-gray-50 transition"
                               aria-label="Open actions"
                             >
                               <MoreVertical className="w-4 h-4" />
                             </button>
-                            {openMenu === dealer.Dealer_Id && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={dealer.Dealer_Id} className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-md shadow-lg z-50 py-1">
+                            {isMenuOpen(openMenu, dealer.Dealer_Id) && (
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={dealer.Dealer_Id} style={{ top: openMenu?.top ?? 0, left: openMenu?.left ?? 0 }} className="fixed w-44 bg-white border border-gray-200 rounded-md shadow-2xl z-[9999] py-1">
                                 <Link href={getDealerViewRoute(dealer.Dealer_Id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">View</Link>
                                 {role === 'staff' && <Link href={getStaffDealerRoute(dealer.Dealer_Id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">View (staff)</Link>}
                                 {canManageDealers && (

@@ -1,7 +1,22 @@
 export type StaffMember = {
   staff_id: string;
+  id?: string;
+  userId?: string;
   staff_name: string;
   staff_roletype: string | number;
+  role?: string;
+  status?: string;
+  location?: string;
+  staff_location?: string;
+  salesRegion?: string;
+  sales_region?: string;
+  parentRsmId?: string;
+  parentAsmId?: string;
+  parent_rsm_id?: string;
+  parent_asm_id?: string;
+  rsmUserId?: string;
+  rsmId?: string;
+  asmId?: string;
 };
 
 export type DealerFormValues = {
@@ -25,6 +40,7 @@ export type DealerFormValues = {
 export type DealerFormSnapshot = DealerFormValues & {
   assignedStaffIds: string[];
   staffNames: string;
+  rsmUserId?: string;
 };
 
 export const emptyDealerForm: DealerFormValues = {
@@ -94,6 +110,7 @@ export function normalizeDealerFormSnapshot(value: unknown): DealerFormSnapshot 
     notes: cleanText(source.notes),
     assignedStaffIds: normalizeStaffIds(source.assignedStaffIds),
     staffNames: cleanText(source.staffNames),
+    rsmUserId: cleanText(source.rsmUserId),
   };
 }
 
@@ -164,10 +181,12 @@ export function toDealerFormSnapshot(
   values: DealerFormValues,
   assignedStaffIds: string[],
   staffNames: string,
+  rsmUserId = "",
 ): DealerFormSnapshot {
   return normalizeDealerFormSnapshot({
     ...values,
     assignedStaffIds,
     staffNames,
+    rsmUserId,
   });
 }

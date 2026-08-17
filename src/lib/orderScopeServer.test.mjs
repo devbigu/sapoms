@@ -40,10 +40,19 @@ test("numeric and string actor IDs normalize to stable strings", () => {
 });
 
 
-test("RSM sessions use assigned-dealer staff scope", () => {
-  assert.deepEqual(orderScope.orderActorFromAuth({ role: "RSM", staffId: 26n, profileId: 26n }), {
+test("RSM sessions use regional staff approval scope", () => {
+  assert.deepEqual(orderScope.orderActorFromAuth({ role: "RSM", staffId: 26n, profileId: 26n, userId: 126n }), {
     role: "staff",
     actorId: "26",
+    isRsm: true,
+    userId: "126",
+  });
+});
+test("ASM sessions use assigned-dealer branch scope", () => {
+  assert.deepEqual(orderScope.orderActorFromAuth({ role: "ASM", staffId: 42n, profileId: 42n }), {
+    role: "staff",
+    actorId: "42",
+    isAsm: true,
   });
 });
 test("orders-data adapter requires authenticated session scope instead of query actor identity", async () => {

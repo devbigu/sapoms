@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/server/db/prisma";
 import { requireAuth } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 import { hashPassword } from "@/server/auth/password";
 import { mapStaffProfileAliases } from "@/server/modules/profiles/profile-aliases";
 
@@ -12,7 +13,7 @@ async function loadStaff(staffId: bigint) { return prisma.staffProfile.findUniqu
 export async function GET() {
   try {
     const actor = await requireAuth();
-    if (actor.role !== "STAFF" || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    if (!isStaffLike(actor) || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
     const staff = await loadStaff(actor.staffId);
     if (!staff) return NextResponse.json({ success: false, message: "Staff profile not found" }, { status: 404 });
     return NextResponse.json({ success: true, status: true, data: mapStaffProfileAliases(staff) }, { headers: { "Cache-Control": "no-store" } });
@@ -25,7 +26,7 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const actor = await requireAuth();
-    if (actor.role !== "STAFF" || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
+    if (!isStaffLike(actor) || !actor.staffId) return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 });
     const raw = await request.json().catch(() => ({}));
     const body = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
     const password = bodyText(body, ["staff_password", "password"], 200);

@@ -34,6 +34,7 @@ export function mapDealerProfileAliases(profile: DealerWithUser, assignedStaffNa
 }
 
 export function mapStaffProfileAliases(profile: StaffWithUser) {
+  const salesRegion = profile.salesRegion || "";
   return {
     id: profile.id.toString(),
     staff_id: profile.id.toString(),
@@ -43,6 +44,8 @@ export function mapStaffProfileAliases(profile: StaffWithUser) {
     staff_designation: text(profile.designation),
     staff_location: text(profile.location),
     staff_roletype: profile.staffRoleType || "1",
+    sales_region: salesRegion,
+    salesRegion,
     staff_username: text(profile.user.username || profile.user.email),
     name: profile.displayName,
     email: profile.user.email,

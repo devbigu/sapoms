@@ -785,7 +785,7 @@ export default function AdminHotItemsPage() {
 
         {/* Header */}
         <div className="bg-white border-b border-gray-200 px-6 lg:px-8 py-4 sticky top-0 z-20">
-          <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+          <div className="admin-page-shell flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <button onClick={() => router.back()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-[12.5px] font-medium text-gray-600 hover:bg-gray-100 hover:-translate-x-px transition-all">
@@ -823,7 +823,7 @@ export default function AdminHotItemsPage() {
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto px-4 lg:px-8 py-8">
+        <div className="admin-page-shell px-4 lg:px-8 py-8">
           {(loadError || catalogueWarning) && (
             <div
               className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${

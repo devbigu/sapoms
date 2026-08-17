@@ -9,6 +9,8 @@ type StaffSession = {
   staff_name?: string;
   staff_designation?: string;
   staff_location?: string;
+  sales_region?: string;
+  salesRegion?: string;
   staff_password?: string;
   staff_email?: string;
   staff_roletype?: string;
@@ -16,6 +18,12 @@ type StaffSession = {
   name?: string;
   staff_image?: string;
 };
+
+function formatSalesRegion(value?: string) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized) return "";
+  return normalized.charAt(0) + normalized.slice(1).toLowerCase();
+}
 
 function readStaffSession(): StaffSession | null {
   if (typeof window === "undefined") return null;
@@ -32,11 +40,13 @@ function Field({
   value,
   onChange,
   type = "text",
+  readOnly = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
+  readOnly?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -45,11 +55,12 @@ function Field({
         <span className="ml-0.5 text-orange-500">*</span>
       </label>
       <input
-        required
+        required={!readOnly}
+        readOnly={readOnly}
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        className={`rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500 ${readOnly ? "bg-gray-50" : "bg-white"}`}
       />
     </div>
   );
@@ -65,6 +76,7 @@ export default function StaffProfilePage() {
   const [name, setName] = useState("");
   const [designation, setDesignation] = useState("");
   const [location, setLocation] = useState("");
+  const [salesRegion, setSalesRegion] = useState("");
   const [password, setPassword] = useState("");
 
   useEffect(() => {
@@ -85,6 +97,7 @@ export default function StaffProfilePage() {
         setName(data.staff_name || "");
         setDesignation(data.staff_designation || "");
         setLocation(data.staff_location || "");
+        setSalesRegion(data.sales_region || data.salesRegion || "");
         setPassword(data.staff_password || "");
       } catch {
         setToast({ text: "Failed to load staff profile", type: "error" });
@@ -124,6 +137,8 @@ export default function StaffProfilePage() {
         staff_name: name,
         staff_designation: designation,
         staff_location: location,
+        sales_region: payloadData.sales_region || payloadData.salesRegion || previous.sales_region || previous.salesRegion || "",
+        salesRegion: payloadData.salesRegion || payloadData.sales_region || previous.salesRegion || previous.sales_region || "",
         staff_password: password,
         name: payloadData.name || previous.name || name,
         image: payloadData.image || previous.image || undefined,
@@ -175,6 +190,9 @@ export default function StaffProfilePage() {
               <Field label="Name" value={name} onChange={setName} />
               <Field label="Designation" value={designation} onChange={setDesignation} />
               <Field label="Location" value={location} onChange={setLocation} />
+              {String((readStaffSession()?.staff_roletype ?? "")).toUpperCase() === "RSM" && (
+                <Field label="RSM Region" value={formatSalesRegion(salesRegion)} onChange={() => {}} readOnly />
+              )}
               <Field label="Password" value={password} onChange={setPassword} type="password" />
             </div>
           </section>

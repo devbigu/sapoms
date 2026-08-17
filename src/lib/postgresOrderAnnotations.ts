@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma, type OrderAcceptanceStatus, type OrderFulfilmentStatus, type OrderStatus } from "@prisma/client";
 import { prisma } from "@/server/db/prisma";
 import type { AuthActor } from "@/server/auth/session";
+import { isStaffLike } from "@/server/auth/sales-scope";
 
 const orderAccessInclude = {
   dealer: { select: { id: true, businessName: true } },
@@ -58,7 +59,7 @@ export async function assertOrderAccess(order: PgOrder, actor: AuthActor) {
     if (order.dealerId === actor.dealerId) return;
     throw new PostgresOrderAnnotationError(403, "forbidden", "This order belongs to another Dealer.");
   }
-  if (actor.role === "STAFF" && actor.staffId) {
+  if (isStaffLike(actor) && actor.staffId) {
     if (order.assignedStaffId === actor.staffId) return;
     const assignment = await prisma.dealerStaffAssignment.findFirst({ where: { dealerId: order.dealerId, staffId: actor.staffId, active: true }, select: { id: true } });
     if (assignment) return;
@@ -257,7 +258,7 @@ export function overlayDoc(row: any, order: PgOrder) {
 export async function listPostgresCancelledOverlays(actor: AuthActor, input: { search?: string; page?: number; limit?: number }) {
   const where: Prisma.OrderOverlayWhereInput = { type: "cancel", status: "cancelled" };
   if (actor.role === "DEALER") where.order = { dealerId: actor.dealerId };
-  if (actor.role === "STAFF" && actor.staffId) where.order = { OR: [{ assignedStaffId: actor.staffId }, { dealer: { staffAssignments: { some: { staffId: actor.staffId, active: true } } } }] };
+  if (isStaffLike(actor) && actor.staffId) where.order = { OR: [{ assignedStaffId: actor.staffId }, { dealer: { staffAssignments: { some: { staffId: actor.staffId, active: true } } } }] };
   if (input.search) where.OR = [{ reason: { contains: input.search, mode: "insensitive" } }, { order: { orderNumber: { contains: input.search, mode: "insensitive" } } }];
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 10)));

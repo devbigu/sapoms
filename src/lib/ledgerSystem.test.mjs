@@ -38,9 +38,10 @@ test("ledger preserves temporary frontend response aliases", () => {
 test("ledger enforces admin staff and dealer visibility from authenticated actor", () => {
   assert.match(allSources, /requireAuth\(\)/);
   assert.match(ledgerSource, /actor\.role === "ADMIN"/);
+  assert.match(ledgerSource, /actor\.role !== "ACCOUNTANT"/);
   assert.match(ledgerSource, /actor\.role === "DEALER"/);
   assert.match(ledgerSource, /actor\.dealerId === dealerId/);
-  assert.match(ledgerSource, /actor\.role === "STAFF"/);
+  assert.match(ledgerSource, /isStaffLike\(actor\)/);
   assert.match(ledgerSource, /dealerStaffAssignment\.findFirst/);
   assert.match(ledgerSource, /staffId: actor\.staffId/);
   assert.match(ledgerSource, /active: true/);
@@ -57,9 +58,11 @@ test("ledger derives balances from order payable and wallet transaction directio
 });
 
 
-test("ledger bills are saved through the dealer ledger API and bill-linked payments return updated bill state", () => {
+test("ledger bill and payment mutations are accountant-only and bill-linked payments return updated bill state", () => {
   assert.match(ledgerSource, /recordLedgerBill/);
   assert.match(ledgerSource, /ledgerBill\.findMany/);
+  assert.match(ledgerSource, /Only Accountant can save ledger bills\./);
+  assert.match(ledgerSource, /Only Accountant can record ledger payments\./);
   assert.match(ledgerSource, /dealerId_orderNumber/);
   assert.match(ledgerSource, /billId/);
   assert.match(detailSource, /Bill saved successfully/);

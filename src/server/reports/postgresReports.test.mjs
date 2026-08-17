@@ -56,7 +56,7 @@ test("accountant dashboard uses native PostgreSQL metrics and preserves UI alias
 });
 
 test("authorization denies dealers and keeps staff reports scoped", () => {
-  assert.match(service, /actor\.role === "STAFF"/);
+  assert.match(service, /isStaffLike\(actor\)/);
   assert.match(service, /return null/);
   assert.match(service, /actor\.role !== "ADMIN" && actor\.role !== "ACCOUNTANT"/);
   assert.match(accountantRoute, /status === 403/);

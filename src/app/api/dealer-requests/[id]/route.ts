@@ -1,5 +1,7 @@
 import { Prisma, type DealerRequest } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/server/auth/session";
+import { isAdminLike, isStaffLike } from "@/server/auth/sales-scope";
 
 import { AdminRouteError } from "@/server/admin/admin-errors";
 import { prisma } from "@/server/db/prisma";
@@ -16,13 +18,33 @@ import {
   buildDealerRequestAccessQuery,
   buildDealerRequestIdentityKey,
   ensureStatusTransition,
-  resolveDealerRequestActor,
   toDealerRequestDetail,
   type DealerRequestActor,
   type DealerRequestRecord,
 } from "@/lib/dealerRequests";
 export const runtime = "nodejs";
 
+function actorFromAuth(authActor: Awaited<ReturnType<typeof requireAuth>>): DealerRequestActor | null {
+  if (isAdminLike(authActor)) {
+    return {
+      role: "admin",
+      actorId: authActor.userId.toString(),
+      actorName: authActor.displayName || authActor.email || "Admin",
+      roletype: authActor.role,
+    };
+  }
+
+  if (isStaffLike(authActor) && authActor.staffId) {
+    return {
+      role: "staff",
+      actorId: authActor.staffId.toString(),
+      actorName: authActor.displayName || authActor.email || "Staff",
+      roletype: authActor.role,
+    };
+  }
+
+  return null;
+}
 function toRequestId(id: string) {
   const trimmed = id.trim();
   if (!/^\d+$/.test(trimmed)) return null;
@@ -112,16 +134,10 @@ export async function GET(
       return buildResponseError("Invalid dealer request id", 400);
     }
 
-    const actor = resolveDealerRequestActor({
-      headers: request.headers,
-      role: request.nextUrl.searchParams.get("role"),
-      actorId: request.nextUrl.searchParams.get("actorId"),
-      actorName: request.nextUrl.searchParams.get("actorName"),
-      roletype: request.nextUrl.searchParams.get("roletype"),
-    });
+    const actor = actorFromAuth(await requireAuth());
 
     if (!actor || (actor.role !== "admin" && actor.role !== "staff")) {
-      return buildResponseError("Dealer request access is restricted to admin and staff", 403);
+      return buildResponseError("Dealer request access is restricted to admin and staff-like roles", 403);
     }
 
     await ensurePostgresDealerRequestIndexes();
@@ -156,16 +172,10 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const actor = resolveDealerRequestActor({
-      headers: request.headers,
-      role: body.role,
-      actorId: body.actorId,
-      actorName: body.actorName,
-      roletype: body.roletype,
-    });
+    const actor = actorFromAuth(await requireAuth());
 
     if (!actor || (actor.role !== "admin" && actor.role !== "staff")) {
-      return buildResponseError("Dealer request access is restricted to admin and staff", 403);
+      return buildResponseError("Dealer request access is restricted to admin and staff-like roles", 403);
     }
 
     const action = String(body.action ?? "").trim().toLowerCase();
@@ -336,7 +346,7 @@ export async function PATCH(
     }
 
     if (actor.role !== "staff" || current.submittedById !== actor.actorId) {
-      return buildResponseError("Only the submitting staff member can resubmit this request", 403);
+      return buildResponseError("Only the submitting staff-like user can resubmit this request", 403);
     }
 
     let snapshot = normalizeDealerFormSnapshot(body.formSnapshot ?? existing.formSnapshot);

@@ -25,11 +25,11 @@ test("dealer staff and admin permissions are enforced from JWT/profile identity"
   assert.match(source, /actor\.role === "ADMIN"/);
   assert.match(source, /actor\.role === "NSM"/);
   assert.match(source, /permission === "read" \|\| permission === "acceptance" \|\| permission === "fulfilment"/);
-  assert.match(source, /actor\.role === "STAFF" \|\| actor\.role === "RSM"/);
+  assert.match(source, /isStaffLike\(actor\)/);
   assert.match(source, /order\.dealerId !== actor\.dealerId/);
   assert.match(source, /Dealers cannot perform staff-only order transitions/);
   assert.match(source, /dealerStaffAssignment\.findFirst/);
-  assert.match(source, /Staff and RSM cannot cancel Dealer orders/);
+  assert.match(source, /Staff, RSM, and ASM cannot cancel Dealer orders/);
   assert.match(source, /NSM cannot cancel Dealer orders/);
   assert.match(overlayRoute, /requireAuth\(\)/);
   assert.match(dispatchRoute, /requireAuth\(\)/);

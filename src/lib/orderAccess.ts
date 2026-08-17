@@ -62,9 +62,9 @@ async function defaultAccessOptions(): Promise<OrderAccessOptions | null> {
 }
 
 async function findPostgresAccessOrder(id: string): Promise<Record<string, unknown> | null> {
-  const module = await import("@/lib/postgresOrders");
-  const order = await module.findPostgresOrderByLookupId(id);
-  return order ? module.mapPostgresOrderToLegacy(order) : null;
+  const postgresOrders = await import("@/lib/postgresOrders");
+  const order = await postgresOrders.findPostgresOrderByLookupId(id);
+  return order ? postgresOrders.mapPostgresOrderToLegacy(order) : null;
 }
 
 function canStaffAccessOrder(order: Record<string, unknown>, options: OrderAccessOptions) {

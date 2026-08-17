@@ -53,7 +53,7 @@ export default function DealerViewPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="admin-page-shell">
         <div className="mb-6">
           <button onClick={() => router.push(DEALER_LIST_ROUTE)} className="text-sm text-gray-500 hover:text-gray-700">&larr; Back to Dealer List</button>
           <h1 className="text-3xl font-bold text-gray-900 mt-3">Dealer Details</h1>

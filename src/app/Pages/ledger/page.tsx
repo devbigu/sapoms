@@ -163,7 +163,7 @@ export default function LedgerDealerListPage() {
       d.Dealer_Email?.toLowerCase().includes(q) ||
       d.Dealer_Number?.includes(q)
     )
-  }, [isStaffRole, assignedDealersResponse?.data, search])
+  }, [isStaffRole, assignedDealersResponse, search])
 
   const allLedgerDealers: Dealer[] = useMemo(() => {
     const rows = (response?.data || []).map(normalizeDealer)
@@ -175,7 +175,7 @@ export default function LedgerDealerListPage() {
       d.Dealer_Email?.toLowerCase().includes(q) ||
       d.Dealer_Number?.includes(q)
     )
-  }, [response?.data, search])
+  }, [response, search])
 
   // Unified data for the current page
   const data: Dealer[] = isStaffRole

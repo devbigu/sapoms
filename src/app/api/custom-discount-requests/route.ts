@@ -12,6 +12,7 @@ import {
   updateDraftApprovalState,
 } from "@/lib/postgresDiscountDrafts";
 import { buildPendingRequestLookup } from "@/lib/customDiscountRequests";
+import { buildDealerRegionWhere, isStaffLike } from "@/server/auth/sales-scope";
 
 export const runtime = "nodejs";
 
@@ -35,8 +36,10 @@ export async function GET(req: NextRequest) {
     const where: any = {};
     if (actor?.role === "DEALER") where.dealerId = actor.dealerId;
     else if (dealerParam) where.dealerId = BigInt(dealerParam);
-    if (actor?.role === "STAFF") where.staffId = actor.staffId;
+    if (actor?.role === "RSM") where.dealer = await buildDealerRegionWhere(actor, undefined, prisma);
+    else if (actor && isStaffLike(actor)) where.staffId = actor.staffId;
     else if (staffParam) where.staffId = BigInt(staffParam);
+    if (actor?.role === "ADMIN") where.rsmApprovalStatus = "APPROVED";
     if (["PENDING", "APPROVED", "REJECTED", "CANCELLED"].includes(status)) where.status = status;
     if (orderId) where.orderId = BigInt(orderId);
     if (orderDraftId) where.orderDraftId = BigInt(orderDraftId);

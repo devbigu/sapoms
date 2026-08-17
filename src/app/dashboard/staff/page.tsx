@@ -53,6 +53,8 @@ type User = {
   staff_designation: string
   staff_location: string
   staff_roletype: string
+  sales_region?: string
+  salesRegion?: string
   staff_username: string
   staff_dealer: string
   status: string
@@ -118,10 +120,22 @@ type DiscountRequest = {
 // ─────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────
-function getRoleLabel(rt: string) {
+function formatSalesRegion(value?: string) {
+  const normalized = String(value ?? "").trim().toUpperCase()
+  if (!normalized) return ""
+  return normalized.charAt(0) + normalized.slice(1).toLowerCase()
+}
+
+function getRoleLabel(rt: string, salesRegion?: string) {
+  if (rt === "NSM") return "NSM"
+  if (rt === "RSM") {
+    const regionLabel = formatSalesRegion(salesRegion)
+    return regionLabel ? `${regionLabel} RSM` : "RSM"
+  }
+  if (rt === "ASM") return "ASM"
   if (rt === "0") return "Admin"
-  if (rt === "1") return "Executive"
-  if (rt === "2") return "Field Executive"
+  if (rt === "1") return "Staff"
+  if (rt === "2") return "Sales Manager"
   return "Staff"
 }
 
@@ -389,7 +403,8 @@ function ExecutiveDashboard() {
   if (!user) return null
 
   const initials   = user.staff_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()
-  const roleLabel  = getRoleLabel(user.staff_roletype)
+  const roleLabel  = getRoleLabel(user.staff_roletype, user.sales_region || user.salesRegion)
+  const rsmRegionLabel = user.staff_roletype === "RSM" ? formatSalesRegion(user.sales_region || user.salesRegion) : ""
 
   const STAT_CONFIG = [
     {
@@ -596,7 +611,7 @@ function ExecutiveDashboard() {
         {/* ── Sidebar ── */}
         <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
           <div className="sb-head">
-            <div className="sb-chip">Executive Portal</div>
+            <div className="sb-chip">Staff Portal</div>
             <div className="sb-title">Workspace</div>
           </div>
           <div className="sb-user">
@@ -651,6 +666,9 @@ function ExecutiveDashboard() {
                 <div className="profile-email">{user.staff_email || "—"}</div>
                 <div className="profile-chips">
                   <span className="pchip pc-purple">{roleLabel}</span>
+                  {rsmRegionLabel && (
+                    <span className="pchip pc-blue">{rsmRegionLabel} Zone</span>
+                  )}
                   {user.staff_designation?.trim() && (
                     <span className="pchip pc-blue">{user.staff_designation.trim()}</span>
                   )}

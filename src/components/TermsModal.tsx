@@ -1,20 +1,55 @@
 "use client";
 
-// components/TermsModal.tsx
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { TermsDocument } from "@/components/terms/TermsDocument";
 
 interface TermsModalProps {
-  userId: string;
-  userName: string;
-  email: string;
-  /** Called after successful acceptance so parent can hide modal */
-  onAccepted: () => void;
+  userId?: string;
+  userName?: string;
+  onAccepted: (acceptedAt: string) => void;
+}
+
+let refreshPromise: Promise<boolean> | null = null;
+
+async function refreshSession() {
+  if (!refreshPromise) {
+    refreshPromise = fetch("/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((response) => response.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
+}
+
+async function postTermsAcceptance() {
+  const send = () =>
+    fetch("/api/terms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      cache: "no-store",
+    });
+
+  let response = await send();
+  if (response.status !== 401) return response;
+
+  const refreshed = await refreshSession();
+  if (!refreshed) return response;
+
+  response = await send();
+  return response;
 }
 
 export default function TermsModal({
-  userId,
-  userName,
-  email,
+  userId = "",
+  userName = "Dealer",
   onAccepted,
 }: TermsModalProps) {
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
@@ -23,15 +58,17 @@ export default function TermsModal({
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Track scroll — user must reach the bottom before checkbox unlocks
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+
     const handleScroll = () => {
       const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
       if (atBottom) setHasScrolledToBottom(true);
     };
+
     el.addEventListener("scroll", handleScroll);
+    handleScroll();
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
@@ -43,17 +80,14 @@ export default function TermsModal({
     setError(null);
 
     try {
-      const res = await fetch("/api/terms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, userName, email }),
-      });
+      const res = await postTermsAcceptance();
+      const payload = await res.json().catch(() => null);
 
-      if (!res.ok) throw new Error("Failed to save agreement.");
+      if (!res.ok) {
+        throw new Error(payload?.msg || payload?.message || "Failed to save agreement.");
+      }
 
-      // Mark in localStorage so modal does not show again for this user
-      localStorage.setItem(`terms_accepted_${userId}`, "true");
-      onAccepted();
+      onAccepted(String(payload?.data?.acceptedAt || new Date().toISOString()));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -63,65 +97,25 @@ export default function TermsModal({
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/90 backdrop-blur-sm">
-      <div className="relative w-full max-w-2xl mx-4 flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[92vh]">
-
-        {/* Header */}
-        <div className="px-8 pt-8 pb-5 border-b border-slate-100">
-          <div className="flex items-center gap-3 mb-1">
-            <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-slate-900">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div className="relative mx-4 flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="border-b border-slate-100 px-8 pb-5 pt-8">
+          <div className="mb-1 flex items-center gap-3">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-900">
+              <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
               </svg>
             </span>
-            <h1 className="text-xl font-semibold text-slate-900 tracking-tight">
-              Terms &amp; Conditions
-            </h1>
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">Terms &amp; Conditions</h1>
           </div>
-          <p className="text-sm text-slate-500 ml-12">
-            Please read the entire document before accepting.
-          </p>
+          <p className="ml-12 text-sm text-slate-500">Dealer access is blocked until you read and accept the full document.</p>
         </div>
 
-        {/* Scrollable T&C Body */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto px-8 py-6 text-sm text-slate-700 leading-relaxed space-y-5"
-        >
-          <TermsSection title="1. Acceptance of Terms">
-            By accessing or using this platform, you agree to be bound by these Terms and Conditions and all applicable laws and regulations. If you do not agree with any part of these terms, you are prohibited from using or accessing this platform.
-          </TermsSection>
-
-          <TermsSection title="2. Use License">
-            Permission is granted to temporarily access the platform for personal, non-commercial transitory viewing only. This is the grant of a license, not a transfer of title, and under this license you may not modify or copy the materials, use the materials for any commercial purpose or for any public display, or remove any copyright or other proprietary notations from the materials.
-          </TermsSection>
-
-          <TermsSection title="3. Data &amp; Privacy">
-            We collect information you provide directly to us. We may use your information to operate, maintain, and improve our services; process transactions; send you technical notices, updates, security alerts, and support messages. We do not sell, trade, or transfer your personally identifiable information to third parties without your consent.
-          </TermsSection>
-
-          <TermsSection title="4. User Responsibilities">
-            You are responsible for maintaining the confidentiality of your account and password. You agree to accept responsibility for all activities that occur under your account. You must notify us immediately of any unauthorized use of your account or any breach of security.
-          </TermsSection>
-
-          <TermsSection title="5. Prohibited Activities">
-            You are prohibited from using the platform to transmit any unsolicited or unauthorized advertising or promotional material, engage in any conduct that restricts or inhibits anyone&apos;s use or enjoyment of the platform, or use the platform in any way that violates any applicable local, national, or international law or regulation.
-          </TermsSection>
-
-          <TermsSection title="6. Disclaimer">
-            The materials on this platform are provided on an &apos;as is&apos; basis. We make no warranties, expressed or implied, and hereby disclaim all other warranties including without limitation implied warranties or conditions of merchantability, fitness for a particular purpose, or non-infringement of intellectual property.
-          </TermsSection>
-
-          <TermsSection title="7. Limitations">
-            In no event shall the platform or its suppliers be liable for any damages (including, without limitation, damages for loss of data or profit, or due to business interruption) arising out of the use or inability to use the materials on the platform.
-          </TermsSection>
-
-          <TermsSection title="8. Governing Law">
-            These terms and conditions are governed by and construed in accordance with applicable laws and you irrevocably submit to the exclusive jurisdiction of the courts in the applicable location.
-          </TermsSection>
+        <div ref={scrollRef} className="flex-1 space-y-5 overflow-y-auto px-8 py-6 text-sm leading-relaxed text-slate-700">
+          <TermsDocument />
 
           {!hasScrolledToBottom && (
-            <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-              <svg className="w-4 h-4 shrink-0 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-600">
+              <svg className="h-4 w-4 shrink-0 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
               Scroll to the bottom to enable acceptance
@@ -129,85 +123,71 @@ export default function TermsModal({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-8 py-5 border-t border-slate-100 bg-slate-50 space-y-4">
-          {/* Checkbox — locked until user scrolls to bottom */}
+        <div className="space-y-4 border-t border-slate-100 bg-slate-50 px-8 py-5">
           <label
-            className={`flex items-start gap-3 cursor-pointer select-none group ${
-              !hasScrolledToBottom ? "opacity-40 pointer-events-none" : ""
-            }`}
+            className={`group flex cursor-pointer select-none items-start gap-3 ${!hasScrolledToBottom ? "pointer-events-none opacity-40" : ""}`}
           >
             <div className="relative mt-0.5">
               <input
                 type="checkbox"
                 checked={isChecked}
-                onChange={(e) => setIsChecked(e.target.checked)}
+                onChange={(event) => setIsChecked(event.target.checked)}
                 disabled={!hasScrolledToBottom}
                 className="sr-only"
               />
               <div
-                className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-150 ${
+                className={`flex h-5 w-5 items-center justify-center rounded border-2 transition-all duration-150 ${
                   isChecked
-                    ? "bg-slate-900 border-slate-900"
+                    ? "border-slate-900 bg-slate-900"
                     : "border-slate-300 bg-white group-hover:border-slate-400"
                 }`}
               >
                 {isChecked && (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 )}
               </div>
             </div>
-            <span className="text-sm text-slate-700 leading-snug">
+            <span className="text-sm leading-snug text-slate-700">
               I have read, understood, and agree to the Terms &amp; Conditions above.
             </span>
           </label>
 
-          {error && (
-            <p className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
+          {error && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-500">{error}</p>}
 
           <button
             onClick={handleAccept}
             disabled={!canAccept || isSubmitting}
-            className={`w-full py-3 rounded-xl text-sm font-semibold tracking-wide transition-all duration-200 ${
+            className={`w-full rounded-xl py-3 text-sm font-semibold tracking-wide transition-all duration-200 ${
               canAccept && !isSubmitting
-                ? "bg-slate-900 text-white hover:bg-slate-700 active:scale-[0.98] shadow-sm"
-                : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                ? "bg-slate-900 text-white shadow-sm hover:bg-slate-700 active:scale-[0.98]"
+                : "cursor-not-allowed bg-slate-200 text-slate-400"
             }`}
           >
             {isSubmitting ? (
               <span className="flex items-center justify-center gap-2">
-                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
-                Saving your agreement…
+                Saving your agreement...
               </span>
             ) : (
-              "I Accept — Continue to Dashboard"
+              "I Accept - Continue"
             )}
           </button>
 
-          <p className="text-xs text-center text-slate-400">
+          <p className="text-center text-xs text-slate-400">
             Accepting as <span className="font-medium text-slate-600">{userName}</span>
-            {" "}·{" "}
-            ID: <span className="font-mono">{userId}</span>
+            {userId ? (
+              <>
+                {" "}- ID: <span className="font-mono">{userId}</span>
+              </>
+            ) : null}
           </p>
         </div>
       </div>
-    </div>
-  );
-}
-
-function TermsSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h2 className="font-semibold text-slate-900 mb-1.5">{title}</h2>
-      <p>{children}</p>
     </div>
   );
 }

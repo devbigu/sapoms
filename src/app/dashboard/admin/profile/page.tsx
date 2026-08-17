@@ -157,7 +157,7 @@ export default function AdminProfilePage() {
         </div>
       )}
 
-      <div className="mx-auto max-w-3xl">
+      <div className="admin-page-shell">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Admin Profile</h1>
           <p className="mt-1 text-sm text-gray-500">Update your administrator account details</p>

@@ -158,15 +158,20 @@ function roundForInput(value: number) {
   return Math.round(value * 100) / 100
 }
 
-function isStaffLedgerSession() {
-  if (typeof window === 'undefined') return false
+function getLedgerViewerRole() {
+  if (typeof window === 'undefined') return null
   const session = resolveStoredAuth(window.localStorage)
-  return session.status === 'authenticated' && session.role === 'staff'
+  return session.status === 'authenticated' ? session.role : null
+}
+
+function isStaffLedgerSession() {
+  return getLedgerViewerRole() === 'staff'
 }
 
 export default function DealerLedgerShellPage() {
   const router = useRouter()
   const [redirectingStaff, setRedirectingStaff] = useState(() => isStaffLedgerSession())
+  const [viewerRole, setViewerRole] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
@@ -186,7 +191,9 @@ export default function DealerLedgerShellPage() {
   const objectUrls = useRef<string[]>([])
 
   useEffect(() => {
-    if (!isStaffLedgerSession()) return
+    const role = getLedgerViewerRole()
+    setViewerRole(role)
+    if (role !== 'staff') return
     setRedirectingStaff(true)
     router.replace('/Pages/ledger')
   }, [router])
@@ -221,6 +228,8 @@ export default function DealerLedgerShellPage() {
       objectUrls.current.forEach((url) => URL.revokeObjectURL(url))
     }
   }, [])
+
+  const canManageLedgerEntries = viewerRole === 'accountant'
 
   const dealers = useMemo(() => {
     const rows = data?.data || []
@@ -436,7 +445,7 @@ export default function DealerLedgerShellPage() {
   if (redirectingStaff) {
     return (
       <div className="min-h-screen bg-gray-100 p-6">
-        <div className="mx-auto max-w-7xl rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
+        <div className="admin-page-shell rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-700">
           Opening assigned dealer ledger...
         </div>
       </div>
@@ -446,7 +455,7 @@ export default function DealerLedgerShellPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-gray-100 p-6">
-        <div className="mx-auto max-w-7xl rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="admin-page-shell rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4" />
             Failed to load dealer ledger data.
@@ -468,7 +477,7 @@ export default function DealerLedgerShellPage() {
         </div>
       )}
 
-      <div className="mx-auto max-w-7xl p-6">
+      <div className="admin-page-shell p-6">
         <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Dealer Ledger</h1>
@@ -555,6 +564,7 @@ export default function DealerLedgerShellPage() {
                         bills={bills}
                         detail={dealerDetails[dealer.Dealer_Id]}
                         onExpand={() => handleExpand(dealer)}
+                        canManageLedgerEntries={canManageLedgerEntries}
                         onAddBill={() => openBillModal(dealer)}
                         onPayment={(bill) => openPaymentModal(dealer, bill)}
                       />
@@ -810,6 +820,7 @@ function FragmentRow({
   bills,
   detail,
   onExpand,
+  canManageLedgerEntries,
   onAddBill,
   onPayment,
 }: {
@@ -821,6 +832,7 @@ function FragmentRow({
   bills: Bill[]
   detail?: DealerDetail
   onExpand: () => void
+  canManageLedgerEntries: boolean
   onAddBill: () => void
   onPayment: (bill: Bill) => void
 }) {
@@ -854,14 +866,18 @@ function FragmentRow({
         </td>
         <td className="px-4 py-4 text-sm text-gray-600">{creditDays} days</td>
         <td className="px-4 py-4 text-right">
-          <button
-            type="button"
-            onClick={onAddBill}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
-          >
-            <Plus className="h-4 w-4" />
-            Add Bill
-          </button>
+          {canManageLedgerEntries ? (
+            <button
+              type="button"
+              onClick={onAddBill}
+              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+            >
+              <Plus className="h-4 w-4" />
+              Add Bill
+            </button>
+          ) : (
+            <span className="text-xs font-medium text-gray-400">View only</span>
+          )}
         </td>
       </tr>
 
@@ -973,15 +989,19 @@ function FragmentRow({
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => onPayment(bill)}
-                              disabled={balance === 0}
-                              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <CreditCard className="h-3.5 w-3.5" />
-                              Record Payment
-                            </button>
+                            {canManageLedgerEntries ? (
+                              <button
+                                type="button"
+                                onClick={() => onPayment(bill)}
+                                disabled={balance === 0}
+                                className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <CreditCard className="h-3.5 w-3.5" />
+                                Record Payment
+                              </button>
+                            ) : (
+                              <span className="text-xs font-medium text-gray-400">Recorded payment only</span>
+                            )}
                           </td>
                         </tr>
                       )

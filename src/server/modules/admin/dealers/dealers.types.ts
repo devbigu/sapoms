@@ -3,6 +3,8 @@ import type { Prisma, SalesRegion, UserStatus } from "@prisma/client";
 
 export type AdminDealerListInput = AdminListInput & {
   staffId?: string;
+  status?: UserStatus;
+  wallet?: "active" | "inactive";
 };
 
 export type AdminDealerStaffAssignment = {
@@ -34,6 +36,7 @@ export type AdminDealerRecord = {
   imageUrl?: string | null;
   deletedAt?: Date | null;
   user: { id: bigint; email: string; username?: string | null; status: string; deletedAt?: Date | null };
+  wallet?: { status: string } | null;
   region?: SalesRegion | null;
   rsmUserId?: bigint | null;
   regionalManager?: { id: bigint; email: string; staffProfile: { displayName: string; salesRegion: SalesRegion | null } | null } | null;

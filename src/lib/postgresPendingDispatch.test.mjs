@@ -34,7 +34,7 @@ test("PostgreSQL dispatch model and transactional quantity protections exist", (
   assert.match(pgDispatch, /dispatchedAt: nextFulfilment === "DISPATCHED"/);
   assert.match(pgDispatch, /actor\.role === "DEALER"/);
   assert.match(pgDispatch, /isGlobalDispatchRole\(actor\)/);
-  assert.match(pgDispatch, /actor\.role === "STAFF" \|\| actor\.role === "RSM"/);
+  assert.match(pgDispatch, /isStaffLike\(actor\)/);
   assert.match(pgDispatch, /actor\.role === "ADMIN" \|\| actor\.role === "NSM"/);
   assert.match(pgDispatch, /order\.assignedStaffId === actor\.staffId/);
 });

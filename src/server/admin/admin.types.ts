@@ -1,6 +1,6 @@
 import type { AuthActor } from "@/server/auth/session";
 
-export type AdminActor = AuthActor & { role: "ADMIN" };
+export type AdminActor = AuthActor & { role: "ADMIN" | "NSM" };
 
 export type AdminListInput = {
   page: number;

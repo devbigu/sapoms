@@ -7,11 +7,23 @@ const staffId = z.preprocess(
   z.string().regex(/^\d+$/).optional(),
 );
 
+const listStatus = z.preprocess(
+  (value) => (value === undefined || value === null || String(value).trim() === "" ? undefined : String(value).trim().toUpperCase()),
+  z.enum(["ACTIVE", "INACTIVE", "SUSPENDED"]).optional(),
+);
+
+const walletFilter = z.preprocess(
+  (value) => (value === undefined || value === null || String(value).trim() === "" ? undefined : String(value).trim().toLowerCase()),
+  z.enum(["active", "inactive"]).optional(),
+);
+
 export function parseAdminDealerListInput(searchParams: URLSearchParams) {
   const base = parseAdminPagination(searchParams);
   return {
     ...base,
     staffId: staffId.parse(searchParams.get("staffId")),
+    status: listStatus.parse(searchParams.get("status")),
+    wallet: walletFilter.parse(searchParams.get("wallet")),
   };
 }
 

@@ -19,6 +19,9 @@ const assignmentCache = scopeGlobal.__staffAssignmentCache
 export type OrderActor = {
   role: "admin" | "accountant" | "staff" | "dealer";
   actorId: string;
+  isRsm?: boolean;
+  isAsm?: boolean;
+  userId?: string;
 };
 
 function safeText(value: unknown, max = 120) {
@@ -38,7 +41,7 @@ export function parseOrderActor(input: {
 
 export function orderActorFromAuth(actor: AuthActor): OrderActor | null {
   const rawRole = actor.role.toLowerCase();
-  const role = rawRole === "rsm" ? "staff" : rawRole;
+  const role = rawRole === "rsm" || rawRole === "asm" || rawRole === "sales_manager" ? "staff" : rawRole;
   if (role !== "admin" && role !== "accountant" && role !== "staff" && role !== "dealer") return null;
   const actorId = role === "staff"
     ? actor.staffId?.toString() ?? ""
@@ -46,7 +49,12 @@ export function orderActorFromAuth(actor: AuthActor): OrderActor | null {
       ? actor.dealerId?.toString() ?? ""
       : actor.profileId.toString();
   if ((role === "staff" || role === "dealer") && !actorId) return null;
-  return { role, actorId } as OrderActor;
+  return {
+    role,
+    actorId,
+    ...(rawRole === "rsm" ? { isRsm: true, userId: actor.userId?.toString() } : {}),
+    ...(rawRole === "asm" ? { isAsm: true } : {}),
+  } as OrderActor;
 }
 
 export async function fetchStaffAssignedDealerIds(staffId: string): Promise<string[]> {

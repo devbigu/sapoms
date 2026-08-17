@@ -30,6 +30,7 @@ function dealerPayloadFromSnapshot(snapshot: DealerFormSnapshot) {
     creditLimitPaise: snapshot.currentLimit,
     status: "ACTIVE",
     assignedStaffIds: snapshot.assignedStaffIds,
+    rsmUserId: snapshot.rsmUserId,
   };
 }
 function resolveMode(actor: DashboardActor | null, requestData: PublicDealerRequest | null): RequestMode | null {

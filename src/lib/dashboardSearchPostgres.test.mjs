@@ -28,8 +28,8 @@ test("dashboard search keeps role scopes and legacy response aliases", async () 
 
   assert.match(route, /actor\.role === "ADMIN" \|\| actor\.role === "ACCOUNTANT"/);
   assert.match(route, /actor\.role === "DEALER"[\s\S]*dealerId: actor\.dealerId/);
-  assert.match(route, /actor\.role === "STAFF"[\s\S]*assignedStaffId: actor\.staffId/);
-  assert.match(route, /actor\.role === "ADMIN" \|\| actor\.role === "STAFF"/);
+  assert.match(route, /isStaffLike\(actor\)[\s\S]*assignedStaffId: actor\.staffId/);
+  assert.match(route, /actor\.role === "ADMIN" \|\| isStaffLike\(actor\)/);
   assert.match(route, /staffAssignments: \{ some: \{ staffId: actor\.staffId/);
   assert.match(route, /dealerId: \{ in: assignedDealerIds \}/);
   assert.match(route, /actor\.role === "ACCOUNTANT"[\s\S]*Promise\.resolve\(\[\]\)/);

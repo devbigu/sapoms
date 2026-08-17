@@ -34,6 +34,16 @@ function buildWhere(input: AdminDealerListInput): Prisma.DealerProfileWhereInput
     });
   }
 
+  if (input.status) {
+    filters.push({ user: { status: input.status } });
+  }
+
+  if (input.wallet === "active") {
+    filters.push({ wallet: { is: { status: "ACTIVE" } } });
+  } else if (input.wallet === "inactive") {
+    filters.push({ OR: [{ wallet: { is: null } }, { wallet: { is: { status: "INACTIVE" } } }] });
+  }
+
   if (search) {
     filters.push({ OR: [
       { businessName: { contains: search, mode: "insensitive" } },
@@ -54,6 +64,7 @@ const staffAssignmentInclude = {
 
 const include = {
   user: { select: { id: true, email: true, username: true, status: true, deletedAt: true } },
+  wallet: { select: { status: true } },
   regionalManager: { select: { id: true, email: true, staffProfile: { select: { displayName: true, salesRegion: true } } } },
   staffAssignments: { where: { active: true }, include: staffAssignmentInclude, orderBy: { assignedAt: "desc" } },
 } satisfies Prisma.DealerProfileInclude;
@@ -88,7 +99,7 @@ function invalid(message: string, code = "INVALID_REQUEST", extra?: Record<strin
 
 async function ensureStaff(tx: Prisma.TransactionClient, staffIds: bigint[]) {
   if (staffIds.length === 0) return [];
-  const staff = await tx.staffProfile.findMany({ where: { id: { in: staffIds }, user: { role: { in: ["STAFF", "RSM"] }, status: "ACTIVE", deletedAt: null } }, include: { user: { select: { email: true, status: true, deletedAt: true } } } });
+  const staff = await tx.staffProfile.findMany({ where: { id: { in: staffIds }, user: { role: { in: ["STAFF", "RSM", "ASM"] }, status: "ACTIVE", deletedAt: null } }, include: { user: { select: { email: true, status: true, deletedAt: true } } } });
   const found = new Set(staff.map((row) => row.id.toString()));
   const missing = staffIds.map(String).filter((id) => !found.has(id));
   if (missing.length) throw notFound("One or more staff members were not found", "STAFF_NOT_FOUND", { staffIds: missing });
