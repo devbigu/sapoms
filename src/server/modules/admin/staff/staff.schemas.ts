@@ -31,6 +31,13 @@ const assignedStates = z.preprocess((value) => {
   return single ? [single] : [];
 }, z.array(z.string().min(1).max(100)).max(40).optional());
 
+const dateValue = z.preprocess((value) => {
+  if (value === undefined || value === null || String(value).trim() === "") return undefined;
+  const normalized = String(value).trim();
+  const parsed = new Date(normalized + "T00:00:00.000Z");
+  return Number.isNaN(parsed.getTime()) ? value : parsed;
+}, z.date().optional());
+
 function aliases(body: Record<string, unknown>) {
   return {
     name: body.name ?? body.staff_name ?? body.displayName,
@@ -39,6 +46,17 @@ function aliases(body: Record<string, unknown>) {
     role: body.role,
     designation: body.designation ?? body.staff_designation,
     location: body.location ?? body.staff_location,
+    mobileNo: body.mobileNo ?? body.mobile_no ?? body.staff_mobile_no,
+    alternateNo: body.alternateNo ?? body.alternate_no,
+    permanentAddress: body.permanentAddress ?? body.permanent_address,
+    localAddress: body.localAddress ?? body.local_address,
+    gender: body.gender,
+    dob: body.dob ?? body.date_of_birth,
+    nationality: body.nationality,
+    maritalStatus: body.maritalStatus ?? body.marital_status,
+    qualification: body.qualification,
+    emergencyContactNo1: body.emergencyContactNo1 ?? body.emergency_contact_no_1,
+    emergencyContactNo2: body.emergencyContactNo2 ?? body.emergency_contact_no_2,
     staffRoleType: body.staffRoleType ?? body.staff_roletype,
     salesRegion: body.salesRegion ?? body.region,
     parentRsmId: body.parentRsmId ?? body.parent_rsm_id ?? body.rsmId,
@@ -57,6 +75,17 @@ const baseStaffSchema = {
   role: z.preprocess((value) => String(value ?? "STAFF").trim().toUpperCase(), createRole),
   designation: text(100),
   location: text(100),
+  mobileNo: text(30),
+  alternateNo: text(30),
+  permanentAddress: text(1000),
+  localAddress: text(1000),
+  gender: text(20),
+  dob: dateValue,
+  nationality: text(100),
+  maritalStatus: text(40),
+  qualification: text(120),
+  emergencyContactNo1: text(30),
+  emergencyContactNo2: text(30),
   staffRoleType: text(30),
   salesRegion,
   parentRsmId: idText,

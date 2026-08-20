@@ -23,12 +23,14 @@ test("PostgreSQL order status service validates legal transitions and timestamps
 
 test("dealer staff and admin permissions are enforced from JWT/profile identity", () => {
   assert.match(source, /actor\.role === "ADMIN"/);
+  assert.match(source, /if \(actor\.role === "ADMIN"\) return/);
   assert.match(source, /actor\.role === "NSM"/);
   assert.match(source, /permission === "read" \|\| permission === "acceptance" \|\| permission === "fulfilment"/);
   assert.match(source, /isStaffLike\(actor\)/);
   assert.match(source, /order\.dealerId !== actor\.dealerId/);
   assert.match(source, /Dealers cannot perform staff-only order transitions/);
   assert.match(source, /dealerStaffAssignment\.findFirst/);
+  assert.match(source, /requiresRsmApprovalBeforeAcceptance\(actor\) && order\.rsmApprovalStatus !== "ACCEPTED"/);
   assert.match(source, /Staff, RSM, and ASM cannot cancel Dealer orders/);
   assert.match(source, /NSM cannot cancel Dealer orders/);
   assert.match(overlayRoute, /requireAuth\(\)/);
@@ -42,6 +44,16 @@ test("legacy accept_order and del_status remain response aliases only for Postgr
   assert.match(source, /del_status: legacyDelStatusAlias\(updated\.status\)/);
   assert.match(postgresOrders, /accept_order: legacyAcceptance\(order\.acceptanceStatus\)/);
   assert.match(postgresOrders, /del_status: legacyDeletion\(order\.status\)/);
+});
+
+test("RSM order headers include child staff hierarchy scope", () => {
+  assert.match(postgresOrders, /if \(actor\.isRsm && actor\.userId\) return buildRsmOrderWhere\(actor\)/);
+  assert.match(postgresOrders, /buildOrderRegionWhere\(\{ userId: BigInt\(actor\.userId!\), role: "RSM" \}/);
+  assert.match(postgresOrders, /parentRsmId: rsm\.id/);
+  assert.match(postgresOrders, /assignedStaffId: \{ in: childStaffIds \}/);
+  assert.match(postgresOrders, /prisma\.dealerStaffAssignment\.findMany/);
+  assert.match(postgresOrders, /staffId: \{ in: childStaffIds \}/);
+  assert.match(postgresOrders, /dealerId: \{ in: childDealerIds \}/);
 });
 
 test("PostgreSQL order mutations bypass PHP and Mongo status writes", () => {

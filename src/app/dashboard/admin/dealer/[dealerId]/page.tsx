@@ -1,8 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { Eye, EyeOff } from 'lucide-react'
+import {
+  Eye, EyeOff, ArrowLeft, User, KeyRound, Wallet,
+  ShieldCheck, Users, FileText, Search, Check, X, Loader2,
+} from 'lucide-react'
+
 type DealerStatus = "active" | "inactive" | "suspended"
 
 function normalizeDealerStatus(value: unknown): DealerStatus {
@@ -62,6 +66,20 @@ function splitCsv(value: unknown) {
   return String(value || "").split(",").map(s => s.trim()).filter(Boolean)
 }
 
+function SectionCard({
+  title, icon, children,
+}: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+      <div className="flex items-center gap-2 mb-5 pb-3 border-b border-gray-100">
+        <span className="text-indigo-500">{icon}</span>
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{title}</h2>
+      </div>
+      {children}
+    </div>
+  )
+}
+
 function InputField({
   label, value, onChange, type = "text", placeholder, required = true, hint,
 }: {
@@ -92,6 +110,21 @@ function InputField({
   )
 }
 
+const STATUS_STYLES: Record<DealerStatus, string> = {
+  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  inactive: "bg-gray-100 text-gray-500 border-gray-200",
+  suspended: "bg-red-50 text-red-600 border-red-200",
+}
+
+function StatusBadge({ status }: { status: DealerStatus }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${STATUS_STYLES[status]}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  )
+}
+
 export default function EditDealerPage() {
   const router = useRouter()
   const params = useParams()
@@ -101,7 +134,7 @@ export default function EditDealerPage() {
   const [isSaving,   setIsSaving]   = useState(false)
   const [toastMsg,   setToastMsg]   = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([])
-  const [selectedStaffToAdd, setSelectedStaffToAdd] = useState("")
+  const [staffSearch, setStaffSearch] = useState("")
 
   // Form fields
   const [name,           setName]           = useState("")
@@ -121,6 +154,7 @@ export default function EditDealerPage() {
   const [notes,          setNotes]          = useState("")
   const [dealerid,       setDealerid]       = useState("")
   const [status,         setStatus]         = useState<DealerStatus>("active")
+  const [walletStatus,   setWalletStatus]   = useState<"active" | "inactive">("inactive")
   const [statusSaving,   setStatusSaving]   = useState(false)
   const [showDiagnosticPassword, setShowDiagnosticPassword] = useState(false)
   const [diagnosticExpiryHours, setDiagnosticExpiryHours] = useState("24")
@@ -170,6 +204,7 @@ export default function EditDealerPage() {
           setAssignedStaffIds(initialStaffIds)
           setInitialAssignedStaffIds(initialStaffIds)
           setStatus(normalizeDealerStatus(d.status))
+          setWalletStatus(String(d.walletStatus || "").toLowerCase() === "active" ? "active" : "inactive")
         } else {
           setToastMsg({ text: json.msz || "Failed to load dealer", type: 'error' })
         }
@@ -212,9 +247,25 @@ export default function EditDealerPage() {
     return () => { active = false }
   }, [dealerId])
 
-  const handleStaffSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setAssignedStaffIds(Array.from(e.target.selectedOptions, o => o.value))
+  const toggleStaffId = (id: string) => {
+    setAssignedStaffIds(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id])
   }
+
+  const isWalletActive = walletStatus === "active"
+
+  const filteredStaffOptions = useMemo(() => {
+    const q = staffSearch.trim().toLowerCase()
+    if (!q) return staffOptions
+    return staffOptions.filter(s =>
+      s.staff_name.toLowerCase().includes(q) || staffRoleLabel(s).toLowerCase().includes(q)
+    )
+  }, [staffOptions, staffSearch])
+
+  const selectAllFiltered = () => {
+    setAssignedStaffIds(prev => Array.from(new Set([...prev, ...filteredStaffOptions.map(s => s.staff_id)])))
+  }
+
+  const clearAllStaff = () => setAssignedStaffIds([])
 
   // Derive staffname string from current selection (matches what AddDealerForm does)
   const getStaffNames = () =>
@@ -322,23 +373,27 @@ export default function EditDealerPage() {
     }
     setIsSaving(true)
     try {
+      const updateBody: Record<string, string> = {
+        businessName: name,
+        email,
+        phone: number,
+        city,
+        address,
+        pincode,
+        dealerCode: dealercode,
+        gstin: gst,
+        discountPercent: discount,
+      }
+      if (!isWalletActive) {
+        updateBody.creditDays = creditdays
+        updateBody.creditLimitPaise = currentlimit
+      }
+
       const updateResponse = await fetch(`${ADMIN_DEALERS_URL}/${encodeURIComponent(resolvedDealerId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          businessName: name,
-          email,
-          phone: number,
-          city,
-          address,
-          pincode,
-          dealerCode: dealercode,
-          gstin: gst,
-          discountPercent: discount,
-          creditDays: creditdays,
-          creditLimitPaise: currentlimit,
-        }),
+        body: JSON.stringify(updateBody),
       })
       const updatePayload = await updateResponse.json()
       if (!updateResponse.ok || !updatePayload.success) throw new Error(updatePayload.message ?? "Failed to update dealer")
@@ -367,7 +422,7 @@ export default function EditDealerPage() {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <Loader2 className="w-7 h-7 text-indigo-600 animate-spin" />
           <p className="text-sm text-gray-500">Loading dealer data...</p>
         </div>
       </div>
@@ -375,7 +430,7 @@ export default function EditDealerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 pb-28">
 
       {/* Toast */}
       {toastMsg && (
@@ -383,8 +438,8 @@ export default function EditDealerPage() {
           toastMsg.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-500 text-white'
         }`}>
           {toastMsg.type === 'success'
-            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
-            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+            ? <Check className="w-3.5 h-3.5" strokeWidth={2.5} />
+            : <X className="w-3.5 h-3.5" strokeWidth={2.5} />
           }
           {toastMsg.text}
         </div>
@@ -396,25 +451,25 @@ export default function EditDealerPage() {
         <div className="mb-8">
           <button
             onClick={() => router.push(DEALER_LIST_ROUTE)}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-4 transition"
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4 transition"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 12H5M12 5l-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <ArrowLeft className="w-4 h-4" strokeWidth={2} />
             Back to Dealer List
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">Edit Dealer</h1>
-          <p className="text-sm text-gray-500 mt-1">Update dealer information and settings</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-3xl font-bold text-gray-900">Edit Dealer</h1>
+            <StatusBadge status={status} />
+          </div>
+          <p className="text-sm text-gray-500 mt-1">
+            {name ? `Updating ${name}` : "Update dealer information and settings"}
+          </p>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div className="flex flex-col gap-6">
 
             {/* Basic Info */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Basic Information
-              </h2>
+            <SectionCard title="Basic Information" icon={<User className="w-4 h-4" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <InputField label="Name"             value={name}    onChange={setName}    placeholder="Full name" />
                 <InputField label="Email Address"    value={email}   onChange={setEmail}   type="email" placeholder="dealer@email.com" />
@@ -423,57 +478,60 @@ export default function EditDealerPage() {
                 <InputField label="Address"          value={address} onChange={setAddress} placeholder="Street address" />
                 <InputField label="Pin Code"         value={pincode} onChange={setPincode} type="number" placeholder="6-digit pin code" />
               </div>
-            </div>
+            </SectionCard>
 
             {/* Account & Auth */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Account &amp; Credentials
-              </h2>
+            <SectionCard title="Account & Credentials" icon={<KeyRound className="w-4 h-4" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <InputField label="Dealer Code" value={dealercode} onChange={setDealercode} placeholder="Unique dealer code" />
                 <InputField label="Username"    value={username}   onChange={setUsername}   placeholder="Login username" />
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-1.5 md:col-span-2 rounded-lg border border-gray-100 bg-gray-50/60 p-4">
                   <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
                     Diagnostic Password
                   </label>
-                  <div className="relative">
-                    <input
-                      type={showDiagnosticPassword ? "text" : "password"}
-                      value={diagnosticPassword}
-                      onChange={e => setDiagnosticPassword(e.target.value)}
-                      placeholder="Temporary testing password"
-                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowDiagnosticPassword(value => !value)}
-                      className="absolute inset-y-0 right-2 flex items-center rounded-md px-2 text-gray-400 transition hover:text-indigo-600"
-                      aria-label={showDiagnosticPassword ? "Hide diagnostic password" : "Show diagnostic password"}
-                      title={showDiagnosticPassword ? "Hide password" : "Show password"}
-                    >
-                      {showDiagnosticPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-start">
+                    <div className="relative">
+                      <input
+                        type={showDiagnosticPassword ? "text" : "password"}
+                        value={diagnosticPassword}
+                        onChange={e => setDiagnosticPassword(e.target.value)}
+                        placeholder="Temporary testing password"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowDiagnosticPassword(value => !value)}
+                        className="absolute inset-y-0 right-2 flex items-center rounded-md px-2 text-gray-400 transition hover:text-indigo-600"
+                        aria-label={showDiagnosticPassword ? "Hide diagnostic password" : "Show diagnostic password"}
+                        title={showDiagnosticPassword ? "Hide password" : "Show password"}
+                      >
+                        {showDiagnosticPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="2160"
+                        value={diagnosticExpiryHours}
+                        onChange={e => setDiagnosticExpiryHours(e.target.value)}
+                        aria-label="Diagnostic password expiry in hours"
+                        className="w-20 rounded-lg border border-gray-200 bg-white px-2 py-2.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <span className="text-[11px] text-gray-400 whitespace-nowrap">hrs</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="2160"
-                      value={diagnosticExpiryHours}
-                      onChange={e => setDiagnosticExpiryHours(e.target.value)}
-                      aria-label="Diagnostic password expiry in hours"
-                      className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <button type="button" onClick={copyDiagnosticPassword} disabled={!diagnosticPassword} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50">
+                  <div className="flex items-center gap-2 mt-1">
+                    <button type="button" onClick={copyDiagnosticPassword} disabled={!diagnosticPassword} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50">
                       Copy
                     </button>
-                    <button type="button" onClick={handleDiagnosticPasswordSave} disabled={diagnosticSaving || diagnosticPassword.length < 5} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
-                      {diagnosticSaving ? "Saving..." : "Save"}
+                    <button type="button" onClick={handleDiagnosticPasswordSave} disabled={diagnosticSaving || diagnosticPassword.length < 5} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-1.5">
+                      {diagnosticSaving && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {diagnosticSaving ? "Saving..." : "Save Password"}
                     </button>
                   </div>
                   {activeDiagnosticPassword ? (
-                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700 mt-1">
                       Active until {new Date(activeDiagnosticPassword.expiresAt).toLocaleString()}.
                       {activeDiagnosticPassword.lastUsedAt ? ` Last used ${new Date(activeDiagnosticPassword.lastUsedAt).toLocaleString()}.` : " Not used yet."}
                       <button type="button" onClick={handleDiagnosticPasswordRevoke} disabled={diagnosticRevoking} className="ml-2 font-semibold text-emerald-800 underline disabled:opacity-50">
@@ -481,138 +539,127 @@ export default function EditDealerPage() {
                       </button>
                     </div>
                   ) : (
-                    <p className="text-[11px] text-gray-400">Dealer original password remains unchanged. Expiry is in hours, from 1 to 2160.</p>
+                    <p className="text-[11px] text-gray-400 mt-1">Dealer&apos;s original password remains unchanged. Expiry is in hours, from 1 to 2160.</p>
                   )}
                 </div>
                 <InputField label="GST No."     value={gst}        onChange={setGst}        placeholder="15-character GST number" />
               </div>
-            </div>
+            </SectionCard>
 
             {/* Financial */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Financial Settings
-              </h2>
+            <SectionCard title={isWalletActive ? "Wallet / Advance Settings" : "Financial Settings"} icon={<Wallet className="w-4 h-4" />}>
+              {isWalletActive && (
+                <div className="mb-5 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  Wallet is active for this dealer. Credit days and current limit are managed by the wallet balance flow.
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <InputField label="Discount %"     value={discount}     onChange={setDiscount}     type="number" placeholder="e.g. 10" />
-                <InputField label="Credit Days"    value={creditdays}   onChange={setCreditdays}   type="number" placeholder="e.g. 30" />
                 <InputField label="Annual Target"  value={annualtarget} onChange={setAnnualtarget} type="number" placeholder="Amount in Rs" />
-                <InputField label="Current Limit"  value={currentlimit} onChange={setCurrentlimit} type="number" placeholder="Credit limit in Rs" />
-              </div>
-            </div>
-
-            {/* Status */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Account Status
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                    Dealer Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(normalizeDealerStatus(e.target.value))}
-                    className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                  <p className="text-[11px] text-gray-400">
-                    Inactive dealers will still remain in the list, but access checks will block the account.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleStatusSave}
-                    disabled={statusSaving}
-                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {statusSaving ? "Saving..." : "Save Status"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Staff Assignment */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Staff Assignment
-              </h2>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                  Assign Staff
-                  <span className="text-orange-500 ml-0.5">*</span>
-                  <span className="ml-2 text-gray-400 normal-case font-normal">(hold Ctrl / Cmd to select multiple)</span>
-                </label>
-                <div className="mt-2 flex gap-2 items-center">
-                  <select
-                    value={selectedStaffToAdd}
-                    onChange={(e) => setSelectedStaffToAdd(e.target.value)}
-                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none"
-                  >
-                    <option value="">Select staff to add</option>
-                    {staffOptions.map(staff => (
-                      <option key={staff.staff_id} value={staff.staff_id}>
-                        {staff.staff_name} ({staffRoleLabel(staff)})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!selectedStaffToAdd) return
-                      setAssignedStaffIds(prev => prev.includes(selectedStaffToAdd) ? prev : [...prev, selectedStaffToAdd])
-                      setSelectedStaffToAdd("")
-                    }}
-                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
-                  >
-                    Add
-                  </button>
-                </div>
-                <select
-                  multiple
-                  value={assignedStaffIds}
-                  onChange={handleStaffSelect}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition h-40"
-                >
-                  {staffOptions.map(staff => (
-                    <option key={staff.staff_id} value={staff.staff_id}>
-                      {staff.staff_name} ({staffRoleLabel(staff)})
-                    </option>
-                  ))}
-                </select>
-
-                {/* Selected staff chips */}
-                {assignedStaffIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {assignedStaffIds.map(sid => {
-                      const staff = staffOptions.find(s => s.staff_id === sid)
-                      return staff ? (
-                        <span key={sid} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs font-medium px-2.5 py-1 rounded-full border border-indigo-100">
-                          {staff.staff_name}
-                          <button
-                            type="button"
-                            onClick={() => setAssignedStaffIds(prev => prev.filter(s => s !== sid))}
-                            className="text-indigo-400 hover:text-indigo-700 ml-0.5"
-                          >
-                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                              <path d="M18 6 6 18M6 6l12 12"/>
-                            </svg>
-                          </button>
-                        </span>
-                      ) : null
-                    })}
-                  </div>
+                {!isWalletActive && (
+                  <>
+                    <InputField label="Credit Days"    value={creditdays}   onChange={setCreditdays}   type="number" placeholder="e.g. 30" />
+                    <InputField label="Current Limit"  value={currentlimit} onChange={setCurrentlimit} type="number" placeholder="Credit limit in Rs" />
+                  </>
                 )}
               </div>
-            </div>
+            </SectionCard>
+
+            {/* Status */}
+            <SectionCard title="Account Status" icon={<ShieldCheck className="w-4 h-4" />}>
+              <div className="flex flex-col gap-3 max-w-sm">
+                <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+                  Dealer Status
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(normalizeDealerStatus(e.target.value))}
+                  className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+                <p className="text-[11px] text-gray-400">
+                  Inactive dealers will still remain in the list, but access checks will block the account.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleStatusSave}
+                  disabled={statusSaving}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 w-fit"
+                >
+                  {statusSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {statusSaving ? "Saving..." : "Save Status"}
+                </button>
+              </div>
+            </SectionCard>
+
+            {/* Staff Assignment */}
+            <SectionCard title="Staff Assignment" icon={<Users className="w-4 h-4" />}>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">
+                    Assign Staff
+                    <span className="text-orange-500 ml-0.5">*</span>
+                  </label>
+                  <span className="text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                    {assignedStaffIds.length} selected
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={staffSearch}
+                    onChange={e => setStaffSearch(e.target.value)}
+                    placeholder="Search staff by name or role..."
+                    className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3 text-xs">
+                  <button type="button" onClick={selectAllFiltered} className="text-indigo-600 font-medium hover:underline">
+                    Select all{staffSearch ? " (filtered)" : ""}
+                  </button>
+                  <span className="text-gray-300">|</span>
+                  <button type="button" onClick={clearAllStaff} className="text-gray-500 font-medium hover:underline">
+                    Clear all
+                  </button>
+                </div>
+
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-72 overflow-y-auto">
+                  {filteredStaffOptions.length === 0 && (
+                    <p className="text-sm text-gray-400 px-3 py-6 text-center">No staff match your search.</p>
+                  )}
+                  {filteredStaffOptions.map(staff => {
+                    const checked = assignedStaffIds.includes(staff.staff_id)
+                    return (
+                      <label
+                        key={staff.staff_id}
+                        className={`flex items-center gap-3 px-3 py-2.5 text-sm cursor-pointer transition ${
+                          checked ? "bg-indigo-50/70" : "hover:bg-gray-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleStaffId(staff.staff_id)}
+                          className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-gray-900">{staff.staff_name}</span>
+                        <span className="ml-auto text-[11px] text-gray-400 border border-gray-200 rounded-full px-2 py-0.5">
+                          {staffRoleLabel(staff)}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            </SectionCard>
 
             {/* Notes */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-5 pb-3 border-b border-gray-100">
-                Notes
-              </h2>
+            <SectionCard title="Notes" icon={<FileText className="w-4 h-4" />}>
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-medium text-gray-600 uppercase tracking-wide">Internal Notes</label>
                 <textarea
@@ -623,29 +670,27 @@ export default function EditDealerPage() {
                   className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-none"
                 />
               </div>
-            </div>
+            </SectionCard>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pb-6">
-              <button
-                type="button"
-                onClick={() => router.push(DEALER_LIST_ROUTE)}
-                className="px-5 py-2.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="flex items-center gap-2 px-6 py-2.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition font-medium"
-              >
-                {isSaving && (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
-                {isSaving ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
+          </div>
 
+          {/* Sticky actions bar */}
+          <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3 z-40">
+            <button
+              type="button"
+              onClick={() => router.push(DEALER_LIST_ROUTE)}
+              className="px-5 py-2.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="flex items-center gap-2 px-6 py-2.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition font-medium"
+            >
+              {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isSaving ? "Saving..." : "Save Changes"}
+            </button>
           </div>
         </form>
       </div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { invalidatePendingProductsCache } from "@/lib/pendingProducts";
 import { requireAuth } from "@/server/auth/session";
+import { serializePrismaValue } from "@/server/db/prisma-serialize";
 import { normalizeFulfilmentStatus, PostgresOrderStatusError } from "@/lib/postgresOrderStatus";
 import { applyPostgresOrderDispatch, findPostgresOrderDispatchPayload, mapPostgresDispatchRecordForResponse } from "@/lib/postgresOrderDispatch";
 
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     invalidatePendingProductsCache();
-    return NextResponse.json({ success: true, data: updated.records, order: updated.order, failures: [] }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(serializePrismaValue({ success: true, data: updated.records, order: updated.order, failures: [] }), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/order-dispatch]", error);
     return errorResponse(error, "Failed to save dispatch details");

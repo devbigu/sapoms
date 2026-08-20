@@ -238,10 +238,10 @@ test("Dealer cannot update dispatch", () => {
   ), false);
 });
 
-test("Multi-item dispatch is Staff-only and still requires assignment and accepted order access", () => {
+test("Multi-item dispatch allows admin or assigned staff and still requires accepted order access", () => {
   const context = { dealerId: "225", assignedStaffId: "77", acceptOrder: "1", delStatus: "0" };
   assert.equal(dispatch.canUserBulkDispatch({ role: "staff", id: "77" }, context), true);
-  assert.equal(dispatch.canUserBulkDispatch({ role: "admin", id: "1" }, context), false);
+  assert.equal(dispatch.canUserBulkDispatch({ role: "admin", id: "1" }, context), true);
   assert.equal(dispatch.canUserBulkDispatch({ role: "dealer", id: "225" }, context), false);
   assert.equal(dispatch.canUserBulkDispatch({ role: "staff", id: "90" }, context), false);
   assert.equal(dispatch.canUserBulkDispatch({ role: "staff", id: "77" }, { ...context, acceptOrder: "0" }), false);
@@ -512,7 +512,7 @@ test("UI uses shared dispatch helper and API delegates to PostgreSQL dispatch se
   assert.match(apiSource, /findPostgresOrderDispatchPayload/);
 });
 
-test("Order details page wires the Staff-only selected-products dispatch flow", async () => {
+test("Order details page wires the selected-products dispatch flow", async () => {
   const source = await fs.readFile(orderDetailPath, "utf8");
   assert.match(source, /canUserBulkDispatch/);
   assert.match(source, /buildBulkDispatchPlan\(displayOrders\)/);

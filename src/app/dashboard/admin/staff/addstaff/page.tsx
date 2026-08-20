@@ -161,32 +161,42 @@ export default function AddStaffPage() {
   }
   const toggleState = (state: string) => setAssignedStates((current) => current.includes(state) ? current.filter((entry) => entry !== state) : [...current, state].sort((a, b) => a.localeCompare(b)))
 
+  const createStaffRequest = () => fetch('/api/admin/staff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      name, designation, location, email,
+      mobileNo, alternateNo, permanentAddress, localAddress,
+      gender, dob, nationality, maritalStatus, qualification,
+      emergencyContactNo1, emergencyContactNo2,
+      password,
+      role: selectedRoleRef(),
+      staffRoleType: selectedStaffRoleTypeRef(),
+      salesRegion: selectedAuthRoleRef() === 'RSM' ? salesRegion : undefined,
+      parentRsmId: role === 'ASM' || role === 'FIELD_EXECUTIVE' ? parentRsmId : undefined,
+      parentAsmId: role === 'EXECUTIVE' ? parentAsmId : undefined,
+      assignedStates: role === 'ASM' || role === 'RSM' ? assignedStates : undefined,
+    }),
+  })
+
+  const selectedRoleRef = () => getRoleOption(role)?.authRole
+  const selectedStaffRoleTypeRef = () => getRoleOption(role)?.staffRoleType
+  const selectedAuthRoleRef = () => getRoleOption(role)?.authRole
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const selectedRole = getRoleOption(role)
     if (!selectedRole) return
     setIsSaving(true)
     try {
-      const response = await fetch('/api/admin/staff', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          name, designation, location, email,
-          mobileNo, alternateNo, permanentAddress, localAddress,
-          gender, dob, nationality, maritalStatus, qualification,
-          emergencyContactNo1, emergencyContactNo2,
-          password,
-          role: selectedRole.authRole,
-          staffRoleType: selectedRole.staffRoleType,
-          salesRegion: selectedRole.authRole === 'RSM' ? salesRegion : undefined,
-          parentRsmId: role === 'ASM' || role === 'FIELD_EXECUTIVE' ? parentRsmId : undefined,
-          parentAsmId: role === 'EXECUTIVE' ? parentAsmId : undefined,
-          assignedStates: role === 'ASM' || role === 'RSM' ? assignedStates : undefined,
-        }),
-      })
+      let response = await createStaffRequest()
+      if (response.status === 401) {
+        const refreshResponse = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' })
+        if (refreshResponse.ok) response = await createStaffRequest()
+      }
       const payload = await response.json().catch(() => null)
-      if (!response.ok || payload?.success === false) throw new Error(payload?.message || 'Failed to add user')
+      if (!response.ok || payload?.success === false) throw new Error(payload?.message || (response.status === 401 ? 'Session expired. Please sign in again.' : 'Failed to add user'))
       showToast(selectedRole.successMessage, 'success')
       resetForm()
       router.push('/dashboard/admin/staff/stafflist')

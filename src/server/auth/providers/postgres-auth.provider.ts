@@ -41,6 +41,55 @@ function displayNameFromProfile(profile: Record<string, unknown>, role: AuthRole
   return "";
 }
 
+function toAuthenticatedPostgresUser(
+  user: NonNullable<Awaited<ReturnType<typeof findPostgresUserByEmail>>>,
+  diagnosticPasswordId?: bigint,
+): AuthenticatedPostgresUser {
+  const profile = mapPostgresUserToLegacyProfile(user);
+  const profileId = getProfileId(user);
+
+  return {
+    userId: user.id,
+    role: user.role,
+    email: user.email,
+    displayName: displayNameFromProfile(profile, user.role),
+    tokenVersion: user.tokenVersion,
+    profileId,
+    profile,
+    diagnosticPasswordId,
+  };
+}
+
+function findPostgresUserByEmail(email: string) {
+  return prisma.user.findFirst({
+    where: { normalizedEmail: normalizeEmail(email) },
+    include: {
+      adminProfile: true,
+      accountantProfile: true,
+      staffProfile: {
+        select: {
+          id: true,
+          displayName: true,
+          designation: true,
+          location: true,
+          staffRoleType: true,
+          salesRegion: true,
+        },
+      },
+      dealerProfile: true,
+    },
+  });
+}
+
+export async function findActivePostgresUserByEmail(email: string): Promise<AuthenticatedPostgresUser> {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) throw new Error("Invalid credentials");
+
+  const user = await findPostgresUserByEmail(normalizedEmail);
+  if (!user || user.deletedAt || user.status !== "ACTIVE") throw new Error("Invalid credentials");
+
+  return toAuthenticatedPostgresUser(user);
+}
 export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticationProvider {
   async authenticate(input: { email: string; password: string; roleType?: string }): Promise<AuthenticatedPostgresUser> {
     const loginIdentifier = normalizeLoginIdentifier(input.email);
@@ -60,7 +109,16 @@ export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticat
       include: {
         adminProfile: true,
         accountantProfile: true,
-        staffProfile: true,
+        staffProfile: {
+          select: {
+            id: true,
+            displayName: true,
+            designation: true,
+            location: true,
+            staffRoleType: true,
+            salesRegion: true,
+          },
+        },
         dealerProfile: true,
       },
     });
@@ -96,19 +154,7 @@ export class PrismaPostgresAuthenticationProvider implements PostgresAuthenticat
       if (!diagnosticPasswordId) throw new Error("Invalid credentials");
     }
 
-    const profile = mapPostgresUserToLegacyProfile(user);
-    const profileId = getProfileId(user);
-
-    return {
-      userId: user.id,
-      role: user.role,
-      email: user.email,
-      displayName: displayNameFromProfile(profile, user.role),
-      tokenVersion: user.tokenVersion,
-      profileId,
-      profile,
-      diagnosticPasswordId,
-    };
+    return toAuthenticatedPostgresUser(user, diagnosticPasswordId);
   }
 }
 

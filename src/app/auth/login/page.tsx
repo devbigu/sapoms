@@ -2,19 +2,24 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import { Eye, EyeOff } from "lucide-react"
-import { persistAuthenticatedSession } from "@/lib/roleAccess"
+import { Eye, EyeOff, Mail, RotateCcw } from "lucide-react"
+import { persistAuthenticatedSession, type StoredUser } from "@/lib/roleAccess"
 
 
 const LOGO_SRC = "/omsons_logo.jpeg"
 
 export default function Login() {
   const router = useRouter()
+  const emailOtpEnabled = process.env.NEXT_PUBLIC_ENABLE_EMAIL_OTP === "true"
 
   const [showNotice, setShowNotice] = useState(true)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPw, setShowPw] = useState(false)
+  const [otpMode, setOtpMode] = useState(false)
+  const [otpRequested, setOtpRequested] = useState(false)
+  const [otpCode, setOtpCode] = useState("")
+  const [otpLoading, setOtpLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
@@ -35,6 +40,28 @@ export default function Login() {
       window.removeEventListener("keydown", handleKeyDown)
     }
   }, [showNotice])
+
+  const completeLogin = (userData: StoredUser) => {
+    const session = persistAuthenticatedSession(localStorage, userData)
+    if (!session || session.status !== "authenticated") {
+      setError("Invalid credentials")
+      return
+    }
+
+    const clientRole = session.role
+    window.dispatchEvent(new Event("omsons-auth-changed"))
+
+    setEmail("")
+    setPassword("")
+    setOtpCode("")
+    setOtpMode(false)
+    setOtpRequested(false)
+
+    if (clientRole === "staff") router.push("/dashboard/staff")
+    else if (clientRole === "dealer") router.push("/home")
+    else if (clientRole === "admin") router.push("/dashboard/admin")
+    else if (clientRole === "accountant") router.push("/dashboard/accountant")
+  }
 
   const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -61,22 +88,7 @@ export default function Login() {
       const failureMessage = typeof data?.message === "string" ? data.message : "Invalid credentials"
 
       if (res.ok && data?.status) {
-        const userData = data.data || { email }
-        const session = persistAuthenticatedSession(localStorage, userData)
-        if (!session || session.status !== "authenticated") {
-          setError("Invalid credentials")
-          return
-        }
-        const clientRole = session.role
-        window.dispatchEvent(new Event("omsons-auth-changed"))
-
-        setEmail("")
-        setPassword("")
-
-        if (clientRole === "staff") router.push("/dashboard/staff")
-        else if (clientRole === "dealer") router.push("/home")
-        else if (clientRole === "admin") router.push("/dashboard/admin")
-        else if (clientRole === "accountant") router.push("/dashboard/accountant")
+        completeLogin(data.data || { email })
       } else {
         setError(failureMessage)
       }
@@ -89,6 +101,65 @@ export default function Login() {
     }
   }
 
+  const handleRequestOtp = async () => {
+    setError("")
+    if (!email) {
+      setError("Email is required")
+      return
+    }
+
+    try {
+      setOtpLoading(true)
+      const res = await fetch("/api/auth/email-otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+        credentials: "include",
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(typeof data?.message === "string" ? data.message : "Unable to send verification code")
+        return
+      }
+      setOtpMode(true)
+      setOtpRequested(true)
+    } catch (err: unknown) {
+      console.error("OTP request error:", err)
+      setError("Server error")
+    } finally {
+      setOtpLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    setError("")
+    if (!email || !otpCode) {
+      setError("Email and verification code are required")
+      return
+    }
+
+    try {
+      setOtpLoading(true)
+      const res = await fetch("/api/auth/email-otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: otpCode }),
+        credentials: "include",
+      })
+      const data = await res.json().catch(() => ({}))
+      const failureMessage = typeof data?.message === "string" ? data.message : "Invalid verification code"
+      if (res.ok && data?.status) {
+        completeLogin(data.data || { email })
+      } else {
+        setError(failureMessage)
+      }
+    } catch (err: unknown) {
+      console.error("OTP verify error:", err)
+      setError("Server error")
+    } finally {
+      setOtpLoading(false)
+    }
+  }
   return (
     <main className="h-screen overflow-hidden text-slate-950">
       <div className="flex h-full w-full">
@@ -186,6 +257,74 @@ export default function Login() {
               >
                 {loading ? "Signing in..." : "Login"}
               </button>
+
+              {emailOtpEnabled && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+                    <span className="h-px flex-1 bg-slate-100" />
+                    <span>OR</span>
+                    <span className="h-px flex-1 bg-slate-100" />
+                  </div>
+
+                  {!otpMode && (
+                    <button
+                      type="button"
+                      onClick={handleRequestOtp}
+                      disabled={otpLoading}
+                      className="flex h-10 w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-[13px] font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-[#593df4] hover:text-[#4b31de] active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <Mail size={15} />
+                      {otpLoading ? "Sending code..." : "Login with Email OTP"}
+                    </button>
+                  )}
+
+                  {otpMode && (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-[12px] font-semibold text-slate-700">Verification Code</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]{6}"
+                          maxLength={6}
+                          placeholder="000000"
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          className="h-10 w-full rounded-full border border-slate-200 bg-white px-5 text-center text-[15px] font-bold tracking-[0.18em] text-slate-900 shadow-sm outline-none transition placeholder:text-slate-300 focus:border-[#5b3ff2] focus:ring-4 focus:ring-[#5b3ff2]/10"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={handleVerifyOtp}
+                        disabled={otpLoading || !otpRequested}
+                        className="h-10 w-full rounded-full bg-[#593df4] px-4 text-[13px] font-bold text-white shadow-[0_14px_28px_rgba(89,61,244,0.28)] transition hover:-translate-y-0.5 hover:bg-[#4b31de] active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {otpLoading ? "Verifying..." : "Verify & Login"}
+                      </button>
+
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => { setOtpMode(false); setOtpCode(""); setError("") }}
+                          className="text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                        >
+                          Use Password
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRequestOtp}
+                          disabled={otpLoading}
+                          className="flex items-center gap-1.5 text-[11px] font-semibold text-[#4f35dc] hover:text-[#321fbd] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <RotateCcw size={12} />
+                          Resend Code
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
 {/* Footer */}
               <p className="mt-4 text-center text-[11px] text-slate-300">

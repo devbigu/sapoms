@@ -260,7 +260,7 @@ export function mapPostgresOrderToLegacy(order: PostgresOrderLike) {
 
 async function actorWhere(actor: OrdersActor, assignedDealerIds: Array<string | number> = []): Promise<Prisma.OrderWhereInput> {
   if (actor.role === "dealer") return { dealerId: BigInt(actor.actorId) };
-  if (actor.isRsm && actor.userId) return buildOrderRegionWhere({ userId: BigInt(actor.userId), role: "RSM" }, undefined, prisma);
+  if (actor.isRsm && actor.userId) return buildRsmOrderWhere(actor);
   if (actor.role === "staff") {
     const assignedDealerBigInts = assignedDealerIds
       .map((id) => String(id ?? "").trim())
@@ -275,6 +275,50 @@ async function actorWhere(actor: OrdersActor, assignedDealerIds: Array<string | 
     return actor.isAsm ? staffScope : { rsmApprovalStatus: "ACCEPTED", ...staffScope };
   }
   return {};
+}
+
+async function buildRsmOrderWhere(actor: OrdersActor): Promise<Prisma.OrderWhereInput> {
+  const regionWhere = await buildOrderRegionWhere({ userId: BigInt(actor.userId!), role: "RSM" }, undefined, prisma);
+  const hierarchyWhere = await buildRsmChildStaffOrderWhere(actor);
+  return hierarchyWhere ? { OR: [regionWhere, hierarchyWhere] } : regionWhere;
+}
+
+async function buildRsmChildStaffOrderWhere(actor: OrdersActor): Promise<Prisma.OrderWhereInput | null> {
+  const rsm = await prisma.staffProfile.findFirst({
+    where: {
+      userId: BigInt(actor.userId!),
+      user: { role: "RSM", status: "ACTIVE", deletedAt: null },
+    },
+    select: { id: true },
+  });
+  if (!rsm) return null;
+
+  const childStaff = await prisma.staffProfile.findMany({
+    where: {
+      parentRsmId: rsm.id,
+      user: { status: "ACTIVE", deletedAt: null },
+    },
+    select: { id: true },
+  });
+  const childStaffIds = childStaff.map((staff) => staff.id);
+  if (childStaffIds.length === 0) return null;
+
+  const childDealerAssignments = await prisma.dealerStaffAssignment.findMany({
+    where: {
+      active: true,
+      staffId: { in: childStaffIds },
+      dealer: { deletedAt: null, user: { status: "ACTIVE", deletedAt: null } },
+    },
+    select: { dealerId: true },
+  });
+  const childDealerIds = childDealerAssignments.map((assignment) => assignment.dealerId);
+
+  return {
+    OR: [
+      { assignedStaffId: { in: childStaffIds } },
+      ...(childDealerIds.length > 0 ? [{ dealerId: { in: childDealerIds } }] : []),
+    ],
+  };
 }
 
 export async function listPostgresOrderHeaders(actor: OrdersActor, assignedDealerIds: Array<string | number> = []) {

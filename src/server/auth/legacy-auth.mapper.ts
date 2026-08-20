@@ -36,7 +36,7 @@ export function mapAccountantProfile(user: UserLike, profile: AccountantProfile)
   });
 }
 
-export function mapStaffProfile(user: UserLike, profile: StaffProfile) {
+export function mapStaffProfile(user: UserLike, profile: Pick<StaffProfile, "id" | "displayName" | "designation" | "location" | "staffRoleType" | "salesRegion">) {
   const staffRoleType = profile.staffRoleType ?? (user.role === "STAFF" ? "1" : user.role);
   return sanitizeLegacyProfile({
     staff_id: profile.id.toString(),
@@ -72,7 +72,7 @@ export function mapDealerProfile(user: UserLike, profile: DealerProfile) {
 export function mapPostgresUserToLegacyProfile(user: User & {
   adminProfile?: AdminProfile | null;
   accountantProfile?: AccountantProfile | null;
-  staffProfile?: StaffProfile | null;
+  staffProfile?: Pick<StaffProfile, "id" | "displayName" | "designation" | "location" | "staffRoleType" | "salesRegion"> | null;
   dealerProfile?: DealerProfile | null;
 }) {
   switch (user.role as AuthRole) {

@@ -553,686 +553,801 @@ function AdminDashboardInner() {
   return (
     <>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { font-family: 'DM Sans', sans-serif; }
-        .root { min-height: 100vh; background: #f0f2f5; color: #111827; font-family: 'DM Sans', sans-serif; }
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        button, input { font: inherit; }
 
-        /* ── Sidebar ─────────────────────────────── */
-        .sidebar {
-          position: fixed;
-          top: 0; left: 0; bottom: 0;
-          width: 256px;
-          z-index: 40;
-          background: #0d0c16;
+        :root {
+          --apple-bg: #f5f5f7;
+          --apple-surface: rgba(255, 255, 255, 0.88);
+          --apple-surface-solid: #ffffff;
+          --apple-text: #1d1d1f;
+          --apple-secondary: #6e6e73;
+          --apple-tertiary: #8e8e93;
+          --apple-blue: #007aff;
+          --apple-green: #34c759;
+          --apple-orange: #ff9500;
+          --apple-red: #ff3b30;
+          --apple-purple: #af52de;
+          --apple-line: rgba(60, 60, 67, 0.11);
+          --apple-shadow: 0 1px 2px rgba(0,0,0,.02), 0 10px 34px rgba(0,0,0,.045);
+        }
+
+        .root {
+          min-height: 100vh;
+          background:
+            radial-gradient(circle at 12% -10%, rgba(0, 122, 255, .055), transparent 28%),
+            var(--apple-bg);
+          color: var(--apple-text);
+          font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+          -webkit-font-smoothing: antialiased;
+          text-rendering: optimizeLegibility;
+        }
+
+        .dashboard-shell {
+          width: min(100%, 1480px);
+          margin: 0 auto;
+          padding: 38px 34px 48px;
+        }
+
+        .dashboard-header {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 24px;
+          margin-bottom: 30px;
+        }
+
+        .eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--apple-blue);
+          font-size: 12px;
+          line-height: 1;
+          font-weight: 650;
+          margin-bottom: 10px;
+        }
+
+        .eyebrow-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: var(--apple-blue);
+          box-shadow: 0 0 0 4px rgba(0, 122, 255, .09);
+        }
+
+        .page-title {
+          margin: 0;
+          font-size: clamp(32px, 4vw, 46px);
+          line-height: 1.02;
+          letter-spacing: -.045em;
+          font-weight: 720;
+          color: var(--apple-text);
+        }
+
+        .page-subtitle {
+          max-width: 620px;
+          margin: 10px 0 0;
+          color: var(--apple-secondary);
+          font-size: 15px;
+          line-height: 1.45;
+          letter-spacing: -.01em;
+        }
+
+        .profile-chip {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          flex-shrink: 0;
+          padding: 7px 9px 7px 7px;
+          border: 1px solid rgba(60, 60, 67, .09);
+          background: rgba(255,255,255,.72);
+          box-shadow: 0 4px 18px rgba(0,0,0,.035);
+          backdrop-filter: saturate(180%) blur(18px);
+          border-radius: 999px;
+        }
+
+        .profile-avatar {
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          background: linear-gradient(145deg, #1d1d1f, #52525a);
+          color: #fff;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: -.02em;
+        }
+
+        .profile-copy { min-width: 0; padding-right: 5px; }
+        .profile-name {
+          max-width: 180px;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          color: var(--apple-text);
+          font-size: 12px;
+          font-weight: 650;
+        }
+        .profile-role {
+          color: var(--apple-tertiary);
+          font-size: 10.5px;
+          margin-top: 1px;
+        }
+
+        .section-label {
+          margin: 0 0 12px 2px;
+          color: var(--apple-secondary);
+          font-size: 12px;
+          font-weight: 650;
+          letter-spacing: .01em;
+        }
+
+        .summary-error {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 16px;
+          padding: 12px 14px;
+          border: 1px solid rgba(255, 59, 48, .16);
+          background: rgba(255,255,255,.8);
+          border-radius: 16px;
+          color: #b42318;
+          font-size: 13px;
+        }
+
+        .retry-button {
+          margin-left: auto;
+          border: 0;
+          background: transparent;
+          color: var(--apple-blue);
+          cursor: pointer;
+          font-weight: 650;
+          padding: 4px 7px;
+        }
+
+        .metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(12, minmax(0, 1fr));
+          gap: 14px;
+          margin-bottom: 30px;
+        }
+
+        .metric-card,
+        .panel {
+          background: var(--apple-surface);
+          border: 1px solid rgba(60, 60, 67, .075);
+          box-shadow: var(--apple-shadow);
+          backdrop-filter: saturate(180%) blur(20px);
+        }
+
+        .metric-card {
+          grid-column: span 3;
+          min-height: 158px;
+          padding: 20px 21px;
+          border-radius: 22px;
+          position: relative;
+          overflow: hidden;
+          transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+        }
+
+        .metric-card:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 1px 2px rgba(0,0,0,.02), 0 14px 38px rgba(0,0,0,.055);
+        }
+
+        .metric-card.wide { grid-column: span 6; }
+
+        .metric-label {
+          color: var(--apple-secondary);
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: -.005em;
+        }
+
+        .metric-value {
+          margin-top: 12px;
+          color: var(--apple-text);
+          font-size: clamp(28px, 3.2vw, 38px);
+          line-height: 1;
+          font-weight: 700;
+          letter-spacing: -.045em;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .metric-meta {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px 12px;
+          margin-top: 15px;
+          color: var(--apple-secondary);
+          font-size: 11.5px;
+          line-height: 1.35;
+        }
+
+        .status-inline {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          white-space: nowrap;
+        }
+
+        .status-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: var(--apple-tertiary);
+        }
+        .status-dot.green { background: var(--apple-green); }
+        .status-dot.orange { background: var(--apple-orange); }
+        .status-dot.red { background: var(--apple-red); }
+        .status-dot.blue { background: var(--apple-blue); }
+        .status-dot.purple { background: var(--apple-purple); }
+
+        .metric-link {
+          color: var(--apple-blue);
+          text-decoration: none;
+          font-size: 11.5px;
+          font-weight: 620;
+          white-space: nowrap;
+        }
+        .metric-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+        .exposure-card {
           display: flex;
           flex-direction: column;
-          transform: translateX(-100%);
-          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-          will-change: transform;
+          min-height: 158px;
         }
-        .sidebar.open { transform: translateX(0); }
 
-        .sb-head { padding: 26px 22px 18px; border-bottom: 1px solid rgba(255,255,255,0.07); }
-        .sb-chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 20px; background: rgba(99,102,241,0.16); color: #818cf8; font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 10px; }
-        .sb-title { font-size: 17px; font-weight: 600; color: #fff; letter-spacing: -.3px; }
+        .exposure-list {
+          display: flex;
+          flex-direction: column;
+          margin-top: 12px;
+          min-width: 0;
+        }
 
-        .sb-user { margin: 14px 14px 0; padding: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; }
-        .sb-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg,#6366f1,#a78bfa); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 8px; }
-        .sb-uname { font-size: 13px; font-weight: 600; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .sb-meta  { font-size: 10.5px; color: #475569; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .sb-role  { margin-top: 6px; display: inline-block; font-size: 10px; font-family: 'DM Mono', monospace; background: rgba(99,102,241,0.18); color: #a5b4fc; padding: 2px 8px; border-radius: 6px; }
+        .exposure-row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 14px;
+          min-height: 29px;
+          border-top: 1px solid var(--apple-line);
+          color: var(--apple-text);
+          font-size: 11.5px;
+        }
+        .exposure-row:first-child { border-top: 0; }
+        .exposure-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--apple-secondary); }
+        .exposure-row strong { font-weight: 650; font-variant-numeric: tabular-nums; }
 
-        .sb-nav { flex: 1; padding: 10px; margin-top: 10px; overflow-y: auto; }
-        .sb-link { display: flex; align-items: center; gap: 11px; padding: 10px 13px; border-radius: 11px; font-size: 13.5px; font-weight: 500; color: #64748b; text-decoration: none; margin-bottom: 2px; transition: background .16s, color .16s; }
-        .sb-link:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
-        .sb-link.active { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+        .analytics-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.55fr) minmax(330px, .9fr);
+          gap: 16px;
+          margin-bottom: 16px;
+        }
 
-        .sb-foot { padding: 14px; border-top: 1px solid rgba(255,255,255,0.07); }
-        .sb-logout { width: 100%; padding: 9px 14px; border-radius: 11px; background: transparent; border: 1px solid rgba(255,255,255,0.09); font-size: 13px; font-weight: 500; color: #475569; cursor: pointer; font-family: inherit; transition: all .16s; }
-        .sb-logout:hover { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.28); color: #f87171; }
+        .charts-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
+          margin-bottom: 16px;
+        }
 
-        /* ── Overlay ─────────────────────────────── */
-        .overlay { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.5); backdrop-filter: blur(3px); opacity: 0; pointer-events: none; transition: opacity .28s; }
-        .overlay.show { opacity: 1; pointer-events: all; }
+        .panel {
+          border-radius: 24px;
+          padding: 22px;
+          min-width: 0;
+        }
 
-        /* ── Main ────────────────────────────────── */
-        .main { transition: padding-left .28s cubic-bezier(.4,0,.2,1); }
+        .panel-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 18px;
+          margin-bottom: 18px;
+        }
 
-        /* ── Topbar ──────────────────────────────── */
-        .topbar { position: sticky; top: 0; z-index: 20; height: 62px; padding: 0 22px; background: linear-gradient(to right, #1f4b8dff, #0d0c16); backdrop-filter: blur(18px); border-bottom: 1px solid #e0e3e8; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-        .topbar-l { display: flex; align-items: center; gap: 13px; min-width: 0; }
-        .hamburger { flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px; border: 1px solid #dde1e8; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #374151; transition: background .15s; }
-        .hamburger:hover { background: #f3f4f6; }
-        .topbar-title { font-size: 15px; font-weight: 600; color: #ffffffff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .topbar-sub   { font-size: 11px; color: #ffffffff; letter-spacing: .04em; margin-top: 1px; }
-        .btn-add { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 22px; background: #0d0c16; color: #fff; font-size: 13px; font-weight: 500; text-decoration: none; transition: opacity .16s, transform .16s; white-space: nowrap; }
-        .btn-add:hover { opacity: .82; transform: translateY(-1px); }
+        .panel-title {
+          color: var(--apple-text);
+          font-size: 16px;
+          line-height: 1.2;
+          font-weight: 680;
+          letter-spacing: -.022em;
+        }
 
-        /* ── Content ─────────────────────────────── */
-        .content { padding: 24px 22px; width: min(100%, 80vw); max-width: none; margin: 0 auto; }
+        .panel-sub {
+          margin-top: 4px;
+          color: var(--apple-secondary);
+          font-size: 11.5px;
+          line-height: 1.35;
+        }
 
-        /* ── Stat Cards ──────────────────────────── */
-        .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
-        .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 18px; padding: 18px 20px; transition: box-shadow .2s, transform .2s; }
-        .stat-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.07); transform: translateY(-2px); }
-        .stat-lbl { font-size: 10px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: .1em; margin-bottom: 8px; }
-        .stat-val { font-size: 28px; font-weight: 700; color: #111827; letter-spacing: -.03em; font-family: 'DM Mono', monospace; line-height: 1; }
-        .stat-badge { display: inline-flex; align-items: center; gap: 3px; margin-top: 9px; padding: 2px 9px; border-radius: 20px; font-size: 10.5px; font-weight: 600; }
-        .badge-amber  { background: #fef3c7; color: #b45309; }
-        .badge-green  { background: #d1fae5; color: #059669; }
-        .badge-blue   { background: #dbeafe; color: #1d4ed8; }
-        .badge-purple { background: #ede9fe; color: #7c3aed; }
-        .badge-red    { background: #fee2e2; color: #b91c1c; }
-        .pulse-amber { box-shadow: 0 0 0 0 rgba(245,158,11,0.7); animation: pulseAmber 1.6s infinite; }
-        @keyframes pulseAmber { 0%{box-shadow:0 0 0 0 rgba(245,158,11,0.7)} 70%{box-shadow:0 0 0 8px rgba(245,158,11,0)} 100%{box-shadow:0 0 0 0 rgba(245,158,11,0)} }
-        .quick-action-btn { display: inline-flex; align-items: center; justify-content: center; margin-top: 10px; padding: 6px 10px; border-radius: 8px; background: #f9fafb; border: 1px solid #e5e7eb; color: #4f46e5; font-size: 11.5px; font-weight: 700; text-decoration: none; transition: background .15s, border-color .15s; }
-        .quick-action-btn:hover { background: #ede9fe; border-color: #ddd6fe; }
-        .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px; }
-        .exposure-list { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; min-width: 0; }
-        .exposure-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; font-size: 11.5px; color: #374151; }
-        .exposure-row span { min-width: 0; overflow-wrap: anywhere; }
-        .exposure-row strong { white-space: nowrap; text-align: right; }
-        .table-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 20px; padding: 22px; margin-bottom: 16px; }
-        .table-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-        .table-search { position: relative; min-width: 260px; max-width: 100%; flex: 1; }
-        .table-search input {
+        .legend {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 7px 10px;
+          max-width: 62%;
+        }
+
+        .leg {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          color: var(--apple-secondary);
+          font-size: 10.5px;
+          white-space: nowrap;
+        }
+
+        .leg-dot {
+          width: 6px;
+          height: 6px;
+          flex: 0 0 auto;
+          border-radius: 50%;
+        }
+
+        .chart-canvas { width: 100%; height: 290px; }
+        .chart-canvas.compact { height: 260px; }
+
+        .empty-state {
           width: 100%;
-          padding: 11px 14px 11px 40px;
-          border: 1px solid #d1d5db;
-          border-radius: 12px;
-          background: #fff;
-          color: #111827;
-          font-size: 13px;
-          outline: none;
+          height: 100%;
+          display: grid;
+          place-items: center;
+          color: var(--apple-tertiary);
+          font-size: 12px;
+          text-align: center;
         }
-        .table-search input:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
-        .table-search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #9ca3af; width: 16px; height: 16px; }
-        .table-wrap { overflow-x: auto; border: 1px solid #e5e7eb; border-radius: 16px; }
-        .data-table { width: 100%; border-collapse: collapse; min-width: 900px; }
-        .data-table thead tr { background: #f9fafb; }
-        .data-table th { padding: 14px 16px; text-align: left; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
-        .data-table td { padding: 14px 16px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #374151; vertical-align: top; }
-        .data-table tbody tr:hover { background: #fafafa; }
-        .status-pill { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-        .status-active { background: #dcfce7; color: #047857; }
-        .status-inactive { background: #fee2e2; color: #b91c1c; }
-        .status-pending { background: #fef3c7; color: #b45309; }
-        .view-button { display: inline-flex; align-items: center; justify-content: center; padding: 7px 12px; border-radius: 10px; background: #eff6ff; color: #1d4ed8; text-decoration: none; font-size: 12px; font-weight: 600; border: 1px solid #dbeafe; transition: all .15s; }
-        .view-button:hover { background: #dbeafe; }
-        .table-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; }
-        .table-count { font-size: 12px; color: #6b7280; }
-        .pagination { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .page-btn { min-width: 36px; height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid #e5e7eb; background: #fff; color: #374151; font-size: 12px; cursor: pointer; transition: all .15s; }
-        .page-btn:hover:not(:disabled) { background: #f9fafb; }
-        .page-btn.active { background: #4f46e5; border-color: #4f46e5; color: #fff; font-weight: 600; }
-        .page-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-        /* ── Charts row ──────────────────────────── */
-        .insights-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
-        @media (min-width: 1100px) { .insights-row { grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr); } }
-        .charts-row { display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 16px; }
-        @media (min-width: 900px) { .charts-row { grid-template-columns: 1fr 1fr; } }
+        .region-tabs-wrap {
+          overflow-x: auto;
+          padding-bottom: 2px;
+          margin-bottom: 15px;
+          scrollbar-width: none;
+        }
+        .region-tabs-wrap::-webkit-scrollbar { display: none; }
 
-        /* ── Panel ───────────────────────────────── */
-        .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 20px; padding: 22px; }
-        .panel-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-        .panel-title  { font-size: 13.5px; font-weight: 600; color: #111827; }
-        .panel-sub    { font-size: 11.5px; color: #9ca3af; margin-top: 2px; }
-        .chart-canvas { height: 260px; width: 100%; }
+        .region-tabs {
+          display: inline-flex;
+          gap: 3px;
+          padding: 3px;
+          min-width: max-content;
+          border-radius: 12px;
+          background: rgba(118, 118, 128, .12);
+        }
 
-        /* Legend */
-        .legend { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-        .leg { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #6b7280; }
-        .leg-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .region-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-        .region-tab { border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease; }
-        .region-tab:hover { transform: translateY(-1px); }
-        .region-list { display: flex; flex-direction: column; gap: 10px; }
-        .region-rank-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f3f4f6; border-radius: 14px; padding: 12px 14px; background: #fafafa; }
-        .region-rank-meta { display: flex; align-items: center; gap: 10px; min-width: 0; }
-        .region-rank-pill { width: 28px; height: 28px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
-        .region-rank-name { font-size: 13px; font-weight: 600; color: #111827; }
-        .region-rank-value { font-size: 13px; font-weight: 700; color: #111827; font-family: 'DM Mono', monospace; }
-        .region-empty { display: flex; align-items: center; justify-content: center; min-height: 240px; color: #9ca3af; font-size: 13px; text-align: center; }
+        .region-tab {
+          border: 0;
+          border-radius: 9px;
+          background: transparent;
+          color: var(--apple-secondary);
+          padding: 6px 10px;
+          font-size: 10.5px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+        }
 
-        /* ── Reports row ─────────────────────────── */
-        .reports-row { display: grid; grid-template-columns: 1fr; gap: 16px; }
-        @media (min-width: 900px) { .reports-row { grid-template-columns: 1fr 1fr; } }
+        .region-tab.active {
+          background: #fff;
+          color: var(--apple-text);
+          box-shadow: 0 1px 4px rgba(0,0,0,.10);
+        }
 
-        .report-section h3 { font-size: 11.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 12px; }
-        .report-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
-        .report-item:last-child { border-bottom: none; }
-        .report-name { color: #374151; font-weight: 500; }
-        .report-value { color: #111827; font-weight: 600; font-family: 'DM Mono', monospace; }
-        .report-loading { padding: 20px; text-align: center; color: #9ca3af; }
+        .ranking-list { display: flex; flex-direction: column; }
 
-        /* Scrollbar */
-        .sb-nav::-webkit-scrollbar { width: 6px; }
-        .sb-nav::-webkit-scrollbar-track { background: transparent; }
-        .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        .ranking-row {
+          display: grid;
+          grid-template-columns: 30px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 10px;
+          padding: 12px 0;
+          border-top: 1px solid var(--apple-line);
+        }
+        .ranking-row:first-child { border-top: 0; }
+
+        .rank-number {
+          width: 25px;
+          height: 25px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          background: rgba(118,118,128,.10);
+          color: var(--apple-secondary);
+          font-size: 10px;
+          font-weight: 700;
+        }
+        .rank-number.top { background: rgba(0,122,255,.10); color: var(--apple-blue); }
+
+        .ranking-name {
+          min-width: 0;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          color: var(--apple-text);
+          font-size: 12.5px;
+          font-weight: 610;
+        }
+        .ranking-meta { margin-top: 2px; color: var(--apple-tertiary); font-size: 10.5px; }
+        .ranking-value { color: var(--apple-text); font-size: 12px; font-weight: 680; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+        .reports-panel { margin-bottom: 2px; }
+        .reports-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 26px;
+        }
+
+        .report-column-title {
+          margin-bottom: 5px;
+          color: var(--apple-secondary);
+          font-size: 11px;
+          font-weight: 650;
+        }
+
+        .report-item {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 12px;
+          min-height: 39px;
+          border-top: 1px solid var(--apple-line);
+          font-size: 12px;
+        }
+        .report-item:first-of-type { border-top: 0; }
+        .report-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--apple-secondary); }
+        .report-value { color: var(--apple-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+        .report-loading { padding: 22px 0; color: var(--apple-tertiary); font-size: 12px; }
+
+        @media (max-width: 1180px) {
+          .metric-card { grid-column: span 4; }
+          .metric-card.wide { grid-column: span 8; }
+          .analytics-grid { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 850px) {
+          .dashboard-shell { padding: 28px 20px 36px; }
+          .dashboard-header { align-items: flex-start; }
+          .profile-copy { display: none; }
+          .profile-chip { padding-right: 7px; }
+          .metric-card { grid-column: span 6; }
+          .metric-card.wide { grid-column: span 12; }
+          .charts-grid, .reports-grid { grid-template-columns: 1fr; }
+          .legend { max-width: 100%; justify-content: flex-start; }
+          .panel-header { flex-direction: column; }
+        }
+
+        @media (max-width: 560px) {
+          .dashboard-shell { padding: 24px 16px 32px; }
+          .dashboard-header { margin-bottom: 24px; }
+          .page-title { font-size: 34px; }
+          .page-subtitle { font-size: 14px; }
+          .profile-chip { display: none; }
+          .metrics-grid { gap: 10px; }
+          .metric-card, .metric-card.wide { grid-column: span 12; min-height: 140px; padding: 18px; border-radius: 20px; }
+          .panel { padding: 18px; border-radius: 20px; }
+          .chart-canvas { height: 250px; }
+          .chart-canvas.compact { height: 230px; }
+          .ranking-row { grid-template-columns: 28px minmax(0, 1fr) auto; }
+        }
       `}</style>
 
       <div className="root">
-        {/* Overlay */}
-        <div
-          className={`overlay${sidebarOpen ? " show" : ""}`}
-          onClick={() => setSidebarOpen(false)}
-          aria-hidden="true"
-        />
-
-        {/* ── Sidebar ── */}
-        {/* <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
-          <div className="sb-head">
-            <div className="sb-chip">Admin Portal</div>
-            <div className="sb-title">Workspace</div>
-          </div>
-
-          <div className="sb-user">
-            <div className="sb-avatar">{loading ? "…" : initials}</div>
-            <div className="sb-uname">{loading ? "Loading…" : (adminUser.name || adminUser.username || "Administrator")}</div>
-            <div className="sb-meta">{adminUser.email || "admin@omsons.com"}</div>
-            {adminUser.role && (
-              <span className="sb-role">{adminUser.role}</span>
-            )}
-          </div>
-
-          <nav className="sb-nav">
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`sb-link${pathname === item.href ? " active" : ""}`}
-                onClick={() => setSidebarOpen(false)}
-              >
-                {item.icon}
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="sb-foot">
-            <button className="sb-logout" onClick={handleLogout}>Sign out</button>
-          </div>
-        </aside> */}
-
-        {/* ── Main ── */}
-        <div className="main">
-          {/* <header className="topbar bg-linear from-bg-blue-500 to-bg-blue-600">
-            <div className="topbar-l">
-              <button
-                className="hamburger"
-                onClick={() => setSidebarOpen(v => !v)}
-                aria-label="Toggle sidebar"
-              >
-                {sidebarOpen
-                  ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
-                  : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-                }
-              </button>
-              <img src={logoImage} alt="amazonLogo" className="h-12" />
-              <div style={{ minWidth: 0 }}>
-                <div className="topbar-title">
-                  {loading ? "Dashboard" : `Welcome, ${adminUser.name || adminUser.username || 'Admin'}`}
-                </div>
-                <div className="topbar-sub">System administration dashboard</div>
-              </div>
-            </div>
-          </header> */}
-
-          <main className="content">
-
-            {/* ── Stat Cards ── */}
-            <div className="stat-grid">
-              {STAT_CONFIG.map((stat) => {
-                const value = stat.key === "dealerCount"
-                  ? totalDistributors
-                  : stat.key === "staffCount"
-                    ? (adminData.staffCount || staffQ.data?.count || staffRows.length)
-                    : adminData[stat.key as keyof AdminStats] || 0;
-                const badgeClass = stat.key === "PorderCount" ? "badge-amber" :
-                  stat.key === "dealerCount" ? "badge-green" :
-                    stat.key === "orderCount" ? "badge-blue" : "badge-purple";
-
-                return (
-
-                  <div key={stat.key} className="stat-card">
-                    <div className="stat-lbl">{stat.label}</div>
-                    <div className="font-sans font-bold">{loading ? "—" : value}</div>
-                    <div className={`stat-badge ${badgeClass}`}>{value.toLocaleString("en-IN")}</div>
-                  </div>
-
-                );
-              })}
-              <div className="stat-card"><div className="stat-lbl">Today&apos;s Sale</div>
-                <div className="font-sans font-bold">₹0</div>
-                <div className="stat-badge badge-green">0</div></div>
-            </div>
-
-            {/* ── Sidebar Summary Widgets ── */}
-            {summaryError && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 13, color: "#dc2626" }}>
-                Some summary data failed to load.
-                <button className="quick-action-btn" style={{ marginTop: 0, marginLeft: "auto", color: "#dc2626" }} onClick={retrySummary}>Retry</button>
-              </div>
-            )}
-            <div className="summary-grid">
-              <div className="stat-card">
-                <div className="stat-lbl">Pending Orders</div>
-                <div className="font-sans font-bold">{summaryLoading ? "—" : totalPendingOrders}</div>
-                <div className="stat-badge badge-amber pulse-amber">{totalPendingOrders} pending</div>
-                <Link href="/Pages/Ordermanagement/outstandingorders" className="quick-action-btn">+ Review orders</Link>
-              </div>
-              <div className="stat-card">
-                <div className="stat-lbl">Total Distributors</div>
-                <div className="font-sans font-bold">{summaryLoading ? "—" : totalDistributors}</div>
-                <div className="stat-badge badge-green">{activeDealers} active</div>
-                <div className="stat-badge badge-red" style={{ marginLeft: 6 }}>{inactiveDealers} inactive</div>
-                <Link href="/dashboard/admin/dealer/DealerList" className="quick-action-btn">+ Open dealers</Link>
-              </div>
-              <div className="stat-card">
-                <div className="stat-lbl">Staff Roles</div>
-                <div className="font-sans font-bold">{summaryLoading ? "—" : (adminData.staffCount || staffQ.data?.count || staffRows.length)}</div>
-                <div className="stat-badge badge-purple">{roleCounts["1"] ?? 0} executive</div>
-                <div className="stat-badge badge-blue" style={{ marginLeft: 6 }}>{roleCounts["2"] ?? 0} field</div>
-                <Link href="/dashboard/admin/staff/stafflist" className="quick-action-btn">+ View staff</Link>
-              </div>
-              <div className="stat-card">
-                <div className="stat-lbl">Discount Approvals</div>
-                <div className="font-sans font-bold">{summaryLoading ? "—" : pendingApprovals}</div>
-                <div className={`stat-badge ${pendingApprovals > 0 ? "badge-amber pulse-amber" : "badge-green"}`}>{pendingApprovals} pending</div>
-                <Link href="/dashboard/admin/custom-discount-approvals" className="quick-action-btn">+ Review discounts</Link>
-              </div>
-              <div className="stat-card">
-                <div className="stat-lbl">Credit Exposure</div>
-                <div className="font-sans font-bold">{summaryLoading ? "—" : `₹${outstandingExposure.toLocaleString("en-IN")}`}</div>
-                <div className="stat-badge badge-blue">{ledgerRows.length} ledgers</div>
-                <Link href="/dashboard/admin/ledger" className="quick-action-btn">+ Open ledger</Link>
-              </div>
-              <div className="stat-card">
-                <div className="stat-lbl">Top Exposure</div>
-                <div className="exposure-list">
-                  {summaryLoading ? (
-                    <div className="font-sans font-bold">—</div>
-                  ) : highExposureDealers.length > 0 ? highExposureDealers.map(d => (
-                    <div className="exposure-row" key={d.Dealer_Id}>
-                      <span>{d.Dealer_Name}</span>
-                      <strong>₹{Number(d.currentlimit || 0).toLocaleString("en-IN")}</strong>
-                    </div>
-                  )) : (
-                    <div className="stat-badge badge-green">No exposure</div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ── Charts ── */}
-            <div className="insights-row">
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <div className="panel-title">RSM Net Sales</div>
-                    <div className="panel-sub">Monthly net sales by regional sales manager zone</div>
-                  </div>
-                  <div className="legend">
-                    {SALES_REGIONS.map((region) => (
-                      <span key={region} className="leg">
-                        <span className="leg-dot" style={{ background: REGION_META[region].color }} />
-                        {formatRegionLabel(region)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="chart-canvas">
-                  {loading ? (
-                    <div className="region-empty">Loading regional sales...</div>
-                  ) : hasRegionalSales ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={regionalLineData}>
-                        <CartesianGrid stroke="#e5e7eb" />
-                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: "#1e1b4b", border: "1px solid #4f46e5", borderRadius: "8px" }}
-                          labelStyle={{ color: "#c7d2fe" }}
-                          formatter={(value, _name, item) => {
-                            const region = String(item?.dataKey ?? "") as SalesRegionKey;
-                            return [`₹${Number(value ?? 0).toLocaleString("en-IN")}`, formatRegionLabel(region)];
-                          }}
-                        />
-                        {SALES_REGIONS.map((region) => (
-                          <Line
-                            key={region}
-                            type="monotone"
-                            dataKey={region}
-                            stroke={REGION_META[region].color}
-                            strokeWidth={2.75}
-                            dot={{ r: 4.5, fill: "#ffffff", stroke: REGION_META[region].color, strokeWidth: 2 }}
-                            activeDot={{ r: 6, fill: "#ffffff", stroke: REGION_META[region].color, strokeWidth: 2.5 }}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="region-empty">No regional sales data available yet.</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <div className="panel-title">Top Distributors by Region</div>
-                    <div className="panel-sub">Select a zone to review its highest net sales distributors</div>
-                  </div>
-                </div>
-                <div className="region-tabs">
-                  {SALES_REGIONS.map((region) => {
-                    const active = selectedRegion === region;
-                    return (
-                      <button
-                        key={region}
-                        type="button"
-                        className="region-tab"
-                        style={{
-                          borderColor: active ? REGION_META[region].color : "#e5e7eb",
-                          background: active ? REGION_META[region].soft : "#fff",
-                          color: active ? REGION_META[region].color : "#6b7280",
-                        }}
-                        onClick={() => setSelectedRegion(region)}
-                      >
-                        {formatRegionLabel(region)}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="region-list">
-                  {loading ? (
-                    <div className="region-empty">Loading distributors...</div>
-                  ) : selectedRegionalDistributors.length > 0 ? (
-                    selectedRegionalDistributors.map((dealer, index) => (
-                      <div key={`${selectedRegion}-${dealer.dealerId || dealer.dealerName}-${index}`} className="region-rank-row">
-                        <div className="region-rank-meta">
-                          <span
-                            className="region-rank-pill"
-                            style={{ background: REGION_META[selectedRegion].soft, color: REGION_META[selectedRegion].color }}
-                          >
-                            {index + 1}
-                          </span>
-                          <div style={{ minWidth: 0 }}>
-                            <div className="region-rank-name">{dealer.dealerName}</div>
-                            <div className="panel-sub">{formatRegionLabel(selectedRegion)} region</div>
-                          </div>
-                        </div>
-                        <div className="region-rank-value">?{Number(dealer.total).toLocaleString("en-IN")}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="region-empty">No distributors found for the {formatRegionLabel(selectedRegion).toLowerCase()} region.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* <PendingProductsPreview role="admin" moreHref="/dashboard/admin/pending-products" /> */}
-{/*
-            <div className="table-card">
-              <div className="table-toolbar">
-                <div>
-                  <div className="panel-title">Distributors</div>
-                  <div className="panel-sub">Search and review all registered distributors</div>
-                </div>
-                <div className="table-search">
-                  <Search className="table-search-icon" />
-                  <input
-                    type="text"
-                    placeholder="Search distributors..."
-                    value={distributorSearchInput}
-                    onChange={(e) => setDistributorSearchInput(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {distributorsError && (
-                <div style={{ marginBottom: 14, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 12, padding: "10px 14px", fontSize: 13 }}>
-                  Failed to load distributors. Please try again.
-                </div>
-              )}
-
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Distributor Name</th>
-                      <th>Dealer Code</th>
-                      <th>City</th>
-                      <th>Phone</th>
-                      <th>Assigned Staff</th>
-                      <th>Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {distributorsLoading ? (
-                      Array.from({ length: 8 }).map((_, idx) => (
-                        <tr key={idx}>
-                          {Array.from({ length: 7 }).map((__, cellIdx) => (
-                            <td key={cellIdx}>
-                              <div style={{ height: 14, borderRadius: 8, background: "#e5e7eb", width: cellIdx === 6 ? 70 : "100%", opacity: 0.75 }} />
-                            </td>
-                          ))}
-                        </tr>
-                      ))
-                    ) : distributorRows.length > 0 ? distributorRows.map((dealer) => {
-                      const isActive = normalizeDealerStatus(dealer.status) === "active";
-                      const statusClass = isActive ? "status-active" : "status-inactive";
-                      const statusLabel = isActive ? "Active" : "Inactive";
-                      return (
-                        <tr key={dealer.Dealer_Id}>
-                          <td>
-                            <div style={{ fontWeight: 600, color: "#111827" }}>{dealer.Dealer_Name || "-"}</div>
-                          </td>
-                          <td>{dealer.Dealer_Dealercode || "-"}</td>
-                          <td>{dealer.Dealer_City || "-"}</td>
-                          <td>{dealer.Dealer_Number || "-"}</td>
-                          <td>{dealer.staffname || dealer.assignedstaff || "-"}</td>
-                          <td><span className={`status-pill ${statusClass}`}>{statusLabel}</span></td>
-                          <td>
-                            <Link href={`/dashboard/admin/dealer/${encodeURIComponent(dealer.Dealer_Id)}/view`} className="view-button">
-                              View
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    }) : (
-                      <tr>
-                        <td colSpan={7} style={{ padding: "24px 16px", textAlign: "center", color: "#9ca3af" }}>
-                          No distributors found
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="table-footer">
-                <div className="table-count">
-                  {distributorRows.length > 0
-                    ? `Showing ${distributorStartIndex}–${distributorEndIndex} of ${distributorTotal}`
-                    : "No results"}
-                </div>
-                <div className="pagination">
-                  <button
-                    className="page-btn"
-                    onClick={() => handleDistributorPageChange(distributorPage - 1)}
-                    disabled={distributorPage === 1}
-                  >
-                    Prev
-                  </button>
-                  {distributorPageNumbers().map((p, idx) => (
-                    p === "..." ? (
-                      <span key={`dist-ellipsis-${idx}`} style={{ color: "#9ca3af", fontSize: 12 }}>...</span>
-                    ) : (
-                      <button
-                        key={p}
-                        className={`page-btn${p === distributorPage ? " active" : ""}`}
-                        onClick={() => handleDistributorPageChange(p)}
-                      >
-                        {p}
-                      </button>
-                    )
-                  ))}
-                  <button
-                    className="page-btn"
-                    onClick={() => handleDistributorPageChange(distributorPage + 1)}
-                    disabled={distributorPage === distributorTotalPages}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
+        <main className="dashboard-shell">
+          <header className="dashboard-header">
+            {/* <div>
+              <div className="eyebrow"><span className="eyebrow-dot" /> Admin overview</div>
+              <h1 className="page-title">Dashboard</h1>
+              <p className="page-subtitle">A focused view of sales, distributors, approvals and regional performance.</p>
             </div> */}
 
-            <div className="charts-row">
-
-              {/* Chart 1 — Top Orders */}
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <div className="panel-title">Top Orders</div>
-                    <div className="panel-sub">Order value distribution</div>
-                  </div>
-                  <div className="legend">
-                    <span className="leg">
-                      <span className="leg-dot" style={{ background: "rgba(99,102,241,0.78)" }} />
-                      Order Value
-                    </span>
-                  </div>
-                </div>
-                <div className="chart-canvas">
-                  {loading ? (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
-                      Loading chart...
-                    </div>
-                  ) : data.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData}>
-                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: "#1e1b4b", border: "1px solid #4f46e5", borderRadius: "8px" }}
-                          labelStyle={{ color: "#c7d2fe" }}
-                          formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`}
-                        />
-                        <Bar dataKey="value" fill="rgba(99,102,241,0.78)" radius={[7, 7, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
-                      No data available
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Chart 2 — Top Dealers */}
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <div className="panel-title">Top Distributors</div>
-                    <div className="panel-sub">Distributor performance ranking</div>
-                  </div>
-                  <div className="legend">
-                    <span className="leg">
-                      <span className="leg-dot" style={{ background: "rgba(159,122,234,0.78)" }} />
-                      Total Value
-                    </span>
-                  </div>
-                </div>
-                <div className="chart-canvas">
-                  {loading ? (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
-                      Loading chart...
-                    </div>
-                  ) : dealerData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={dealerChartData}>
-                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                        <YAxis tick={{ fontSize: 11 }} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: "#1e1b4b", border: "1px solid #4f46e5", borderRadius: "8px" }}
-                          labelStyle={{ color: "#c7d2fe" }}
-                          formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`}
-                        />
-                        <Bar dataKey="value" fill="rgba(159,122,234,0.78)" radius={[7, 7, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9ca3af" }}>
-                      No data available
-                    </div>
-                  )}
-                </div>
+            <div className="profile-chip" aria-label="Current administrator">
+              <div className="profile-avatar">{loading ? "…" : initials}</div>
+              <div className="profile-copy">
+                <div className="profile-name">{loading ? "Loading…" : (adminUser.name || adminUser.username || "Administrator")}</div>
+                <div className="profile-role">{adminUser.role || "Administrator"}</div>
               </div>
             </div>
+          </header>
 
-            {/* ── Reports ── */}
-            <div className="panel">
+          <div className="section-label">At a glance</div>
+
+          {summaryError && (
+            <div className="summary-error">
+              Some summary data failed to load.
+              <button type="button" className="retry-button" onClick={retrySummary}>Retry</button>
+            </div>
+          )}
+
+          <section className="metrics-grid" aria-label="Dashboard summary">
+            <article className="metric-card">
+              <div className="metric-label">Today&apos;s Sale</div>
+              <div className="metric-value">₹0</div>
+              <div className="metric-meta">
+                <span className="status-inline"><span className="status-dot green" />Today</span>
+              </div>
+            </article>
+
+            <article className="metric-card">
+              <div className="metric-label">Pending Orders</div>
+              <div className="metric-value">{summaryLoading ? "—" : totalPendingOrders}</div>
+              <div className="metric-meta">
+                <span className="status-inline"><span className="status-dot orange" />{totalPendingOrders} awaiting review</span>
+                <Link href="/Pages/Ordermanagement/outstandingorders" className="metric-link">Review →</Link>
+              </div>
+            </article>
+
+            <article className="metric-card">
+              <div className="metric-label">Total Distributors</div>
+              <div className="metric-value">{summaryLoading ? "—" : totalDistributors}</div>
+              <div className="metric-meta">
+                <span className="status-inline"><span className="status-dot green" />{activeDealers} active</span>
+                <span className="status-inline"><span className="status-dot red" />{inactiveDealers} inactive</span>
+                <Link href="/dashboard/admin/dealer/DealerList" className="metric-link">Open →</Link>
+              </div>
+            </article>
+
+            <article className="metric-card">
+              <div className="metric-label">Staff</div>
+              <div className="metric-value">{summaryLoading ? "—" : (adminData.staffCount || staffQ.data?.count || staffRows.length)}</div>
+              <div className="metric-meta">
+                <span className="status-inline"><span className="status-dot purple" />{roleCounts["1"] ?? 0} executive</span>
+                <span className="status-inline"><span className="status-dot blue" />{roleCounts["2"] ?? 0} field</span>
+                <Link href="/dashboard/admin/staff/stafflist" className="metric-link">View →</Link>
+              </div>
+            </article>
+
+            <article className="metric-card">
+              <div className="metric-label">Discount Approvals</div>
+              <div className="metric-value">{summaryLoading ? "—" : pendingApprovals}</div>
+              <div className="metric-meta">
+                <span className="status-inline"><span className={`status-dot ${pendingApprovals > 0 ? "orange" : "green"}`} />{pendingApprovals > 0 ? "Needs attention" : "All clear"}</span>
+                <Link href="/dashboard/admin/custom-discount-approvals" className="metric-link">Review →</Link>
+              </div>
+            </article>
+
+            <article className="metric-card">
+              <div className="metric-label">Credit Exposure</div>
+              <div className="metric-value">{summaryLoading ? "—" : `₹${outstandingExposure.toLocaleString("en-IN")}`}</div>
+              <div className="metric-meta">
+                <span>{ledgerRows.length} ledgers</span>
+                <Link href="/dashboard/admin/ledger" className="metric-link">Ledger →</Link>
+              </div>
+            </article>
+
+            <article className="metric-card wide exposure-card">
+              <div className="metric-label">Highest Credit Exposure</div>
+              <div className="exposure-list">
+                {summaryLoading ? (
+                  <div className="report-loading">Loading exposure…</div>
+                ) : highExposureDealers.length > 0 ? highExposureDealers.map((dealer) => (
+                  <div className="exposure-row" key={dealer.Dealer_Id}>
+                    <span>{dealer.Dealer_Name}</span>
+                    <strong>₹{Number(dealer.currentlimit || 0).toLocaleString("en-IN")}</strong>
+                  </div>
+                )) : (
+                  <div className="report-loading">No exposure recorded.</div>
+                )}
+              </div>
+            </article>
+          </section>
+
+          <div className="section-label">Regional performance</div>
+
+          <section className="analytics-grid">
+            <article className="panel">
               <div className="panel-header">
                 <div>
-                  <div className="panel-title">Reports</div>
-                  <div className="panel-sub">Top performing orders and distributors</div>
+                  <div className="panel-title">RSM Net Sales</div>
+                  <div className="panel-sub">Monthly net sales by regional sales manager zone</div>
+                </div>
+                <div className="legend">
+                  {SALES_REGIONS.map((region) => (
+                    <span key={region} className="leg">
+                      <span className="leg-dot" style={{ background: REGION_META[region].color }} />
+                      {formatRegionLabel(region)}
+                    </span>
+                  ))}
                 </div>
               </div>
 
-              <div className="reports-row">
-                {/* Top Orders */}
-                <div>
-                  <h3 style={{ fontSize: "12px", fontWeight: "600", color: "#ffffffff", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "12px", background: "#d0d0d0ff", padding: "7px", borderRadius: "5px" }}>
-                    Top Orders
-                  </h3>
-                  {loading ? (
-                    <div className="report-loading">Loading...</div>
-                  ) : data.length > 0 ? (
-                    data.map((item) => (
-                      <div key={item.order_id} className="report-item">
-                        <span className="report-name">{formatDisplayOrderNumber(item.order_id)}</span>
-                        <span className="report-value">
-                          ₹{Number(item.total).toLocaleString("en-IN")}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="report-loading">No data available</div>
-                  )}
-                </div>
+              <div className="chart-canvas">
+                {loading ? (
+                  <div className="empty-state">Loading regional sales…</div>
+                ) : hasRegionalSales ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={regionalLineData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(60,60,67,.10)" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10.5, fill: "#8e8e93" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10.5, fill: "#8e8e93" }} axisLine={false} tickLine={false} width={52} />
+                      <Tooltip
+                        cursor={{ stroke: "rgba(60,60,67,.12)", strokeWidth: 1 }}
+                        contentStyle={{ backgroundColor: "rgba(255,255,255,.96)", border: "1px solid rgba(60,60,67,.12)", borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,.10)", color: "#1d1d1f", fontSize: "11px" }}
+                        labelStyle={{ color: "#6e6e73", marginBottom: "5px" }}
+                        formatter={(value, _name, item) => {
+                          const region = String(item?.dataKey ?? "") as SalesRegionKey;
+                          return [`₹${Number(value ?? 0).toLocaleString("en-IN")}`, formatRegionLabel(region)];
+                        }}
+                      />
+                      {SALES_REGIONS.map((region) => (
+                        <Line
+                          key={region}
+                          type="monotone"
+                          dataKey={region}
+                          stroke={REGION_META[region].color}
+                          strokeWidth={2.25}
+                          dot={false}
+                          activeDot={{ r: 4, fill: "#ffffff", stroke: REGION_META[region].color, strokeWidth: 2 }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="empty-state">No regional sales data available yet.</div>
+                )}
+              </div>
+            </article>
 
-                {/* Top Distributors */}
-                <div className="">
-                  <h3 style={{ fontSize: "12px", fontWeight: "600", color: "#ffffffff", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "12px", background: "#d0d0d0ff", padding: "7px", borderRadius: "5px" }}>
-                    Top Distributors
-                  </h3>
-                  {loading ? (
-                    <div className="report-loading">Loading...</div>
-                  ) : dealerData.length > 0 ? (
-                    dealerData.map((dealer, index) => (
-                      <div key={index} className="report-item">
-                        <span className="report-name">{dealer.Dealer_Name}</span>
-                        <span className="report-value">
-                          ₹{Number(dealer.total).toLocaleString("en-IN")}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="report-loading">No data available</div>
-                  )}
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">Top Distributors by Region</div>
+                  <div className="panel-sub">Select a zone to review its highest net sales distributors</div>
                 </div>
+              </div>
+
+              <div className="region-tabs-wrap">
+                <div className="region-tabs">
+                  {SALES_REGIONS.map((region) => (
+                    <button
+                      key={region}
+                      type="button"
+                      className={`region-tab${selectedRegion === region ? " active" : ""}`}
+                      onClick={() => setSelectedRegion(region)}
+                    >
+                      {formatRegionLabel(region)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="ranking-list">
+                {loading ? (
+                  <div className="empty-state" style={{ minHeight: 220 }}>Loading distributors…</div>
+                ) : selectedRegionalDistributors.length > 0 ? (
+                  selectedRegionalDistributors.map((dealer, index) => (
+                    <div key={`${selectedRegion}-${dealer.dealerId || dealer.dealerName}-${index}`} className="ranking-row">
+                      <span className={`rank-number${index < 3 ? " top" : ""}`}>{index + 1}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="ranking-name">{dealer.dealerName}</div>
+                        <div className="ranking-meta">{formatRegionLabel(selectedRegion)} region</div>
+                      </div>
+                      <div className="ranking-value">₹{Number(dealer.total).toLocaleString("en-IN")}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="empty-state" style={{ minHeight: 220 }}>No distributors found for the {formatRegionLabel(selectedRegion).toLowerCase()} region.</div>
+                )}
+              </div>
+            </article>
+          </section>
+
+          <div className="section-label">Sales leaders</div>
+
+          <section className="charts-grid">
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">Top Orders</div>
+                  <div className="panel-sub">Highest order values in the current dataset</div>
+                </div>
+                <span className="leg"><span className="leg-dot" style={{ background: "#007aff" }} />Order value</span>
+              </div>
+              <div className="chart-canvas compact">
+                {loading ? (
+                  <div className="empty-state">Loading chart…</div>
+                ) : data.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(60,60,67,.08)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#8e8e93" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "#8e8e93" }} axisLine={false} tickLine={false} width={50} />
+                      <Tooltip
+                        cursor={{ fill: "rgba(0,122,255,.035)" }}
+                        contentStyle={{ backgroundColor: "rgba(255,255,255,.96)", border: "1px solid rgba(60,60,67,.12)", borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,.10)", fontSize: "11px" }}
+                        labelStyle={{ color: "#6e6e73" }}
+                        formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`}
+                      />
+                      <Bar dataKey="value" fill="#007aff" radius={[8, 8, 2, 2]} maxBarSize={38} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="empty-state">No order data available.</div>
+                )}
+              </div>
+            </article>
+
+            <article className="panel">
+              <div className="panel-header">
+                <div>
+                  <div className="panel-title">Top Distributors</div>
+                  <div className="panel-sub">Distributor performance by total value</div>
+                </div>
+                <span className="leg"><span className="leg-dot" style={{ background: "#8e8e93" }} />Total value</span>
+              </div>
+              <div className="chart-canvas compact">
+                {loading ? (
+                  <div className="empty-state">Loading chart…</div>
+                ) : dealerData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dealerChartData} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
+                      <CartesianGrid stroke="rgba(60,60,67,.08)" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#8e8e93" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "#8e8e93" }} axisLine={false} tickLine={false} width={50} />
+                      <Tooltip
+                        cursor={{ fill: "rgba(60,60,67,.035)" }}
+                        contentStyle={{ backgroundColor: "rgba(255,255,255,.96)", border: "1px solid rgba(60,60,67,.12)", borderRadius: "14px", boxShadow: "0 10px 30px rgba(0,0,0,.10)", fontSize: "11px" }}
+                        labelStyle={{ color: "#6e6e73" }}
+                        formatter={(value) => `₹${Number(value).toLocaleString("en-IN")}`}
+                      />
+                      <Bar dataKey="value" fill="#8e8e93" radius={[8, 8, 2, 2]} maxBarSize={38} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="empty-state">No distributor data available.</div>
+                )}
+              </div>
+            </article>
+          </section>
+
+          <section className="panel reports-panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">Reports</div>
+                <div className="panel-sub">Quick ranked view of your strongest orders and distributors</div>
               </div>
             </div>
 
-          </main>
-        </div>
+            <div className="reports-grid">
+              <div>
+                <div className="report-column-title">Top orders</div>
+                {loading ? (
+                  <div className="report-loading">Loading…</div>
+                ) : data.length > 0 ? (
+                  data.map((item) => (
+                    <div key={item.order_id} className="report-item">
+                      <span className="report-name">{formatDisplayOrderNumber(item.order_id)}</span>
+                      <span className="report-value">₹{Number(item.total).toLocaleString("en-IN")}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="report-loading">No order data available.</div>
+                )}
+              </div>
+
+              <div>
+                <div className="report-column-title">Top distributors</div>
+                {loading ? (
+                  <div className="report-loading">Loading…</div>
+                ) : dealerData.length > 0 ? (
+                  dealerData.map((dealer, index) => (
+                    <div key={`${dealer.Dealer_Name}-${index}`} className="report-item">
+                      <span className="report-name">{dealer.Dealer_Name}</span>
+                      <span className="report-value">₹{Number(dealer.total).toLocaleString("en-IN")}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="report-loading">No distributor data available.</div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
     </>
   );
 }
-

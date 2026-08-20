@@ -200,7 +200,16 @@ async function loadUserWithProfiles(userId: bigint) {
     include: {
       adminProfile: true,
       accountantProfile: true,
-      staffProfile: true,
+      staffProfile: {
+        select: {
+          id: true,
+          displayName: true,
+          designation: true,
+          location: true,
+          staffRoleType: true,
+          salesRegion: true,
+        },
+      },
       dealerProfile: true,
     },
   });

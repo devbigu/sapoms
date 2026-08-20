@@ -321,6 +321,9 @@ function DealerDashboardInner() {
   const currentLimit = Number(dealer.currentlimit)  || 0;
   const creditDays   = Number(dealer.creditdays)    || 0;
   const discountPct  = Number(dealer.discount)      || 0;
+  const isWalletActive = wallet?.status === "active";
+  const walletAvailable = Number(wallet?.availableBalance ?? 0);
+  const walletConsumed = Number(wallet?.totalConsumed ?? 0);
   const outstanding  = currentLimit;
   const usagePct     = annualTarget > 0 ? Math.min(100, Math.round((currentLimit / annualTarget) * 100)) : 0;
   const initials     = dealer.Dealer_Name?.trim()?.charAt(0)?.toUpperCase() || dealer.Dealer_Email?.trim()?.charAt(0)?.toUpperCase() || "D";
@@ -512,18 +515,22 @@ function DealerDashboardInner() {
                 <div className="icard-sub">Full year goal</div>
                 <div className="icard-badge badge-purple">₹{annualTarget.toLocaleString("en-IN")}</div>
               </div>
-              <div className="icard">
-                <div className="icard-lbl">Current Limit</div>
-                <div className="font-sans font-bold">{fmtCurrency(currentLimit)}</div>
-                <div className="icard-sub">Credit ceiling</div>
-                <div className="icard-badge badge-blue">{usagePct}% of target</div>
-              </div>
-              <div className="icard">
-                <div className="icard-lbl">Credit Days</div>
-                <div className="font-sans font-bold">{creditDays}</div>
-                <div className="icard-sub">Payment window</div>
-                <div className="icard-badge badge-amber">{creditDays} days</div>
-              </div>
+              {!isWalletActive && (
+                <>
+                  <div className="icard">
+                    <div className="icard-lbl">Current Limit</div>
+                    <div className="font-sans font-bold">{fmtCurrency(currentLimit)}</div>
+                    <div className="icard-sub">Credit ceiling</div>
+                    <div className="icard-badge badge-blue">{usagePct}% of target</div>
+                  </div>
+                  <div className="icard">
+                    <div className="icard-lbl">Credit Days</div>
+                    <div className="font-sans font-bold">{creditDays}</div>
+                    <div className="icard-sub">Payment window</div>
+                    <div className="icard-badge badge-amber">{creditDays} days</div>
+                  </div>
+                </>
+              )}
               <div className="icard">
                 <div className="icard-lbl">Discount</div>
                 <div className="font-sans font-bold">{discountPct}%</div>
@@ -562,15 +569,27 @@ function DealerDashboardInner() {
                 <div className="icard-badge badge-blue" style={{ marginLeft: 6 }}>{processingOrders} processing</div>
                 <div className="icard-badge badge-green" style={{ marginLeft: 6 }}>{shippedOrders} shipped</div>
               </div>
-              <div className="icard">
-                <div className="icard-lbl">Payment Due</div>
-                <div className="font-sans font-bold">{creditDaysRemaining}</div>
-                <div className="icard-sub">Credit days remaining</div>
-                <div className={`icard-badge ${paymentAlert ? "badge-amber pulse-amber" : "badge-green"}`}>
-                  ₹{currentLimit.toLocaleString("en-IN")} exposure
+              {isWalletActive ? (
+                <div className="icard">
+                  <div className="icard-lbl">Advance Wallet</div>
+                  <div className="font-sans font-bold">{fmtCurrency(walletAvailable)}</div>
+                  <div className="icard-sub">Available balance for new orders</div>
+                  <div className={`icard-badge ${walletAvailable > 0 ? "badge-green" : "badge-amber pulse-amber"}`}>
+                    {walletAvailable > 0 ? "Ready" : "Top-up needed"}
+                  </div>
+                  <Link href="/Pages/ledger" className="quick-action-btn">+ Open ledger</Link>
                 </div>
-                <Link href="/Pages/ledger" className="quick-action-btn">+ Open ledger</Link>
-              </div>
+              ) : (
+                <div className="icard">
+                  <div className="icard-lbl">Payment Due</div>
+                  <div className="font-sans font-bold">{creditDaysRemaining}</div>
+                  <div className="icard-sub">Credit days remaining</div>
+                  <div className={`icard-badge ${paymentAlert ? "badge-amber pulse-amber" : "badge-green"}`}>
+                    ₹{currentLimit.toLocaleString("en-IN")} exposure
+                  </div>
+                  <Link href="/Pages/ledger" className="quick-action-btn">+ Open ledger</Link>
+                </div>
+              )}
             </div>
 
             <PendingProductsPreview role="dealer" moreHref="/dashboard/dealer/pending-products" />
@@ -624,28 +643,48 @@ function DealerDashboardInner() {
             {/* Bottom Row */}
             <div className="bottom-row">
 
-              <div className="panel">
-                <div className="panel-header">
-                  <div>
-                    <div className="panel-title">Outstanding</div>
-                    <div className="panel-sub">Current credit limit utilisation</div>
-                  </div>
-                </div>
-                <div className="outstanding-block">
-                  <div className="outstanding-amount">₹{outstanding.toLocaleString("en-IN")}</div>
-                  <div className="outstanding-sub">of ₹{annualTarget.toLocaleString("en-IN")} annual target</div>
-                  <div className="progress-bar-wrap">
-                    <div className="progress-label"><span>Used</span><span>{usagePct}%</span></div>
-                    <div className="progress-track">
-                      <div className="progress-fill" style={{ width: `${usagePct}%` }} />
+              {isWalletActive ? (
+                <div className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <div className="panel-title">Advance Wallet</div>
+                      <div className="panel-sub">Orders consume the active wallet balance</div>
                     </div>
                   </div>
-                  <div className="credit-meta">
-                    <span className="credit-chip badge-amber">Credit: {creditDays} days</span>
-                    <span className="credit-chip badge-blue">Discount: {discountPct}%</span>
+                  <div className="outstanding-block">
+                    <div className="outstanding-amount">{fmtCurrency(walletAvailable)}</div>
+                    <div className="outstanding-sub">available for order placement</div>
+                    <div className="credit-meta">
+                      <span className="credit-chip badge-green">Active wallet</span>
+                      <span className="credit-chip badge-blue">Consumed: {fmtCurrency(walletConsumed)}</span>
+                      <span className="credit-chip badge-amber">Discount: {discountPct}%</span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="panel">
+                  <div className="panel-header">
+                    <div>
+                      <div className="panel-title">Outstanding</div>
+                      <div className="panel-sub">Current credit limit utilisation</div>
+                    </div>
+                  </div>
+                  <div className="outstanding-block">
+                    <div className="outstanding-amount">₹{outstanding.toLocaleString("en-IN")}</div>
+                    <div className="outstanding-sub">of ₹{annualTarget.toLocaleString("en-IN")} annual target</div>
+                    <div className="progress-bar-wrap">
+                      <div className="progress-label"><span>Used</span><span>{usagePct}%</span></div>
+                      <div className="progress-track">
+                        <div className="progress-fill" style={{ width: `${usagePct}%` }} />
+                      </div>
+                    </div>
+                    <div className="credit-meta">
+                      <span className="credit-chip badge-amber">Credit: {creditDays} days</span>
+                      <span className="credit-chip badge-blue">Discount: {discountPct}%</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="panel">
                 <div className="panel-header">

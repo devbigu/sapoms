@@ -223,7 +223,7 @@ export function canUserBulkDispatch(user: DispatchUserSession | null, context: {
   acceptOrder?: string | number | null;
   delStatus?: string | number | null;
 }): boolean {
-  return user?.role === "staff" && canUserEditDispatch(user, context);
+  return (user?.role === "staff" || user?.role === "admin") && canUserEditDispatch(user, context);
 }
 
 export function mergeOrderItemsWithDispatchRecords<T extends DispatchSourceItem>(

@@ -7,6 +7,17 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
   const email = record.user.email || "";
   const designation = record.designation || "";
   const location = record.location || "";
+  const mobileNo = record.mobileNo || "";
+  const alternateNo = record.alternateNo || "";
+  const permanentAddress = record.permanentAddress || "";
+  const localAddress = record.localAddress || "";
+  const gender = record.gender || "";
+  const dob = record.dob ? record.dob.toISOString().slice(0, 10) : "";
+  const nationality = record.nationality || "";
+  const maritalStatus = record.maritalStatus || "";
+  const qualification = record.qualification || "";
+  const emergencyContactNo1 = record.emergencyContactNo1 || "";
+  const emergencyContactNo2 = record.emergencyContactNo2 || "";
   const staffRoleType = record.staffRoleType || "";
   const role = record.user.role;
   const salesRegion = record.salesRegion || "";
@@ -20,6 +31,17 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
     email,
     designation,
     location,
+    mobileNo,
+    alternateNo,
+    permanentAddress,
+    localAddress,
+    gender,
+    dob,
+    nationality,
+    maritalStatus,
+    qualification,
+    emergencyContactNo1,
+    emergencyContactNo2,
     staffRoleType,
     salesRegion,
     parentRsmId,
@@ -46,6 +68,13 @@ export function mapAdminStaff(record: AdminStaffRecord, detail = false) {
     staff_email: email,
     staff_designation: designation,
     staff_location: location,
+    mobile_no: mobileNo,
+    alternate_no: alternateNo,
+    permanent_address: permanentAddress,
+    local_address: localAddress,
+    marital_status: maritalStatus,
+    emergency_contact_no_1: emergencyContactNo1,
+    emergency_contact_no_2: emergencyContactNo2,
     staff_roletype: staffRoleType,
     sales_region: salesRegion,
     parent_rsm_id: parentRsmId,

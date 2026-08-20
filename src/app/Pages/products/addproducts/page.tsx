@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { AlertCircle, ArrowLeft, CheckCircle, ImagePlus, Loader2, Package, Plus, Trash2, X } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle, GripVertical, ImagePlus, Loader2, Package, Plus, Trash2, X } from 'lucide-react'
 
 type ToastState = { text: string; ok: boolean } | null
 type Column = { id: string; title: string; locked?: boolean; kind?: 'catalogue' | 'pack' | 'unitPrice' | 'packPrice' | 'availability' }
@@ -48,6 +48,24 @@ function categoryText(value: CategoryValue) {
   if (!value) return ''
   if (typeof value === 'string') return value
   return String(value.name ?? '')
+}
+
+// Catalogue numbers are always derived from the SKU + the row's position in
+// the table: "<SKU>/<position>". Reordering or adding/removing rows keeps
+// every catalogue number in sync automatically.
+function catalogueNumberFor(sku: string, position: number) {
+  return `${sku.trim() || 'SKU'}/${position}`
+}
+
+function reorderById<T extends { id: string }>(list: T[], fromId: string | null, toId: string): T[] {
+  if (!fromId || fromId === toId) return list
+  const fromIndex = list.findIndex((item) => item.id === fromId)
+  const toIndex = list.findIndex((item) => item.id === toId)
+  if (fromIndex === -1 || toIndex === -1) return list
+  const next = [...list]
+  const [moved] = next.splice(fromIndex, 1)
+  next.splice(toIndex, 0, moved)
+  return next
 }
 
 function parseStoredDescription(value: string) {
@@ -141,6 +159,10 @@ export default function AddProductPage() {
   const firstVariant = useMemo(() => initialVariant(), [])
   const [variants, setVariants] = useState<VariantRow[]>([firstVariant])
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(firstVariant.id)
+  const [dragRowId, setDragRowId] = useState<string | null>(null)
+  const [dragOverRowId, setDragOverRowId] = useState<string | null>(null)
+  const [dragColId, setDragColId] = useState<string | null>(null)
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null)
 
   const selectedVariant = variants.find((row) => row.id === selectedVariantId) ?? variants[0]
   const selectedPack = Math.max(1, Math.trunc(num(selectedVariant?.values.packSize || '1')) || 1)
@@ -148,6 +170,28 @@ export default function AddProductPage() {
   const selectedPackPrice = num(selectedVariant?.values.packPrice || '') || selectedPack * selectedUnitPrice
   const availability = selectedVariant?.values.availability || 'In Stock'
   const effectiveCategory = customCategory.trim() || category.trim()
+
+  // Stable key that only changes when the row *order* or *count* changes
+  // (not when values inside a row change) — used to re-derive catalogue
+  // numbers without looping on our own writes.
+  const variantOrderKey = variants.map((row) => row.id).join('|')
+
+  // SKU is the single source of truth for every catalogue number: it is
+  // used as the prefix, and the position in the table (which updates as
+  // rows are dragged, added, or removed) supplies the running suffix.
+  useEffect(() => {
+    setVariants((rows) => {
+      let changed = false
+      const next = rows.map((row, index) => {
+        const computed = catalogueNumberFor(productCode, index + 1)
+        if (row.values.catalogueNumber === computed) return row
+        changed = true
+        return { ...row, values: { ...row.values, catalogueNumber: computed } }
+      })
+      return changed ? next : rows
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productCode, variantOrderKey])
 
   useEffect(() => {
     let cancelled = false
@@ -281,6 +325,21 @@ export default function AddProductPage() {
     })
   }
 
+  // Native drag-and-drop reordering. Feedback starts the instant the row is
+  // grabbed (opacity dip), the drop target is highlighted continuously as
+  // the pointer moves over it, and catalogue numbers re-derive immediately
+  // on drop via the effect above — no separate "renumber" step needed.
+  const reorderVariant = (fromId: string | null, toId: string) => {
+    setVariants((rows) => reorderById(rows, fromId, toId))
+  }
+
+  // Same pattern for columns: grab the header's handle, drop on the target
+  // header. Locked columns (catalogue, pack, prices, availability) are
+  // reorderable too — only their content/computation is fixed, not position.
+  const reorderColumn = (fromId: string | null, toId: string) => {
+    setColumns((cols) => reorderById(cols, fromId, toId))
+  }
+
   const handleImageChange = (file?: File) => {
     if (!file) return
     setImagePreview(URL.createObjectURL(file))
@@ -289,7 +348,7 @@ export default function AddProductPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!name.trim()) return showToast('Product name is required.', false)
-    if (!variants.some((row) => row.values.catalogueNumber?.trim())) return showToast('At least one catalogue number is required.', false)
+    if (!productCode.trim()) return showToast('SKU / Product Code is required — it prefixes every catalogue number.', false)
 
     setLoading(true)
     try {
@@ -330,7 +389,8 @@ export default function AddProductPage() {
         .ap-root { min-height: 100vh; background: #f8fafc; color: #0f172a; font-family: Outfit, Inter, system-ui, sans-serif; }
         .ap-topbar { height: 60px; padding: 0 32px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 20; }
         .back-btn, .icon-btn, .small-btn, .btn-submit, .btn-reset { font: inherit; cursor: pointer; }
-        .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; color: #475569; font-size: 12px; font-weight: 700; }
+        .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; color: #475569; font-size: 12px; font-weight: 700; transition: background-color 120ms ease, border-color 120ms ease; }
+        .back-btn:active { transform: scale(0.97); }
         .ap-topbar-title { font-size: 15px; font-weight: 800; }
         .ap-topbar-sub { font-size: 11.5px; color: #94a3b8; margin-top: 1px; }
         .ap-body { width: min(1380px, calc(100vw - 48px)); margin: 0 auto; padding: 28px 0 44px; }
@@ -346,6 +406,7 @@ export default function AddProductPage() {
         .upload-row { display: grid; gap: 9px; margin-top: 14px; }
         .field { display: flex; flex-direction: column; gap: 6px; }
         .field-label, .section-title { font-size: 12px; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: .06em; }
+        .field-hint { font-size: 11px; color: #94a3b8; font-weight: 600; }
         .field-input, .field-textarea, .table-input, .column-input { width: 100%; border: 1px solid #dbe3ef; border-radius: 7px; background: #fff; color: #0f172a; outline: none; font: inherit; font-size: 13px; }
         .field-input { height: 38px; padding: 8px 10px; }
         .field-textarea { min-height: 86px; resize: vertical; padding: 10px; line-height: 1.45; }
@@ -354,13 +415,15 @@ export default function AddProductPage() {
         .badge-row, .variant-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
         .category-picker { display: grid; gap: 10px; }
         .category-custom { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 10px; }
-        .category-badge { border: 1px solid #e2e8f0; background: #f8fafc; color: #475569; border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+        .category-badge { border: 1px solid #e2e8f0; background: #f8fafc; color: #475569; border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
+        .category-badge:active { transform: scale(0.96); }
         .category-badge.primary { background: #fefce8; color: #a16207; border-color: #fde68a; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         .wide { grid-column: 1 / -1; }
         .about-add { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 8px; }
-        .small-btn, .icon-btn { border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 7px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 800; }
+        .small-btn, .icon-btn { border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 7px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 800; transition: background-color 120ms ease, border-color 120ms ease; }
         .small-btn:hover, .icon-btn:hover, .back-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+        .small-btn:active, .icon-btn:active { transform: scale(0.96); }
         .bullet-list { display: grid; gap: 8px; margin-top: 10px; }
         .bullet-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px; gap: 8px; align-items: center; }
         .bullet-dot { color: #6A5ACD; font-weight: 900; text-align: center; }
@@ -374,17 +437,35 @@ export default function AddProductPage() {
         .stock-out { color: #dc2626; }
         .variant-section { margin-top: 24px; }
         .section-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 12px; }
-        .variant-btn { border: 2px solid #e2e8f0; background: #fff; color: #374151; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .variant-btn { border: 2px solid #e2e8f0; background: #fff; color: #374151; border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 800; cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
+        .variant-btn:active { transform: scale(0.96); }
         .variant-btn.active { border-color: #6A5ACD; background: #6A5ACD; color: #fff; }
         .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 860px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
         th { padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; color: #334155; font-size: 12px; text-align: left; white-space: nowrap; }
         td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
         .table-input { min-width: 120px; height: 34px; padding: 7px 9px; }
         .column-input { min-width: 130px; height: 30px; padding: 5px 7px; font-weight: 800; }
+        .catalogue-cell { min-width: 120px; height: 34px; display: flex; align-items: center; padding: 0 10px; font-weight: 800; color: #334155; background: #f8fafc; border: 1px solid #e7ecf3; border-radius: 7px; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+        .drag-col { width: 30px; }
+        .drag-handle-cell { width: 34px; padding: 10px 4px; }
+        .drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 7px; color: #94a3b8; cursor: grab; touch-action: none; transition: background-color 120ms ease, color 120ms ease; }
+        .drag-handle:hover { background: #f1f5f9; color: #475569; }
+        .drag-handle:active { cursor: grabbing; }
+        .variant-row { background: #fff; transition: opacity 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
+        .variant-row.is-dragging { opacity: .45; }
+        .variant-row.is-drag-over td { box-shadow: inset 0 2px 0 0 #6A5ACD; }
+        .col-header { position: relative; transition: opacity 150ms ease, box-shadow 150ms ease; }
+        .col-header-inner { display: flex; align-items: center; gap: 6px; }
+        .col-grip { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 5px; color: #94a3b8; cursor: grab; touch-action: none; transition: background-color 120ms ease, color 120ms ease; }
+        .col-grip:hover { background: #eef1f6; color: #475569; }
+        .col-grip:active { cursor: grabbing; }
+        .col-header.is-dragging { opacity: .5; }
+        .col-header.is-drag-over { box-shadow: inset 2px 0 0 0 #6A5ACD; }
         .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e2e8f0; }
         .btn-reset { padding: 10px 18px; border: 1px solid #dbe3ef; background: #fff; color: #334155; border-radius: 8px; font-size: 13px; font-weight: 800; }
-        .btn-submit { padding: 10px 22px; border: 1px solid #6A5ACD; background: #6A5ACD; color: #fff; border-radius: 8px; font-size: 13px; font-weight: 900; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-submit { padding: 10px 22px; border: 1px solid #6A5ACD; background: #6A5ACD; color: #fff; border-radius: 8px; font-size: 13px; font-weight: 900; display: inline-flex; align-items: center; gap: 8px; transition: transform 100ms ease-out; }
+        .btn-submit:active, .btn-reset:active { transform: scale(0.97); }
         .btn-submit:disabled, .btn-reset:disabled { opacity: .55; cursor: not-allowed; }
         .toast { position: fixed; right: 24px; bottom: 24px; z-index: 100; padding: 12px 16px; border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,.14); display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 800; }
         .toast-ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
@@ -392,6 +473,10 @@ export default function AddProductPage() {
         @keyframes spin { to { transform: rotate(360deg); } }
         @media (max-width: 1080px) { .product-grid { grid-template-columns: 1fr; } .summary-card { position: static; } }
         @media (max-width: 640px) { .ap-topbar { padding: 0 16px; } .ap-body { width: calc(100vw - 28px); padding-top: 18px; } .ap-heading { align-items: flex-start; flex-direction: column; } .info-grid, .category-custom { grid-template-columns: 1fr; } .wide { grid-column: auto; } }
+        @media (prefers-reduced-motion: reduce) {
+          .back-btn, .icon-btn, .small-btn, .category-badge, .variant-btn, .btn-submit, .btn-reset, .drag-handle, .variant-row, .col-header, .col-grip { transition: none; }
+          .back-btn:active, .icon-btn:active, .small-btn:active, .category-badge:active, .variant-btn:active, .btn-submit:active, .btn-reset:active { transform: none; }
+        }
       `}</style>
 
       <div className="ap-root">
@@ -450,7 +535,11 @@ export default function AddProductPage() {
 
                 <div className="info-grid">
                   <label className="field wide"><span className="field-label">Product Name *</span><input className="field-input" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Interchangeable Joint Adapter" disabled={loading} /></label>
-                  <label className="field"><span className="field-label">SKU / Product Code</span><input className="field-input" value={productCode} onChange={(event) => setProductCode(event.target.value)} placeholder="e.g. 152" disabled={loading} /></label>
+                  <label className="field">
+                    <span className="field-label">SKU / Product Code *</span>
+                    <input className="field-input" value={productCode} onChange={(event) => setProductCode(event.target.value)} placeholder="e.g. 152" disabled={loading} />
+                    <span className="field-hint">Prefixes every catalogue number below — e.g. {catalogueNumberFor(productCode, 1)}, {catalogueNumberFor(productCode, 2)}...</span>
+                  </label>
                   <label className="field"><span className="field-label">Selected Category</span><input className="field-input" value={effectiveCategory} readOnly placeholder="Choose or add a category above" /></label>
                   <label className="field"><span className="field-label">Unit</span><input className="field-input" value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="Pcs." disabled={loading} /></label>
                   <label className="field wide"><span className="field-label">Description</span><textarea className="field-textarea" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Brief product description" disabled={loading} /></label>
@@ -502,9 +591,75 @@ export default function AddProductPage() {
 
               <div className="table-wrap">
                 <table>
-                  <thead><tr>{columns.map((column) => <th key={column.id}>{column.locked ? column.title : <input className="column-input" value={column.title} onChange={(event) => setColumns((items) => items.map((item) => item.id === column.id ? { ...item, title: event.target.value } : item))} disabled={loading} />}</th>)}<th /></tr></thead>
+                  <thead>
+                    <tr>
+                      <th className="drag-col" />
+                      {columns.map((column) => (
+                        <th
+                          key={column.id}
+                          onDragEnter={(event) => { event.preventDefault(); if (column.id !== dragColId) setDragOverColId(column.id) }}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={(event) => { event.preventDefault(); reorderColumn(dragColId, column.id); setDragColId(null); setDragOverColId(null) }}
+                          className={`col-header ${column.id === dragColId ? 'is-dragging' : ''} ${column.id === dragOverColId ? 'is-drag-over' : ''}`}
+                        >
+                          <span className="col-header-inner">
+                            <span
+                              className="col-grip"
+                              draggable={!loading}
+                              onDragStart={(event) => { setDragColId(column.id); event.dataTransfer.effectAllowed = 'move' }}
+                              onDragEnd={() => { setDragColId(null); setDragOverColId(null) }}
+                              aria-label={`Drag to reorder ${column.title} column`}
+                            >
+                              <GripVertical size={12} />
+                            </span>
+                            {column.locked ? column.title : <input className="column-input" value={column.title} onChange={(event) => setColumns((items) => items.map((item) => item.id === column.id ? { ...item, title: event.target.value } : item))} disabled={loading} />}
+                          </span>
+                        </th>
+                      ))}
+                      <th />
+                    </tr>
+                  </thead>
                   <tbody>
-                    {variants.map((row) => <tr key={row.id}>{columns.map((column) => <td key={column.id}>{column.kind === 'availability' ? <select className="table-input" value={row.values[column.id] || 'In Stock'} onChange={(event) => updateRow(row.id, column.id, event.target.value)} disabled={loading}><option>In Stock</option><option>Out of Stock</option><option>On Request</option></select> : <input className="table-input" value={row.values[column.id] || ''} onChange={(event) => updateRow(row.id, column.id, event.target.value)} placeholder={column.kind === 'catalogue' ? '152/1' : column.kind === 'pack' ? '10' : column.kind === 'unitPrice' ? '94' : column.kind === 'packPrice' ? '940' : column.title} disabled={loading} />}</td>)}<td><button className="icon-btn" type="button" onClick={() => removeVariant(row.id)} disabled={loading || variants.length === 1} aria-label="Remove variant"><Trash2 size={14} /></button></td></tr>)}
+                    {variants.map((row) => (
+                      <tr
+                        key={row.id}
+                        draggable={!loading}
+                        onDragStart={(event) => { setDragRowId(row.id); event.dataTransfer.effectAllowed = 'move' }}
+                        onDragEnter={(event) => { event.preventDefault(); if (row.id !== dragRowId) setDragOverRowId(row.id) }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => { event.preventDefault(); reorderVariant(dragRowId, row.id); setDragRowId(null); setDragOverRowId(null) }}
+                        onDragEnd={() => { setDragRowId(null); setDragOverRowId(null) }}
+                        className={`variant-row ${row.id === dragRowId ? 'is-dragging' : ''} ${row.id === dragOverRowId ? 'is-drag-over' : ''}`}
+                      >
+                        <td className="drag-handle-cell">
+                          <span className="drag-handle" aria-label="Drag to reorder variant">
+                            <GripVertical size={15} />
+                          </span>
+                        </td>
+                        {columns.map((column) => (
+                          <td key={column.id}>
+                            {column.kind === 'catalogue' ? (
+                              <div className="catalogue-cell">{row.values.catalogueNumber}</div>
+                            ) : column.kind === 'availability' ? (
+                              <select className="table-input" value={row.values[column.id] || 'In Stock'} onChange={(event) => updateRow(row.id, column.id, event.target.value)} disabled={loading}>
+                                <option>In Stock</option>
+                                <option>Out of Stock</option>
+                                <option>On Request</option>
+                              </select>
+                            ) : (
+                              <input
+                                className="table-input"
+                                value={row.values[column.id] || ''}
+                                onChange={(event) => updateRow(row.id, column.id, event.target.value)}
+                                placeholder={column.kind === 'pack' ? '10' : column.kind === 'unitPrice' ? '94' : column.kind === 'packPrice' ? '940' : column.title}
+                                disabled={loading}
+                              />
+                            )}
+                          </td>
+                        ))}
+                        <td><button className="icon-btn" type="button" onClick={() => removeVariant(row.id)} disabled={loading || variants.length === 1} aria-label="Remove variant"><Trash2 size={14} /></button></td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

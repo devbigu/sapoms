@@ -80,6 +80,10 @@ function isAssignedStaffRole(actor: AuthActor) {
   return isStaffLike(actor);
 }
 
+function requiresRsmApprovalBeforeAcceptance(actor: AuthActor) {
+  return isAssignedStaffRole(actor);
+}
+
 async function assertCanAct(actor: AuthActor, order: StatusOrder, permission: "read" | "acceptance" | "fulfilment" | "cancel") {
   if (actor.role === "ADMIN") return;
   if (actor.role === "NSM") {
@@ -173,7 +177,7 @@ export async function updatePostgresOrderAcceptance(orderId: unknown, actor: Aut
     return { ...updated, accept_order: legacyAcceptOrderAlias(updated.acceptanceStatus), del_status: legacyDelStatusAlias(updated.status) };
   }
 
-  if (order.rsmApprovalStatus !== "ACCEPTED") {
+  if (requiresRsmApprovalBeforeAcceptance(actor) && order.rsmApprovalStatus !== "ACCEPTED") {
     throw new PostgresOrderStatusError(403, "rsm_approval_required", "Order is not available for staff acceptance until RSM approval is complete.");
   }
   assertAcceptanceTransition(order.acceptanceStatus, next);

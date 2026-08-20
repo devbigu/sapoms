@@ -81,6 +81,7 @@ model User {
   deletedAt          DateTime?  @map("deleted_at")
 
   sessions                 AuthSession[]
+  emailOtps                EmailOtp[]
   createdDealerDiagnosticPasswords DealerDiagnosticPassword[] @relation("DealerDiagnosticPasswordCreatedBy")
   revokedDealerDiagnosticPasswords DealerDiagnosticPassword[] @relation("DealerDiagnosticPasswordRevokedBy")
   adminProfile             AdminProfile?
@@ -253,6 +254,17 @@ model StaffProfile {
   displayName    String  @map("display_name")
   designation    String?
   location       String?
+  mobileNo       String?   @map("mobile_no")
+  alternateNo    String?   @map("alternate_no")
+  permanentAddress String? @map("permanent_address") @db.Text
+  localAddress   String?   @map("local_address") @db.Text
+  gender         String?
+  dob            DateTime? @db.Date
+  nationality    String?
+  maritalStatus  String?   @map("marital_status")
+  qualification  String?
+  emergencyContactNo1 String? @map("emergency_contact_no_1")
+  emergencyContactNo2 String? @map("emergency_contact_no_2")
   staffRoleType  String? @map("staff_role_type")
   salesRegion    SalesRegion? @map("sales_region")
   assignedStates String[] @default([]) @map("assigned_states")
@@ -946,4 +958,18 @@ model CustomDiscountReorderLog {
   @@map("custom_discount_reorder_logs")
 }
 
+model EmailOtp {
+  id        String    @id @default(cuid())
+  userId    BigInt    @map("user_id")
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now()) @map("created_at")
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([usedAt])
+  @@map("email_otps")
+}

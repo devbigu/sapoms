@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import axios from 'axios'
-import { Pencil, Trash2, Download, Search, Users, Eye, EyeOff, MoreVertical } from 'lucide-react'
+import { Pencil, Trash2, Download, Search, Users, Eye, EyeOff, MoreVertical, ChevronDown, X } from 'lucide-react'
 
 type StaffData = {
   staff_id: string
@@ -30,6 +30,11 @@ const SHIMMER = "animate-pulse bg-gray-200 rounded"
 const ADMIN_STAFF_URL = "/api/admin/staff"
 const ITEMS_PER_PAGE = 10
 const getStaffEditRoute = (staffId: string) => `/dashboard/admin/staff/${encodeURIComponent(staffId)}`
+
+// Shared feedback classes: press-down responds instantly (Apple's "respond
+// on pointer-down, not release"), and prefers-reduced-motion drops the
+// transform/transition entirely rather than losing the feedback outright.
+const pressable = 'transition-transform duration-100 active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100'
 
 function getFloatingMenuPosition(button: HTMLElement) {
   const rect = button.getBoundingClientRect()
@@ -96,6 +101,7 @@ export default function StaffListPage() {
   const [page,          setPage]          = useState(1)
   const [search,        setSearch]        = useState("")
   const [searchInput,   setSearchInput]   = useState("")
+  const [roleFilter,    setRoleFilter]    = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toastMsg,      setToastMsg]      = useState<{ text: string; type: 'success' | 'error' } | null>(null)
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(() => new Set())
@@ -173,14 +179,31 @@ export default function StaffListPage() {
   })
 
   const data: StaffData[] = response?.data || []
+
+  // Distinct role labels present in the current dataset, driving the Role filter dropdown.
+  const roleOptions = useMemo(() => {
+    const labels = new Set<string>()
+    data.forEach(s => labels.add(roleBadge(s).label))
+    return Array.from(labels).sort()
+  }, [data])
+
+  // Apply the role filter client-side on top of whatever the server returned.
+  const roleFilteredData = useMemo(
+    () => roleFilter ? data.filter(s => roleBadge(s).label === roleFilter) : data,
+    [data, roleFilter]
+  )
+
   const totalFromServer = response?.count ?? 0
-  const total = totalFromServer || data.length
+  const total = roleFilter ? roleFilteredData.length : (totalFromServer || data.length)
   const serverLastPage = response?.last_page ?? 0
-  const totalPages = serverLastPage > 1 ? serverLastPage : Math.max(1, Math.ceil(total / ITEMS_PER_PAGE))
+  const totalPages = !roleFilter && serverLastPage > 1 ? serverLastPage : Math.max(1, Math.ceil(total / ITEMS_PER_PAGE))
 
   // If server returns a full dataset (no server-side pagination), paginate on the client
-  const serverPaging = serverLastPage > 1
-  const displayedData: StaffData[] = serverPaging ? data : data.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
+  const serverPaging = !roleFilter && serverLastPage > 1
+  const displayedData: StaffData[] = serverPaging ? roleFilteredData : roleFilteredData.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE)
+
+  // Reset to page 1 whenever the role filter changes so pagination stays in sync.
+  useEffect(() => { setPage(1) }, [roleFilter])
 
   // Prefetch next page (only when searching / using server pagination)
   useEffect(() => {
@@ -217,10 +240,10 @@ export default function StaffListPage() {
   }
 
   const handleDownloadCSV = () => {
-    if (!data.length) return
+    if (!roleFilteredData.length) return
     const headers = ["S.No.", "Name", "Email", "Role", "Password"]
-    const rows = data.map((s, i) => [
-      (page - 1) * ITEMS_PER_PAGE + i + 1,
+    const rows = roleFilteredData.map((s, i) => [
+      i + 1,
       s.staff_name,
       s.staff_email,
       roleBadge(s).label,
@@ -256,15 +279,24 @@ export default function StaffListPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const startIndex = (page - 1) * ITEMS_PER_PAGE + 1
+  const startIndex = total === 0 ? 0 : (page - 1) * ITEMS_PER_PAGE + 1
   const endIndex = Math.min(page * ITEMS_PER_PAGE, total)
 
   return (
     <div className="min-h-screen bg-gray-100">
+      <style>{`
+        @keyframes staff-toast-in { from { opacity: 0; transform: translateY(-8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes staff-menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .staff-toast { animation: staff-toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+        .staff-menu { animation: staff-menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1); transform-origin: top right; }
+        @media (prefers-reduced-motion: reduce) {
+          .staff-toast, .staff-menu { animation: none; }
+        }
+      `}</style>
 
       {/* Toast */}
       {toastMsg && (
-        <div className={`fixed top-5 right-5 z-50 text-sm px-4 py-3 rounded-lg shadow-lg transition-all ${
+        <div className={`staff-toast fixed top-5 right-5 z-50 text-sm px-4 py-3 rounded-lg shadow-lg ${
           toastMsg.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-500 text-white'
         }`}>
           {toastMsg.text}
@@ -287,13 +319,13 @@ export default function StaffListPage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setDeleteConfirm(null)}
-                className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition"
+                className={`px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 ${pressable}`}
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleDelete(deleteConfirm)}
-                className="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-medium"
+                className={`px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium ${pressable}`}
               >
                 Delete
               </button>
@@ -304,9 +336,9 @@ export default function StaffListPage() {
 
       <div className="p-6 admin-page-shell">
 
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-6">
+        {/* Header — just the page title + export; search & role filter now live inline in the table header below */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Staff List</h1>
               <p className="text-sm text-gray-500 mt-1">
@@ -316,25 +348,13 @@ export default function StaffListPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownloadCSV}
-                disabled={!data.length}
-                className="flex items-center gap-2 px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                disabled={!roleFilteredData.length}
+                className={`flex items-center gap-2 px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm ${pressable}`}
               >
                 <Download className="w-4 h-4" />
                 Export CSV
               </button>
             </div>
-          </div>
-
-          {/* Search */}
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by name..."
-              value={searchInput}
-              onChange={e => setSearchInput(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition w-full"
-            />
           </div>
         </div>
 
@@ -349,13 +369,60 @@ export default function StaffListPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">S.No.</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Name</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Email</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Role</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Password</th>
-                  <th className="px-4 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide">Actions</th>
+                <tr className="bg-white">
+                  <th className="p-1.5 text-left">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">S.No.</div>
+                  </th>
+
+                  <th className="p-1.5 text-left">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        placeholder="Name"
+                        className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-600 placeholder:text-gray-600 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                      {searchInput && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchInput("")}
+                          className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-600 ${pressable}`}
+                          aria-label="Clear name search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </th>
+
+                  <th className="p-1.5 text-left">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">Email</div>
+                  </th>
+
+                  <th className="p-1.5 text-left">
+                    <div className="relative">
+                      <select
+                        value={roleFilter}
+                        onChange={(e) => setRoleFilter(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-gray-200 bg-gray-50 pl-4 pr-8 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-600 outline-none transition cursor-pointer focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20"
+                      >
+                        <option value="">Role</option>
+                        {roleOptions.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    </div>
+                  </th>
+
+                  <th className="p-1.5 text-left">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">Password</div>
+                  </th>
+
+                  <th className="p-1.5 text-right">
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-2.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">Actions</div>
+                  </th>
                 </tr>
               </thead>
 
@@ -372,7 +439,7 @@ export default function StaffListPage() {
                 ))}
 
                 {/* Empty */}
-                {!isLoading && data.length === 0 && (
+                {!isLoading && displayedData.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-6 py-16 text-center">
                       <div className="flex flex-col items-center gap-2 text-gray-400">
@@ -442,13 +509,13 @@ export default function StaffListPage() {
                             <button
                               onClick={(e) => openFloatingMenu(e, staff.staff_id, setOpenMenu)}
                               data-menu-id={staff.staff_id}
-                              className="p-2 rounded-md text-gray-600 hover:bg-gray-50 transition"
+                              className={`p-2 rounded-md text-gray-600 hover:bg-gray-50 ${pressable}`}
                               aria-label="Open actions"
                             >
                               <MoreVertical className="w-4 h-4" />
                             </button>
                             {isMenuOpen(openMenu, staff.staff_id) && (
-                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} style={{ top: openMenu?.top ?? 0, left: openMenu?.left ?? 0 }} className="fixed w-44 bg-white border border-gray-200 rounded-md shadow-2xl z-[9999] py-1">
+                              <div onClick={(e) => e.stopPropagation()} data-menu-id={staff.staff_id} style={{ top: openMenu?.top ?? 0, left: openMenu?.left ?? 0 }} className="staff-menu fixed w-44 bg-white border border-gray-200 rounded-md shadow-2xl z-[9999] py-1">
                                 <Link href={getStaffEditRoute(staff.staff_id)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Edit</Link>
                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(staff.staff_id); setOpenMenu(null) }} className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50">Delete</button>
                               </div>
@@ -466,7 +533,7 @@ export default function StaffListPage() {
           {/* Pagination */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
             <span className="text-xs text-gray-400">
-              {data.length > 0
+              {displayedData.length > 0
                 ? `Showing ${startIndex}–${endIndex} of ${total} staff`
                 : "No results"}
             </span>
@@ -474,7 +541,7 @@ export default function StaffListPage() {
               <button
                 onClick={() => handlePageChange(page - 1)}
                 disabled={page === 1}
-                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className={`px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed ${pressable}`}
               >
                 Prev
               </button>
@@ -486,7 +553,7 @@ export default function StaffListPage() {
                   <button
                     key={p}
                     onClick={() => handlePageChange(p)}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition ${
+                    className={`px-3 py-1.5 text-sm rounded-lg border ${pressable} ${
                       p === page
                         ? "bg-indigo-600 text-white border-indigo-600 font-medium"
                         : "border-gray-200 text-gray-600 hover:bg-gray-50"
@@ -500,7 +567,7 @@ export default function StaffListPage() {
               <button
                 onClick={() => handlePageChange(page + 1)}
                 disabled={page >= totalPages}
-                className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className={`px-3 py-1.5 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed ${pressable}`}
               >
                 Next
               </button>

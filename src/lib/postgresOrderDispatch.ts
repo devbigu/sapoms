@@ -206,7 +206,13 @@ export async function applyPostgresOrderDispatch(orderId: unknown, actor: AuthAc
     const quantity = safeDispatchInteger(line.dispatchQuantity);
     if (quantity <= 0) throw new PostgresOrderStatusError(400, "invalid_quantity", "Dispatch Quantity must be greater than zero");
     const alreadyDispatched = currentTotals.get(item.id.toString()) ?? 0;
-    if (alreadyDispatched + quantity > item.quantityPacks) throw new PostgresOrderStatusError(409, "over_dispatch", "Dispatch quantity exceeds the remaining quantity");
+    if (alreadyDispatched + quantity > item.quantityPacks) {
+      throw new PostgresOrderStatusError(
+        409,
+        "over_dispatch",
+        "Dispatch quantity exceeds the remaining quantity",
+      );
+    }
     currentTotals.set(item.id.toString(), alreadyDispatched + quantity);
     const status = normalizeDispatchStatus(line.status, "dispatched") === "not_in_stock" ? "IN_PROCESS" : "DISPATCHED";
     creates.push({ orderId: order.id, orderItemId: item.id, quantity, status, remark, actorUserId: actor.userId, actorRole: actor.role as UserRole });

@@ -1,19 +1,14 @@
 'use client'
 
-import { Suspense, useState, useEffect, useMemo } from 'react'
+import { Suspense, useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRouter, useSearchParams } from 'next/navigation'
-import axios from 'axios'
-import { Pencil, Trash2, Download, Search, Package, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Pencil, Trash2, Download, Search, Package, AlertTriangle, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { compactCategoryList, matchesCategory } from '@/lib/categories'
 import {
-  getCatalogueProductDescriptor,
-  getVariantSpecSummary,
-  stripHtml,
   type CatalogueProduct,
   type CatalogueVariant,
 } from '@/lib/catalogue'
-import { loadCatalogueProducts } from '@/lib/catalogueClient'
 import productSearch from '@/lib/productSearch.js'
 
 const { getSearchQueryInfo, normalizeCatalogueNumber, searchProducts } = productSearch
@@ -22,15 +17,18 @@ type ProductData = {
   product_id: string
   product_name: string
   product_image: string
-  product_price: string
-  product_discription: string
+  product_code: string
+  catalogue_number: string
+  product_description: string
+  about_items: string[]
+  variant_specs: string
   product_unit: string
-  product_quantity: string
-  product_cat: string
+  pack_size: string
+  unit_price: string
+  pack_price: string
   product_category: string
   product_categories: string[]
-  product_stock_state: string
-  product_detail_href: string
+  availability: 'In Stock' | 'Out of Stock' | 'On Request'
   admin_product_id?: string
 }
 
@@ -40,103 +38,182 @@ type ProductResponse = {
   last_page: number
 }
 
+type AdminCatalogueVariant = CatalogueVariant & {
+  catalogueNumber?: string
+  packPrice?: number
+  unitName?: string
+  availability?: 'In Stock' | 'Out of Stock' | 'On Request'
+  specSummary?: string
+}
+
+type AdminCatalogueProduct = CatalogueProduct & {
+  adminProductId?: string
+  productCode?: string
+  baseDescription?: string
+  aboutItems?: string[]
+}
+
 const ITEMS_PER_PAGE = 10
 
 function firstNonEmpty(...values: unknown[]): string {
   for (const value of values) {
-    const text = String(value ?? "").trim()
+    const text = String(value ?? '').trim()
     if (text) return text
   }
-  return ""
+  return ''
 }
 
 function priceToString(value: unknown): string {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    return String(value)
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return String(value)
+  const parsed = Number(String(value ?? '').replace(/,/g, '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : ''
+}
+
+function money(value: string): string {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount) || amount <= 0) return 'On request'
+  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function parseStoredDescription(value: string) {
+  const aboutItems: string[] = []
+  const specRows = new Map<string, Record<string, string>>()
+  const baseParts: string[] = []
+  let mode: 'description' | 'about' | 'specs' = 'description'
+
+  for (const rawLine of String(value || '').split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const normalized = line.toUpperCase()
+
+    if (normalized === 'ABOUT THIS ITEM') {
+      mode = 'about'
+      continue
+    }
+    if (normalized === 'VARIANT SPECIFICATIONS') {
+      mode = 'specs'
+      continue
+    }
+
+    if (mode === 'about') {
+      const item = line.replace(/^[-*•\s]+/, '').trim()
+      if (item) aboutItems.push(item)
+      continue
+    }
+
+    if (mode === 'specs') {
+      const [catalogueNumberPart, specsPart] = line.split(/\s+-\s+/, 2)
+      const catalogueNumber = catalogueNumberPart?.trim()
+      if (!catalogueNumber || !specsPart) continue
+
+      const specs: Record<string, string> = {}
+      specsPart.split(';').forEach((entry) => {
+        const [key, ...valueParts] = entry.split(':')
+        const specKey = key?.trim()
+        const specValue = valueParts.join(':').trim()
+        if (specKey && specValue) specs[specKey] = specValue
+      })
+      if (Object.keys(specs).length) specRows.set(catalogueNumber, specs)
+      continue
+    }
+
+    baseParts.push(line)
   }
 
-  const parsed = Number(String(value ?? "").replace(/,/g, "").trim())
-  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : ""
+  return { description: baseParts.join(' '), aboutItems, specRows }
+}
+
+function formatVariantSpecs(specs?: Record<string, string>): string {
+  if (!specs) return ''
+  return Object.entries(specs)
+    .filter(([key, value]) => key.trim() && String(value).trim())
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(' • ')
 }
 
 function getVariantImage(product: CatalogueProduct, variant?: CatalogueVariant): string {
-  return firstNonEmpty(
-    ...(variant?.images ?? []),
-    ...(product.images ?? [])
-  )
+  return firstNonEmpty(...(variant?.images ?? []), ...(product.images ?? []))
 }
 
-function getVariantPackSize(variant?: CatalogueVariant): string {
+function getVariantPackSize(variant?: AdminCatalogueVariant): string {
   const pack = Number(variant?.pack)
-  return Number.isFinite(pack) && pack > 0 ? String(pack) : ""
+  return Number.isFinite(pack) && pack > 0 ? String(pack) : '1'
 }
 
-function mapCatalogueProductToRows(product: CatalogueProduct & { adminProductId?: string }, matchingVariants?: Array<CatalogueVariant | undefined>): ProductData[] {
+function mapCatalogueProductToRows(
+  product: AdminCatalogueProduct,
+  matchingVariants?: Array<AdminCatalogueVariant | undefined>
+): ProductData[] {
   const variants = matchingVariants?.length
     ? matchingVariants
     : product.variants?.length
-      ? product.variants
+      ? (product.variants as AdminCatalogueVariant[])
       : [undefined]
+
   const productSku = firstNonEmpty(product.sku, product.id)
-  const descriptor = getCatalogueProductDescriptor(product) || stripHtml(product.descriptionHtml)
-  const productCategory = firstNonEmpty(product.category, product.categories?.[0], "Uncategorized")
+  const productCategory = firstNonEmpty(product.category, product.categories?.[0], 'Uncategorized')
   const productCategories = compactCategoryList([product.category, ...(product.categories ?? [])])
 
   return variants.map((variant, index) => {
-    const sku = firstNonEmpty(variant?.sku, variant?.id, productSku)
-    const variantSummary = variant ? getVariantSpecSummary(variant) : ""
+    const catalogueNumber = firstNonEmpty(variant?.catalogueNumber, variant?.sku, variant?.id)
+    const unitPrice = priceToString(variant?.price)
+    const packSize = getVariantPackSize(variant)
+    const computedPackPrice = Number(unitPrice || 0) * Number(packSize || 1)
+    const packPrice = priceToString(variant?.packPrice) || priceToString(computedPackPrice)
+    const availability = variant?.availability
+      || (variant?.inStock === false ? 'Out of Stock' : 'In Stock')
 
     return {
-      product_id: sku || `${productSku || "product"}-${index}`,
-      product_name: firstNonEmpty(product.name, variant?.name, sku, "Unnamed product"),
+      product_id: `${product.adminProductId || product.id || productSku}-${variant?.id || catalogueNumber || index}`,
+      product_name: firstNonEmpty(product.name, variant?.name, catalogueNumber, 'Unnamed product'),
       product_image: getVariantImage(product, variant),
-      product_price: priceToString(variant?.price),
-      product_discription: firstNonEmpty(variantSummary, descriptor),
-      product_unit: "Pack",
-      product_quantity: getVariantPackSize(variant),
-      product_cat: sku,
+      product_code: firstNonEmpty(product.productCode, productSku),
+      catalogue_number: catalogueNumber,
+      product_description: product.baseDescription || '',
+      about_items: product.aboutItems || [],
+      variant_specs: variant?.specSummary || '',
+      product_unit: firstNonEmpty(variant?.unitName, 'Pcs.'),
+      pack_size: packSize,
+      unit_price: unitPrice,
+      pack_price: packPrice,
       product_category: productCategory,
       product_categories: productCategories,
-      product_stock_state: variant?.inStock === false ? "Out of stock" : "In stock",
-      product_detail_href: `/Products/${encodeURIComponent(sku || productSku)}`,
+      availability,
       admin_product_id: product.adminProductId,
     }
   })
 }
 
 function filterCatalogueProducts(
-  products: CatalogueProduct[],
+  products: AdminCatalogueProduct[],
   search: string,
   selectedCategory: string
 ): ProductData[] {
-  const categoryMatches = (product: CatalogueProduct) => {
-      if (selectedCategory === "all") return true
-      return matchesCategory(compactCategoryList([product.category, ...(product.categories ?? [])]), selectedCategory)
+  const categoryMatches = (product: AdminCatalogueProduct) => {
+    if (selectedCategory === 'all') return true
+    return matchesCategory(compactCategoryList([product.category, ...(product.categories ?? [])]), selectedCategory)
   }
 
   if (!search.trim()) {
-    return products
-      .filter(categoryMatches)
-      .flatMap((product) => mapCatalogueProductToRows(product))
+    return products.filter(categoryMatches).flatMap((product) => mapCatalogueProductToRows(product))
   }
 
   const queryInfo = getSearchQueryInfo(search)
   const catalogueQuery = normalizeCatalogueNumber(queryInfo.normalizedQuery)
 
-  return (searchProducts(products, queryInfo.normalizedQuery) as Array<{
-    originalProduct: CatalogueProduct
-    matchedVariant?: CatalogueVariant | null
+  const searched = searchProducts(products, queryInfo.normalizedQuery) as Array<{
+    originalProduct: AdminCatalogueProduct
+    matchedVariant?: AdminCatalogueVariant | null
     normalizedCatalogueNumber?: string
-  }>)
+  }>
+
+  return searched
     .filter((result) => categoryMatches(result.originalProduct))
     .flatMap((result) => {
       const variant = result.matchedVariant ?? undefined
-      const variantCatalogue = normalizeCatalogueNumber(variant?.sku ?? variant?.id ?? "")
+      const variantCatalogue = normalizeCatalogueNumber(variant?.catalogueNumber ?? variant?.sku ?? variant?.id ?? '')
       const isVariantCatalogueMatch = Boolean(
-        variant &&
-        catalogueQuery &&
-        variantCatalogue &&
-        variantCatalogue.includes(catalogueQuery)
+        variant && catalogueQuery && variantCatalogue && variantCatalogue.includes(catalogueQuery)
       )
 
       return mapCatalogueProductToRows(
@@ -147,17 +224,19 @@ function filterCatalogueProducts(
 }
 
 function normalizeCategory(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase()
+  return String(value ?? '').trim().toLowerCase()
 }
 
 function productMatchesCategory(product: ProductData, selectedCategory: string): boolean {
-  if (selectedCategory === "all") return true
+  if (selectedCategory === 'all') return true
 
   const target = normalizeCategory(selectedCategory)
   const productValues = [
-    product.product_cat,
+    product.product_code,
+    product.catalogue_number,
     product.product_name,
-    product.product_discription,
+    product.product_description,
+    product.variant_specs,
     product.product_unit,
   ]
     .map(normalizeCategory)
@@ -165,13 +244,22 @@ function productMatchesCategory(product: ProductData, selectedCategory: string):
 
   return (
     matchesCategory(compactCategoryList([product.product_category, ...(product.product_categories ?? [])]), selectedCategory) ||
-    productValues.some((value) =>
-      value === target ||
-      value.includes(target) ||
-      target.includes(value)
-    )
+    productValues.some((value) => value === target || value.includes(target) || target.includes(value))
   )
 }
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? '')
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+/**
+ * Shared motion + material language for this page (see /apple-design):
+ * - Feedback lives on press (active:scale), never waits for release.
+ * - Reduced motion drops the scale/slide and keeps a plain opacity cross-fade.
+ * - Translucent chrome (topbar) lets content scroll underneath it.
+ */
+const PRESS = 'transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:active:scale-100'
 
 function ProductListContent() {
   const router = useRouter()
@@ -185,6 +273,8 @@ function ProductListContent() {
   const [selectedCategory, setSelectedCategory] = useState(urlCategory)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [toastMsg,      setToastMsg]      = useState<{ text: string; ok: boolean } | null>(null)
+  const [modalClosing,  setModalClosing]  = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!toastMsg) return
@@ -215,28 +305,44 @@ function ProductListContent() {
           : Array.isArray(json.data)
             ? json.data
             : []
-      const catalogueProducts = adminItems.map((product: any) => ({
-        id: product.id,
-        adminProductId: product.id,
-        sku: product.productCode || product.id,
-        name: product.name,
-        descriptionHtml: product.description || '',
-        images: product.imageUrl ? [product.imageUrl] : [],
-        category: product.category?.name || '',
-        categories: product.category?.name ? [product.category.name] : [],
-        variants: (product.variants ?? []).map((variant: any) => ({
-          id: variant.id,
-          sku: variant.sku || variant.catalogueNumber || variant.id,
-          catalogueNumber: variant.catalogueNumber || variant.sku || '',
-          name: variant.catalogueNumber || variant.sku || product.name,
-          pack: Number(variant.packSize || 1),
-          price: Number(variant.unitPricePaise || 0) / 100,
-          unitName: variant.unitName || '',
-          inStock: product.active && variant.active,
-          active: variant.active,
+      const catalogueProducts: AdminCatalogueProduct[] = adminItems.map((product: any) => {
+        const parsedDescription = parseStoredDescription(product.description || '')
+
+        return {
+          id: product.id,
+          adminProductId: product.id,
+          productCode: product.productCode || '',
+          sku: product.productCode || product.id,
+          name: product.name,
+          descriptionHtml: parsedDescription.description,
+          baseDescription: parsedDescription.description,
+          aboutItems: parsedDescription.aboutItems,
           images: product.imageUrl ? [product.imageUrl] : [],
-        })),
-      }))
+          category: product.category?.name || '',
+          categories: product.category?.name ? [product.category.name] : [],
+          variants: (product.variants ?? []).map((variant: any) => {
+            const catalogueNumber = variant.catalogueNumber || variant.sku || ''
+            return {
+              id: variant.id,
+              sku: variant.sku || variant.catalogueNumber || variant.id,
+              catalogueNumber,
+              name: catalogueNumber || product.name,
+              pack: Number(variant.packSize || 1),
+              price: Number(variant.unitPricePaise || 0) / 100,
+              packPrice: Number(variant.packPricePaise || 0) / 100,
+              unitName: variant.unitName || 'Pcs.',
+              availability: product.active && variant.active ? 'In Stock' : 'Out of Stock',
+              inStock: Boolean(product.active && variant.active),
+              active: variant.active,
+              specSummary: formatVariantSpecs(
+                parsedDescription.specRows.get(catalogueNumber)
+                || parsedDescription.specRows.get(variant.sku)
+              ),
+              images: product.imageUrl ? [product.imageUrl] : [],
+            } as AdminCatalogueVariant
+          }),
+        }
+      })
       const filteredProducts = filterCatalogueProducts(catalogueProducts, search, selectedCategory)
       const start = (page - 1) * ITEMS_PER_PAGE
       const pagedProducts = filteredProducts.slice(start, start + ITEMS_PER_PAGE)
@@ -272,23 +378,66 @@ function ProductListContent() {
     } catch {
       setToastMsg({ text: "Failed to delete product", ok: false })
     } finally {
-      setDeleteConfirm(null)
+      closeDeleteModal()
     }
+  }
+
+  // Let the sheet play its exit motion before it leaves the tree, and make it
+  // interruptible: a second call (e.g. re-opening) simply resets the flag.
+  const closeDeleteModal = () => {
+    setModalClosing(true)
+    window.setTimeout(() => {
+      setDeleteConfirm(null)
+      setModalClosing(false)
+    }, 180)
   }
 
   const handleDownloadExcel = () => {
     if (!filteredData.length) return
-    const headers = ["S.No.", "Catalogue No.", "Product Name", "Price", "Quantity", "Unit"]
+
+    const headers = [
+      'S.No.',
+      'Product Code',
+      'Product Name',
+      'Category',
+      'Catalogue No.',
+      'Pack Size',
+      'Unit Price',
+      'Pack Price',
+      'Unit',
+      'Availability',
+      'Description',
+      'About This Item',
+      'Variant Specifications',
+    ]
+
     const rows = filteredData.map((p, i) => [
       (page - 1) * ITEMS_PER_PAGE + i + 1,
-      p.product_cat, p.product_name, p.product_price, p.product_quantity, p.product_unit,
+      p.product_code,
+      p.product_name,
+      p.product_category,
+      p.catalogue_number,
+      p.pack_size,
+      p.unit_price,
+      p.pack_price,
+      p.product_unit,
+      p.availability,
+      p.product_description,
+      p.about_items.join(' | '),
+      p.variant_specs,
     ])
-    const csv = [headers, ...rows].map(r => r.join(",")).join("\n")
-    const a   = Object.assign(document.createElement("a"), {
-      href: URL.createObjectURL(new Blob([csv], { type: "text/csv" })),
-      download: "products.csv",
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map(csvCell).join(','))
+      .join('\n')
+
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const a = Object.assign(document.createElement('a'), {
+      href: url,
+      download: 'products.csv',
     })
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   function pageNumbers(): (number | "…")[] {
@@ -311,18 +460,33 @@ function ProductListContent() {
   const endIndex   = Math.min(page * ITEMS_PER_PAGE, total)
 
   return (
-    <div className="min-h-screen bg-[#f4f5f9] text-[#111827]" style={{ fontFamily: "'Outfit', sans-serif" }}>
+    <div
+      className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f] antialiased"
+      style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif" }}
+    >
+      <style>{`
+        @keyframes toastIn { from { transform: translateY(12px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+        @keyframes toastOut { from { transform: translateY(0); opacity: 1 } to { transform: translateY(12px); opacity: 0 } }
+        @keyframes scrimIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes sheetIn { from { transform: scale(0.94) translateY(6px); opacity: 0 } to { transform: scale(1) translateY(0); opacity: 1 } }
+        @keyframes sheetOut { from { transform: scale(1) translateY(0); opacity: 1 } to { transform: scale(0.96) translateY(4px); opacity: 0 } }
+        @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+        @media (prefers-reduced-motion: reduce) {
+          .motion-toast, .motion-scrim, .motion-sheet { animation-duration: 120ms !important; animation-name: fade !important; transform: none !important; }
+        }
+        @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+      `}</style>
 
       {/* ── Toast ── */}
       {toastMsg && (
-        <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-2 px-[18px] py-3 rounded-xl text-[13px] font-medium shadow-[0_6px_24px_rgba(0,0,0,0.14)] animate-[toastIn_0.22s_ease] ${
-          toastMsg.ok
-            ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
-            : "bg-[#fff1f2] text-[#be123c] border border-[#fecdd3]"
-        }`}
-          style={{ animation: "toastIn 0.22s ease" }}
+        <div
+          className={`motion-toast fixed bottom-6 right-6 z-[100] flex items-center gap-2 px-4 py-3 rounded-2xl text-[13px] font-medium backdrop-blur-xl border ${
+            toastMsg.ok
+              ? "bg-[#f0fdf6]/90 text-[#0d6b3f] border-[#bdf0d3]"
+              : "bg-[#fff1f1]/90 text-[#c02b3a] border-[#f9c9cd]"
+          }`}
+          style={{ animation: "toastIn 320ms cubic-bezier(0.22,1,0.36,1)", boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}
         >
-          <style>{`@keyframes toastIn{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
           {toastMsg.ok
             ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6 9 17l-5-5"/></svg>
             : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
@@ -331,94 +495,105 @@ function ProductListContent() {
         </div>
       )}
 
-      {/* ── Delete modal ── */}
+      {/* ── Delete sheet — dims and pushes the page back, exits along the same path it entered ── */}
       {deleteConfirm && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-[4px]"
-          style={{ animation: "fadeIn 0.18s ease" }}
-          onClick={() => setDeleteConfirm(null)}
+          className="motion-scrim fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[6px]"
+          style={{ animation: `${modalClosing ? 'scrimIn' : 'scrimIn'} 200ms ease ${modalClosing ? 'reverse' : ''} forwards` }}
+          onClick={closeDeleteModal}
         >
-          <style>{`
-            @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-            @keyframes popIn{from{transform:scale(0.95);opacity:0}to{transform:scale(1);opacity:1}}
-          `}</style>
           <div
-            className="bg-white rounded-[18px] shadow-[0_24px_60px_rgba(0,0,0,0.18)] p-7 w-[360px] border border-[#f1f5f9]"
-            style={{ animation: "popIn 0.2s ease" }}
+            className="motion-sheet bg-white/95 backdrop-blur-xl rounded-[20px] p-7 w-[360px] border border-black/5"
+            style={{
+              animation: `${modalClosing ? 'sheetOut' : 'sheetIn'} 220ms cubic-bezier(0.22,1,0.36,1) forwards`,
+              boxShadow: '0 24px 60px rgba(0,0,0,0.18)',
+            }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="w-11 h-11 rounded-xl bg-[#fff1f2] flex items-center justify-center mb-4">
-              <AlertTriangle size={20} color="#ef4444" />
+            <div className="w-11 h-11 rounded-full bg-[#fff1f1] flex items-center justify-center mb-4">
+              <AlertTriangle size={20} color="#ff3b30" />
             </div>
-            <div className="text-[16px] font-bold text-[#0f172a] mb-2">Delete Product</div>
-            <div className="text-[13px] text-[#64748b] leading-relaxed mb-[22px]">
-              Are you sure you want to permanently delete this product?
-              This action cannot be undone and will remove all associated data.
+            <div className="text-[17px] font-semibold text-[#1d1d1f] mb-1.5 tracking-[-0.01em]">Delete product?</div>
+            <div className="text-[13px] text-[#6e6e73] leading-relaxed mb-6">
+              This cant be undone — the product and all of its data will be removed permanently.
             </div>
             <div className="flex gap-2.5 justify-end">
               <button
-                onClick={() => setDeleteConfirm(null)}
-                className="px-[18px] py-[9px] rounded-[9px] border-[1.5px] border-[#e2e8f0] bg-white text-[13px] font-medium text-[#374151] cursor-pointer transition-all hover:bg-[#f8fafc] hover:border-[#cbd5e1]"
+                onClick={closeDeleteModal}
+                className={`${PRESS} px-[18px] py-[9px] rounded-full border border-[#e5e5ea] bg-white text-[13px] font-medium text-[#1d1d1f] cursor-pointer hover:bg-[#f5f5f7]`}
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleDelete(deleteConfirm)}
-                className="px-[18px] py-[9px] rounded-[9px] border-none bg-[#ef4444] text-[13px] font-semibold text-white cursor-pointer transition-colors hover:bg-[#dc2626]"
+                className={`${PRESS} px-[18px] py-[9px] rounded-full border-none bg-[#ff3b30] text-[13px] font-semibold text-white cursor-pointer hover:bg-[#e0352b]`}
               >
-                Delete Product
+                Delete
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Topbar ── */}
-      <div className="bg-white text-black px-8 h-16 flex items-center justify-between gap-4 sticky top-0 z-20 shadow-[0_2px_16px_rgba(0,0,0,0.08)] border-b border-[#e5e7eb]">
+      {/* ── Topbar — translucent material, content scrolls underneath ── */}
+      <div
+        className="px-8 h-16 flex items-center justify-between gap-4 sticky top-0 z-20 border-b border-black/[0.06]"
+        style={{ background: 'rgba(255,255,255,0.72)', backdropFilter: 'blur(20px) saturate(180%)' }}
+      >
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] text-[12.5px] font-medium text-[#374151] cursor-pointer transition-all hover:bg-[#f1f5f9] hover:-translate-x-px"
+            className={`${PRESS} inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#e5e5ea] bg-white/70 text-[12.5px] font-medium text-[#1d1d1f] cursor-pointer hover:bg-white`}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
               <path d="M19 12H5M12 5l-7 7 7 7"/>
             </svg>
             Back
           </button>
-          <div className="w-px h-6 bg-[#e2e8f0]" />
+          <div className="w-px h-6 bg-black/[0.08]" />
           <div>
-            <div className="text-[15px] font-semibold text-[#0f172a]">Product Catalogue</div>
+            <div className="text-[15px] font-semibold text-[#1d1d1f] tracking-[-0.01em]">Product Catalogue</div>
             {!isLoading && total > 0 && (
-              <div className="text-[11.5px] text-[#64748b] mt-px">{total.toLocaleString()} products</div>
+              <div className="text-[11.5px] text-[#86868b] mt-px">{total.toLocaleString()} products</div>
             )}
           </div>
         </div>
-        <button
-          onClick={handleDownloadExcel}
-          disabled={!filteredData.length}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[9px] border border-[#e2e8f0] bg-[#f8fafc] text-[12.5px] font-medium text-[#374151] cursor-pointer transition-all whitespace-nowrap hover:bg-[#eff6ff] hover:border-[#bfdbfe] hover:text-[#1d4ed8] disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Download size={14} />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push('/Pages/products/addproducts')}
+            className={`${PRESS} inline-flex items-center gap-1.5 px-4 py-2 rounded-full border-none bg-[#0071e3] text-[12.5px] font-semibold text-white cursor-pointer whitespace-nowrap hover:bg-[#0077ed]`}
+          >
+            <Plus size={14} />
+            Add Product
+          </button>
+          <button
+            onClick={handleDownloadExcel}
+            disabled={!filteredData.length}
+            className={`${PRESS} inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-[#e5e5ea] bg-white/70 text-[12.5px] font-medium text-[#1d1d1f] cursor-pointer whitespace-nowrap hover:bg-white disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100`}
+          >
+            <Download size={14} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
-      <div className="px-8 py-7 max-w-[1440px] mx-auto">
+      <div className="px-8 py-7 max-w-[1680px] mx-auto">
 
         {/* ── Page header ── */}
         <div className="flex items-end justify-between flex-wrap gap-4 mb-6">
           <div>
-            <div className="text-[28px] font-bold tracking-tight text-[#0f172a]">Products</div>
-            <div className="text-[13px] text-[#64748b] mt-1">Browse and manage your product catalogue</div>
+            <div className="text-[28px] font-bold text-[#1d1d1f]" style={{ letterSpacing: '-0.02em', lineHeight: 1.1 }}>Products</div>
+            <div className="text-[13px] text-[#6e6e73] mt-1.5">Browse and manage your product catalogue</div>
           </div>
           <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94a3b8] pointer-events-none" />
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#98989d] pointer-events-none" />
             <input
+              ref={searchRef}
               type="text"
-              placeholder="Search by catalogue number or name…"
+              placeholder="Search product code, catalogue no. or name…"
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
-              className="pl-[38px] pr-[14px] py-[9px] border-[1.5px] border-[#e2e8f0] rounded-[10px] text-[13px] bg-white text-[#0f172a] w-[300px] outline-none transition-all placeholder:text-[#94a3b8] focus:border-[#3b5bdb] focus:shadow-[0_0_0_3px_rgba(59,91,219,0.1)]"
+              className="pl-[38px] pr-[14px] py-[9px] border border-[#e5e5ea] rounded-full text-[13px] bg-white text-[#1d1d1f] w-[300px] outline-none transition-shadow duration-150 placeholder:text-[#98989d] focus:border-[#0071e3] focus:shadow-[0_0_0_4px_rgba(0,113,227,0.12)]"
               style={{ fontFamily: "inherit" }}
             />
           </div>
@@ -426,16 +601,16 @@ function ProductListContent() {
 
         {/* ── Stats row ── */}
         {!isLoading && (
-          <div className="flex gap-3 mb-[22px] flex-wrap">
+          <div className="flex gap-2.5 mb-6 flex-wrap">
             {[
-              { dot: "#3b5bdb", label: "Total Products", value: total.toLocaleString() },
-              { dot: "#10b981", label: "This Page",      value: filteredData.length },
-              { dot: "#f59e0b", label: "Page",           value: `${page} / ${totalPages}` },
+              { dot: "#0071e3", label: "Total Products", value: total.toLocaleString() },
+              { dot: "#34c759", label: "This Page",      value: filteredData.length },
+              { dot: "#ff9f0a", label: "Page",           value: `${page} / ${totalPages}` },
             ].map(s => (
-              <div key={s.label} className="flex items-center gap-2 px-4 py-[9px] bg-white border border-[#e8edf5] rounded-[10px] text-[12.5px] text-[#374151] font-medium shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+              <div key={s.label} className="flex items-center gap-2 px-4 py-[9px] bg-white border border-black/[0.05] rounded-full text-[12.5px] text-[#3a3a3c] font-medium" style={{ boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.dot }} />
                 {s.label}
-                <span className="font-semibold text-[13px] text-[#0f172a]" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{s.value}</span>
+                <span className="font-semibold text-[13px] text-[#1d1d1f]" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>{s.value}</span>
               </div>
             ))}
           </div>
@@ -443,22 +618,35 @@ function ProductListContent() {
 
         {/* ── Error ── */}
         {isError && (
-          <div className="flex items-center gap-2 mb-4 px-4 py-3 bg-[#fff5f5] border border-[#fecaca] rounded-[10px] text-[13px] text-[#dc2626]">
+          <div className="flex items-center gap-2 mb-4 px-4 py-3 bg-[#fff1f1] border border-[#f9c9cd] rounded-2xl text-[13px] text-[#c02b3a]">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
             Failed to load products. Please try again.
           </div>
         )}
 
         {/* ── Table card ── */}
-        <div className="bg-white border border-[#e8edf5] rounded-[18px] overflow-hidden shadow-[0_2px_16px_rgba(0,0,0,0.05)]">
+        <div className="bg-white border border-black/[0.05] rounded-[22px] overflow-hidden" style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[13px]">
-              <thead className="bg-[#f8faff] border-b-[1.5px] border-[#e8edf5]">
+              <thead className="bg-[#fafafc] border-b border-black/[0.05]">
                 <tr>
-                  {["#", "Catalogue No.", "Product", "Price", "Qty", "Unit", "Actions"].map(h => (
+                  {[
+                    '#',
+                    'Product',
+                    'Product Code',
+                    'Category',
+                    'Catalogue No.',
+                    'Pack Size',
+                    'Unit Price',
+                    'Pack Price',
+                    'Unit',
+                    'Availability',
+                    'Actions',
+                  ].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-[13px] text-left text-[10.5px] font-bold uppercase tracking-[0.08em] text-[#64748b] whitespace-nowrap first:pl-[22px] last:pr-[22px]"
+                      className="px-4 py-[13px] text-left text-[10.5px] font-semibold uppercase text-[#86868b] whitespace-nowrap first:pl-[22px] last:pr-[22px]"
+                      style={{ letterSpacing: '0.06em' }}
                     >
                       {h}
                     </th>
@@ -469,92 +657,150 @@ function ProductListContent() {
 
                 {/* Shimmer rows */}
                 {isLoading && Array.from({ length: ITEMS_PER_PAGE }).map((_, i) => (
-                  <tr key={i} className="border-b border-[#f1f5fb]">
-                    {[40, 80, 180, 70, 50, 60, 100].map((w, j) => (
+                  <tr key={i} className="border-b border-black/[0.04]">
+                    {[40, 260, 100, 120, 110, 70, 90, 90, 70, 100, 120].map((w, j) => (
                       <td key={j} className="px-4 py-[14px] first:pl-[22px] last:pr-[22px]">
                         <div
-                          className="h-[14px] rounded-[6px]"
+                          className="h-[14px] rounded-full"
                           style={{
                             width: w,
-                            background: "linear-gradient(90deg,#f1f5fb 25%,#e8edf5 50%,#f1f5fb 75%)",
-                            backgroundSize: "200% 100%",
-                            animation: "sh 1.5s infinite",
+                            background: 'linear-gradient(90deg,#f0f0f3 25%,#e5e5ea 50%,#f0f0f3 75%)',
+                            backgroundSize: '200% 100%',
+                            animation: 'shimmer 1.5s infinite',
                           }}
                         />
                       </td>
                     ))}
                   </tr>
                 ))}
-                <style>{`@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
 
                 {/* Empty state */}
                 {!isLoading && filteredData.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-5 py-[60px] text-center">
-                      <Package size={36} className="mx-auto mb-3 text-[#cbd5e1]" />
-                      <div className="text-[13.5px] text-[#94a3b8] font-medium">No products found</div>
-                      <div className="text-[12px] text-[#cbd5e1] mt-1">
-                        {search ? `No results for "${search}"` : "Your catalogue is empty"}
+                    <td colSpan={11} className="px-5 py-[60px] text-center">
+                      <Package size={36} className="mx-auto mb-3 text-[#c7c7cc]" />
+                      <div className="text-[13.5px] text-[#98989d] font-medium">No products found</div>
+                      <div className="text-[12px] text-[#c7c7cc] mt-1">
+                        {search ? `No results for "${search}"` : 'Your catalogue is empty'}
                       </div>
                     </td>
                   </tr>
                 )}
 
-                {/* Data rows */}
+                {/* Data rows — one row per catalogue variant */}
                 {!isLoading && filteredData.map((product, i) => (
-                  <tr key={product.product_id} className="border-b border-[#f1f5fb] last:border-b-0 transition-colors hover:bg-[#f8faff]">
+                  <tr key={product.product_id} className="border-b border-black/[0.04] last:border-b-0 transition-colors duration-150 hover:bg-[#fafafc] align-top">
 
                     <td className="pl-[22px] pr-4 py-[14px]">
-                      <span className="text-[11px] text-[#94a3b8]" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                      <span className="text-[11px] text-[#98989d]" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
                         {startIndex + i}
                       </span>
                     </td>
 
+                    <td className="px-4 py-[12px] min-w-[300px]">
+                      <div className="flex items-start gap-3">
+                        <div className="w-12 h-12 flex-shrink-0 rounded-[12px] border border-black/[0.06] bg-[#fafafc] overflow-hidden flex items-center justify-center">
+                          {product.product_image ? (
+                            <img src={product.product_image} alt={product.product_name} className="w-full h-full object-contain bg-white" />
+                          ) : (
+                            <Package size={18} className="text-[#c7c7cc]" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-semibold text-[#1d1d1f] leading-snug">{product.product_name || '—'}</div>
+                          {product.product_description && (
+                            <div className="text-[11px] text-[#98989d] mt-1 line-clamp-2 max-w-[330px] leading-relaxed">
+                              {product.product_description}
+                            </div>
+                          )}
+                          {product.variant_specs && (
+                            <div className="text-[10.5px] text-[#0071e3] mt-1 line-clamp-2 max-w-[330px] leading-relaxed">
+                              {product.variant_specs}
+                            </div>
+                          )}
+                          {product.about_items.length > 0 && (
+                            <div
+                              className="text-[10.5px] text-[#6e6e73] mt-1 truncate max-w-[330px]"
+                              title={product.about_items.join(' • ')}
+                            >
+                              About: {product.about_items[0]}
+                              {product.about_items.length > 1 ? ` +${product.about_items.length - 1} more` : ''}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
                     <td className="px-4 py-[14px]">
-                      <span className="text-[11px] font-medium bg-[#f1f5fb] text-[#334155] px-[9px] py-[3px] rounded-[6px] border border-[#e2e8f0] whitespace-nowrap" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        {product.product_cat || "—"}
+                      <span className="text-[11px] font-medium bg-[#fafafc] text-[#3a3a3c] px-[9px] py-[3px] rounded-full border border-black/[0.06] whitespace-nowrap" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                        {product.product_code || '—'}
                       </span>
                     </td>
 
                     <td className="px-4 py-[14px]">
-                      <div className="text-[13px] font-semibold text-[#0f172a]">{product.product_name || "—"}</div>
-                      {product.product_discription && (
-                        <div className="text-[11px] text-[#94a3b8] mt-0.5 truncate max-w-[220px]">{product.product_discription}</div>
-                      )}
-                    </td>
-
-                    <td className="px-4 py-[14px]">
-                      <span className="text-[12px] font-bold text-[#065f46] bg-[#ecfdf5] border border-[#a7f3d0] px-[10px] py-1 rounded-full whitespace-nowrap" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        ₹{Number(product.product_price || 0).toLocaleString("en-IN")}
+                      <span className="text-[11px] font-semibold bg-[#fffbea] text-[#9a6b00] border border-[#f5e6a8] px-[9px] py-[3px] rounded-full whitespace-nowrap">
+                        {product.product_category || 'Uncategorized'}
                       </span>
                     </td>
 
                     <td className="px-4 py-[14px]">
-                      <span className="text-[12px] font-semibold text-[#374151]" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                        {product.product_quantity
-                          ? `${product.product_quantity} pcs`
-                          : "—"}
+                      <span className="text-[11px] font-medium bg-[#f5f5f7] text-[#3a3a3c] px-[9px] py-[3px] rounded-full border border-black/[0.06] whitespace-nowrap" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                        {product.catalogue_number || '—'}
                       </span>
                     </td>
 
                     <td className="px-4 py-[14px]">
-                      <span className="text-[11px] font-semibold bg-[#eff6ff] text-[#1d4ed8] border border-[#bfdbfe] px-[9px] py-[3px] rounded-full whitespace-nowrap">
-                        {product.product_unit || "—"}
+                      <span className="text-[12px] font-semibold text-[#3a3a3c] whitespace-nowrap" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                        {product.pack_size ? `${product.pack_size} pcs` : '—'}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-[14px]">
+                      <span className="text-[12px] font-semibold text-[#1d1d1f] whitespace-nowrap" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                        {money(product.unit_price)}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-[14px]">
+                      <span className="text-[12px] font-bold text-[#0d6b3f] bg-[#f0fdf6] border border-[#bdf0d3] px-[10px] py-1 rounded-full whitespace-nowrap" style={{ fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace" }}>
+                        {money(product.pack_price)}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-[14px]">
+                      <span className="text-[11px] font-semibold bg-[#eef6ff] text-[#0071e3] border border-[#cce4fb] px-[9px] py-[3px] rounded-full whitespace-nowrap">
+                        {product.product_unit || 'Pcs.'}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-[14px]">
+                      <span className={`inline-flex px-[9px] py-[4px] rounded-full text-[10.5px] font-bold whitespace-nowrap border ${
+                        product.availability === 'Out of Stock'
+                          ? 'bg-[#fff1f1] text-[#c02b3a] border-[#f9c9cd]'
+                          : product.availability === 'On Request'
+                            ? 'bg-[#fff8f0] text-[#b8600a] border-[#f8dcb2]'
+                            : 'bg-[#f0fdf6] text-[#0d6b3f] border-[#bdf0d3]'
+                      }`}>
+                        {product.availability}
                       </span>
                     </td>
 
                     <td className="pr-[22px] pl-4 py-[14px]">
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => product.admin_product_id ? router.push(`/Pages/products/addproducts?id=${encodeURIComponent(product.admin_product_id)}`) : setToastMsg({ text: "Only PostgreSQL products can be edited here", ok: false })}
-                          className="inline-flex items-center gap-1 px-[11px] py-1.5 rounded-lg text-[12px] font-medium bg-[#f8faff] text-[#475569] border-[1.5px] border-[#e2e8f0] cursor-pointer transition-all hover:bg-[#eff6ff] hover:border-[#bfdbfe] hover:text-[#1d4ed8]"
+                          onClick={() => product.admin_product_id
+                            ? router.push(`/Pages/products/addproducts?id=${encodeURIComponent(product.admin_product_id)}`)
+                            : setToastMsg({ text: 'Only PostgreSQL products can be edited here', ok: false })}
+                          className={`${PRESS} inline-flex items-center gap-1 px-[11px] py-1.5 rounded-full text-[12px] font-medium bg-[#fafafc] text-[#3a3a3c] border border-black/[0.06] cursor-pointer hover:bg-[#eef6ff] hover:text-[#0071e3]`}
                         >
                           <Pencil size={12} />
                           Edit
                         </button>
                         <button
-                          onClick={() => product.admin_product_id ? setDeleteConfirm(product.admin_product_id) : setToastMsg({ text: "Only PostgreSQL products can be deleted here", ok: false })}
-                          className="inline-flex items-center gap-1 px-[11px] py-1.5 rounded-lg text-[12px] font-medium bg-white text-[#64748b] border-[1.5px] border-[#e2e8f0] cursor-pointer transition-all hover:bg-[#fff1f2] hover:border-[#fecdd3] hover:text-[#be123c]"
+                          onClick={() => product.admin_product_id
+                            ? setDeleteConfirm(product.admin_product_id)
+                            : setToastMsg({ text: 'Only PostgreSQL products can be deleted here', ok: false })}
+                          className={`${PRESS} inline-flex items-center gap-1 px-[11px] py-1.5 rounded-full text-[12px] font-medium bg-white text-[#6e6e73] border border-black/[0.06] cursor-pointer hover:bg-[#fff1f1] hover:text-[#c02b3a]`}
                         >
                           <Trash2 size={12} />
                           Delete
@@ -570,31 +816,31 @@ function ProductListContent() {
           </div>
 
           {/* ── Pagination ── */}
-          <div className="flex items-center justify-between px-[22px] py-[14px] border-t border-[#f1f5fb] flex-wrap gap-3">
-            <div className="text-[12px] text-[#94a3b8]">
+          <div className="flex items-center justify-between px-[22px] py-[14px] border-t border-black/[0.05] flex-wrap gap-3">
+            <div className="text-[12px] text-[#98989d]">
               {filteredData.length > 0 ? (
-                <>Showing <strong className="text-[#374151] font-semibold">{startIndex}–{endIndex}</strong> of <strong className="text-[#374151] font-semibold">{total.toLocaleString()}</strong> products</>
+                <>Showing <strong className="text-[#3a3a3c] font-semibold">{startIndex}–{endIndex}</strong> of <strong className="text-[#3a3a3c] font-semibold">{total.toLocaleString()}</strong> products</>
               ) : "No results"}
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={() => handlePageChange(page - 1)}
                 disabled={page === 1}
-                className="min-w-[34px] h-[34px] px-2 rounded-[9px] border-[1.5px] border-[#e2e8f0] bg-white text-[13px] font-medium text-[#374151] cursor-pointer inline-flex items-center justify-center gap-1 transition-all hover:bg-[#f8faff] hover:border-[#c7d2e8] disabled:opacity-30 disabled:cursor-not-allowed"
+                className={`${PRESS} min-w-[34px] h-[34px] px-2 rounded-full border border-[#e5e5ea] bg-white text-[13px] font-medium text-[#3a3a3c] cursor-pointer inline-flex items-center justify-center gap-1 hover:bg-[#fafafc] disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100`}
               >
                 <ChevronLeft size={14} /> Prev
               </button>
 
               {pageNumbers().map((p, idx) =>
                 p === "…"
-                  ? <span key={`e${idx}`} className="px-1 text-[#94a3b8] text-[14px]">…</span>
+                  ? <span key={`e${idx}`} className="px-1 text-[#98989d] text-[14px]">…</span>
                   : <button
                       key={p}
                       onClick={() => handlePageChange(p as number)}
-                      className={`min-w-[34px] h-[34px] px-2 rounded-[9px] border-[1.5px] text-[13px] font-medium inline-flex items-center justify-center transition-all cursor-pointer ${
+                      className={`${PRESS} min-w-[34px] h-[34px] px-2 rounded-full border text-[13px] font-medium inline-flex items-center justify-center cursor-pointer ${
                         p === page
-                          ? "bg-[#1e3a8a] border-[#1e3a8a] text-white font-bold"
-                          : "bg-white border-[#e2e8f0] text-[#374151] hover:bg-[#f8faff] hover:border-[#c7d2e8]"
+                          ? "bg-[#0071e3] border-[#0071e3] text-white font-semibold"
+                          : "bg-white border-[#e5e5ea] text-[#3a3a3c] hover:bg-[#fafafc]"
                       }`}
                     >
                       {p}
@@ -604,7 +850,7 @@ function ProductListContent() {
               <button
                 onClick={() => handlePageChange(page + 1)}
                 disabled={page === totalPages}
-                className="min-w-[34px] h-[34px] px-2 rounded-[9px] border-[1.5px] border-[#e2e8f0] bg-white text-[13px] font-medium text-[#374151] cursor-pointer inline-flex items-center justify-center gap-1 transition-all hover:bg-[#f8faff] hover:border-[#c7d2e8] disabled:opacity-30 disabled:cursor-not-allowed"
+                className={`${PRESS} min-w-[34px] h-[34px] px-2 rounded-full border border-[#e5e5ea] bg-white text-[13px] font-medium text-[#3a3a3c] cursor-pointer inline-flex items-center justify-center gap-1 hover:bg-[#fafafc] disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100`}
               >
                 Next <ChevronRight size={14} />
               </button>
@@ -619,7 +865,7 @@ function ProductListContent() {
 
 export default function ProductListPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#f4f5f9]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[#f5f5f7]" />}>
       <ProductListContent />
     </Suspense>
   )
