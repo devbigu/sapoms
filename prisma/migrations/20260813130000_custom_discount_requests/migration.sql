@@ -12,6 +12,60 @@ EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
 
+DO $$
+BEGIN
+  CREATE TYPE "OrderDraftStatus" AS ENUM ('ACTIVE', 'CONVERTED', 'CANCELLED');
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "order_drafts" (
+  "id" BIGSERIAL NOT NULL,
+  "dealer_id" BIGINT NOT NULL,
+  "order_id" BIGINT,
+  "status" "OrderDraftStatus" NOT NULL DEFAULT 'ACTIVE',
+  "name" TEXT NOT NULL DEFAULT 'Untitled Draft',
+  "snapshot" JSONB,
+  "approval_state" JSONB,
+  "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  CONSTRAINT "order_drafts_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "order_drafts_order_id_key" ON "order_drafts"("order_id");
+CREATE INDEX IF NOT EXISTS "order_drafts_dealer_id_status_idx" ON "order_drafts"("dealer_id", "status");
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'order_drafts_dealer_id_fkey'
+  ) THEN
+    ALTER TABLE "order_drafts"
+      ADD CONSTRAINT "order_drafts_dealer_id_fkey"
+      FOREIGN KEY ("dealer_id") REFERENCES "dealer_profiles"("id")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'order_drafts_order_id_fkey'
+  ) THEN
+    ALTER TABLE "order_drafts"
+      ADD CONSTRAINT "order_drafts_order_id_fkey"
+      FOREIGN KEY ("order_id") REFERENCES "orders"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS "custom_discount_requests" (
   "id" BIGSERIAL NOT NULL,
   "dealer_id" BIGINT NOT NULL,
